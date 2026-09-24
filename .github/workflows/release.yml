@@ -1,0 +1,77 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  GO_VERSION: '1.25'
+  NODE_VERSION: '20'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux,  goarch: amd64, ext: '' }
+          - { goos: linux,  goarch: arm64, ext: '' }
+          - { goos: darwin, goarch: amd64, ext: '' }
+          - { goos: darwin, goarch: arm64, ext: '' }
+          - { goos: windows, goarch: amd64, ext: '.exe' }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Build web assets
+        run: |
+          cd web
+          npm install --no-audit --no-fund
+          npm run build
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+          VERSION: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          mkdir -p out
+          go build -trimpath -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.builtAt=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -o out/gb28181-simulator-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./cmd/gb28181-simulator
+      - name: Checksum
+        run: |
+          cd out
+          for f in gb28181-simulator-*; do
+            sha256sum "$f" > "$f.sha256" || shasum -a 256 "$f" > "$f.sha256"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gb28181-simulator-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: out/
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: List artifacts
+        run: ls -la dist
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

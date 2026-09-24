@@ -1,0 +1,28 @@
+=== RUN   TestParse_INVITE_PS_PreservesSSRC
+--- PASS: TestParse_INVITE_PS_PreservesSSRC (0.00s)
+=== RUN   TestParse_RFC4566_Only
+--- PASS: TestParse_RFC4566_Only (0.00s)
+=== RUN   TestParse_AV_TwoBlocks
+--- PASS: TestParse_AV_TwoBlocks (0.00s)
+=== RUN   TestMarshal_PreservesKOrdering
+--- PASS: TestMarshal_PreservesKOrdering (0.00s)
+=== RUN   TestMarshal_EmptySSRC_OmitsLine
+--- PASS: TestMarshal_EmptySSRC_OmitsLine (0.00s)
+=== RUN   TestRoundTrip_AV
+--- PASS: TestRoundTrip_AV (0.00s)
+=== RUN   TestParse_MissingKLines
+--- PASS: TestParse_MissingKLines (0.00s)
+=== RUN   TestParse_EmptyF
+--- PASS: TestParse_EmptyF (0.00s)
+=== RUN   TestParse_A_Y_Attribute
+--- PASS: TestParse_A_Y_Attribute (0.00s)
+=== RUN   TestParse_CRLF_LF_Mixed
+--- PASS: TestParse_CRLF_LF_Mixed (0.00s)
+=== RUN   TestParse_EmptyBody
+--- PASS: TestParse_EmptyBody (0.00s)
+=== RUN   TestParse_MultipleY
+--- PASS: TestParse_MultipleY (0.00s)
+=== RUN   TestFixtures_SHA256Stable
+--- PASS: TestFixtures_SHA256Stable (0.00s)
+PASS
+ok  	github.com/your-org/gb28181-simulator/internal/sdp	1.644s

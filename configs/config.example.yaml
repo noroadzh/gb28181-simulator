@@ -1,0 +1,25 @@
+# Default configuration for gb28181-simulator (Change 1).
+# All keys fall back to sensible defaults when omitted; the file is
+# optional. Environment variables override values here
+# (e.g. GB28181_SIMULATOR_HTTP_PORT=19090).
+
+http:
+  host: 127.0.0.1
+  port: 18080
+
+log:
+  level: info             # trace|debug|info|warn|error
+  file: ""                # default: $XDG_STATE_HOME/.../logs/app.log
+  add_source: false       # attach file:line to each record
+  redact_keys:
+    - password
+    - authorization
+
+storage:
+  path: ""                # default: $XDG_STATE_HOME/.../data.db
+
+tracing:
+  enabled: true           # stdout exporter; set false to use a no-op tracer
+  sample_ratio: 1.0       # 0.0..1.0; 1.0 samples everything (dev), 0.01 default
+  otlp_endpoint: ""       # host:port for OTLP gRPC; empty = stdout only
+  service_name: ""        # defaults to "gb28181-simulator"

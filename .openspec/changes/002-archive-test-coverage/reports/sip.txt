@@ -1,0 +1,64 @@
+=== RUN   TestBuildRequest_MandatoryHeaders
+=== PAUSE TestBuildRequest_MandatoryHeaders
+=== RUN   TestBuildRequest_XGBVer
+=== PAUSE TestBuildRequest_XGBVer
+=== RUN   TestBuildRequest_ContentTypeAndBody
+=== PAUSE TestBuildRequest_ContentTypeAndBody
+=== RUN   TestBuildResponse_DefaultReason
+=== PAUSE TestBuildResponse_DefaultReason
+=== RUN   TestCSeqNo
+=== PAUSE TestCSeqNo
+=== RUN   TestStartLineAndContentLength
+=== PAUSE TestStartLineAndContentLength
+=== CONT  TestBuildRequest_XGBVer
+=== CONT  TestBuildRequest_ContentTypeAndBody
+--- PASS: TestBuildRequest_XGBVer (0.00s)
+=== CONT  TestBuildResponse_DefaultReason
+=== RUN   TestBuildResponse_DefaultReason/OK
+=== CONT  TestBuildRequest_MandatoryHeaders
+=== RUN   TestBuildResponse_DefaultReason/Unauthorized
+=== RUN   TestBuildResponse_DefaultReason/Not_Found
+=== CONT  TestStartLineAndContentLength
+=== CONT  TestCSeqNo
+--- PASS: TestCSeqNo (0.00s)
+--- PASS: TestBuildRequest_ContentTypeAndBody (0.00s)
+=== RUN   TestBuildResponse_DefaultReason/Proxy_Authentication_Required
+--- PASS: TestStartLineAndContentLength (0.00s)
+=== RUN   TestBuildResponse_DefaultReason/Busy_Here
+=== RUN   TestBuildResponse_DefaultReason/Server_Internal_Error
+--- PASS: TestBuildRequest_MandatoryHeaders (0.01s)
+--- PASS: TestBuildResponse_DefaultReason (0.01s)
+    --- PASS: TestBuildResponse_DefaultReason/OK (0.00s)
+    --- PASS: TestBuildResponse_DefaultReason/Unauthorized (0.00s)
+    --- PASS: TestBuildResponse_DefaultReason/Not_Found (0.00s)
+    --- PASS: TestBuildResponse_DefaultReason/Proxy_Authentication_Required (0.00s)
+    --- PASS: TestBuildResponse_DefaultReason/Busy_Here (0.00s)
+    --- PASS: TestBuildResponse_DefaultReason/Server_Internal_Error (0.00s)
+PASS
+ok  	github.com/your-org/gb28181-simulator/internal/sip	2.032s
+=== RUN   TestEmitterFunc_Adapter
+=== PAUSE TestEmitterFunc_Adapter
+=== RUN   TestGlobal_SetAndReset
+--- PASS: TestGlobal_SetAndReset (0.00s)
+=== RUN   TestGlobal_ConcurrentSetAndEmit
+--- PASS: TestGlobal_ConcurrentSetAndEmit (0.00s)
+=== RUN   TestNopEmitter_NeverPanics
+=== PAUSE TestNopEmitter_NeverPanics
+=== RUN   TestRedactAuthHeader
+=== PAUSE TestRedactAuthHeader
+=== CONT  TestNopEmitter_NeverPanics
+=== CONT  TestEmitterFunc_Adapter
+--- PASS: TestNopEmitter_NeverPanics (0.00s)
+=== CONT  TestRedactAuthHeader
+--- PASS: TestEmitterFunc_Adapter (0.00s)
+=== RUN   TestRedactAuthHeader/no_auth_header
+=== RUN   TestRedactAuthHeader/RFC_2617_lowercase_response
+=== RUN   TestRedactAuthHeader/RFC_7616_capitalised_Response
+=== RUN   TestRedactAuthHeader/empty_buffer
+--- PASS: TestRedactAuthHeader (0.00s)
+    --- PASS: TestRedactAuthHeader/no_auth_header (0.00s)
+    --- PASS: TestRedactAuthHeader/RFC_2617_lowercase_response (0.00s)
+    --- PASS: TestRedactAuthHeader/RFC_7616_capitalised_Response (0.00s)
+    --- PASS: TestRedactAuthHeader/empty_buffer (0.00s)
+PASS
+ok  	github.com/your-org/gb28181-simulator/internal/sip/audit	1.527s

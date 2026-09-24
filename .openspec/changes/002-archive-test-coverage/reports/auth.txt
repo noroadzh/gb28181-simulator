@@ -1,0 +1,26 @@
+=== RUN   TestChallenger_GeneratesUniqueNonce
+--- PASS: TestChallenger_GeneratesUniqueNonce (0.00s)
+=== RUN   TestChallenger_FormatMatchesRFC7616
+--- PASS: TestChallenger_FormatMatchesRFC7616 (0.00s)
+=== RUN   TestResponder_VerifyQopAuth_Pass
+--- PASS: TestResponder_VerifyQopAuth_Pass (0.00s)
+=== RUN   TestResponder_WrongPassword_Fails
+--- PASS: TestResponder_WrongPassword_Fails (0.00s)
+=== RUN   TestResponder_NoQopLegacyClient
+--- PASS: TestResponder_NoQopLegacyClient (0.00s)
+=== RUN   TestResponder_HashFuncOverride
+--- PASS: TestResponder_HashFuncOverride (0.00s)
+=== RUN   TestResponder_UTF8Normalization_Pass
+--- PASS: TestResponder_UTF8Normalization_Pass (0.00s)
+=== RUN   TestResponder_UTF8Normalization_ASCIIIdentity
+--- PASS: TestResponder_UTF8Normalization_ASCIIIdentity (0.00s)
+=== RUN   TestResponder_InvalidUTF8
+--- PASS: TestResponder_InvalidUTF8 (0.00s)
+=== RUN   TestParseAuthorization_RejectsNonDigest
+--- PASS: TestParseAuthorization_RejectsNonDigest (0.00s)
+=== RUN   TestParseAuthorization_RoundTrip
+--- PASS: TestParseAuthorization_RoundTrip (0.00s)
+=== RUN   TestFixtures_SHA256Stable
+--- PASS: TestFixtures_SHA256Stable (0.00s)
+PASS
+ok  	github.com/your-org/gb28181-simulator/internal/auth	1.502s

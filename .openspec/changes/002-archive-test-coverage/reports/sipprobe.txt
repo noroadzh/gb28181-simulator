@@ -1,0 +1,16 @@
+=== RUN   TestParseStatus
+--- PASS: TestParseStatus (0.00s)
+=== RUN   TestMode
+--- PASS: TestMode (0.00s)
+=== RUN   TestRun_TimeoutExitCode
+--- PASS: TestRun_TimeoutExitCode (0.15s)
+=== RUN   TestRun_BindMissing
+--- PASS: TestRun_BindMissing (0.00s)
+=== RUN   TestRun_UnexpectedStatus
+--- PASS: TestRun_UnexpectedStatus (0.20s)
+=== RUN   TestRun_AcceptAnyResponse
+--- PASS: TestRun_AcceptAnyResponse (0.00s)
+=== RUN   TestResult_Print
+--- PASS: TestResult_Print (0.00s)
+PASS
+ok  	github.com/your-org/gb28181-simulator/internal/sipprobe	1.942s

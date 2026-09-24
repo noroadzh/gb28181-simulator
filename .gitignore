@@ -1,0 +1,28 @@
+# Build artifacts
+bin/
+dist/
+web/dist/
+out/
+
+# Go test/coverage
+*.test
+coverage.out
+coverage.html
+
+# Logs and local data
+*.log
+*.db
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
+# Editor / IDE
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+# Node
+node_modules/
+.npm/

@@ -1,0 +1,1 @@
+Digest username="34020000001320000002", realm="gb28181", nonce="aW52aXRlLW5vbmNlLTk4NzY1NDMyMTA=", uri="sip:34020000001320000001@3402000000", qop=auth, nc=00000002, cnonce="ab12cd34", response="12345678901234567890123456789012", algorithm=MD5

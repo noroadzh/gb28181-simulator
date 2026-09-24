@@ -1,0 +1,38 @@
+=== RUN   TestTransport_MultiInstance
+=== PAUSE TestTransport_MultiInstance
+=== RUN   TestTransport_MultiInstanceSimultaneous
+=== PAUSE TestTransport_MultiInstanceSimultaneous
+=== RUN   TestTransport_ReceiveAfterClose
+=== PAUSE TestTransport_ReceiveAfterClose
+=== RUN   TestTransport_SendAfterClose
+=== PAUSE TestTransport_SendAfterClose
+=== RUN   TestTransport_LocalAddr
+=== PAUSE TestTransport_LocalAddr
+=== RUN   TestTransport_Protocol
+=== PAUSE TestTransport_Protocol
+=== RUN   TestTransport_AuditHook_InjectEmitter
+--- PASS: TestTransport_AuditHook_InjectEmitter (0.02s)
+=== RUN   TestAudit_RedactAuthHeader
+=== PAUSE TestAudit_RedactAuthHeader
+=== CONT  TestTransport_MultiInstance
+=== CONT  TestTransport_Protocol
+=== CONT  TestTransport_ReceiveAfterClose
+=== CONT  TestAudit_RedactAuthHeader
+=== CONT  TestTransport_LocalAddr
+=== CONT  TestTransport_SendAfterClose
+=== RUN   TestAudit_RedactAuthHeader/no_auth_header
+=== CONT  TestTransport_MultiInstanceSimultaneous
+--- PASS: TestTransport_Protocol (0.00s)
+--- PASS: TestTransport_ReceiveAfterClose (0.00s)
+=== RUN   TestAudit_RedactAuthHeader/RFC_2617_WWW-Authenticate
+--- PASS: TestTransport_LocalAddr (0.00s)
+=== RUN   TestAudit_RedactAuthHeader/RFC_7616_(algorithm_case-insensitive)
+--- PASS: TestTransport_SendAfterClose (0.00s)
+--- PASS: TestAudit_RedactAuthHeader (0.00s)
+    --- PASS: TestAudit_RedactAuthHeader/no_auth_header (0.00s)
+    --- PASS: TestAudit_RedactAuthHeader/RFC_2617_WWW-Authenticate (0.00s)
+    --- PASS: TestAudit_RedactAuthHeader/RFC_7616_(algorithm_case-insensitive) (0.00s)
+--- PASS: TestTransport_MultiInstance (0.00s)
+--- PASS: TestTransport_MultiInstanceSimultaneous (0.04s)
+PASS
+ok  	github.com/your-org/gb28181-simulator/internal/siptransport	1.654s
