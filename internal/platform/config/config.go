@@ -56,6 +56,13 @@ type NodeRegistrationConfig struct {
 	Expires   uint32        `mapstructure:"expires"`
 	Timeout   time.Duration `mapstructure:"timeout"`
 	Transport string        `mapstructure:"transport"`
+
+	// How the node holds the registration open once it is online. All
+	// three are optional and fall back to the GB/T 28181 practice of a
+	// heartbeat a minute, answered within seconds, tolerated thrice.
+	HeartbeatInterval    time.Duration `mapstructure:"heartbeat_interval"`
+	HeartbeatTimeout     time.Duration `mapstructure:"heartbeat_timeout"`
+	HeartbeatMaxFailures uint32        `mapstructure:"heartbeat_max_failures"`
 }
 
 // ValidateNodes checks every `nodes:` entry and returns an error naming the
@@ -80,6 +87,10 @@ func (c Config) ValidateNodes() error {
 				Expires:   r.Expires,
 				Timeout:   r.Timeout,
 				Transport: r.Transport,
+
+				HeartbeatInterval:    r.HeartbeatInterval,
+				HeartbeatTimeout:     r.HeartbeatTimeout,
+				HeartbeatMaxFailures: r.HeartbeatMaxFailures,
 			}); err != nil {
 				// The model never echoes the password, so this message
 				// cannot leak it either.

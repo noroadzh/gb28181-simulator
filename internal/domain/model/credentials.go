@@ -68,11 +68,11 @@ func (c Credentials) String() string {
 // algorithm and opaque. The Nonce is opaque to the model layer; callers
 // (adapters) decide how to generate it.
 type Challenge struct {
-	realm    string
-	nonce    string
+	realm     string
+	nonce     string
 	algorithm string
-	opaque   string
-	qop      string
+	opaque    string
+	qop       string
 }
 
 // NewChallenge builds a Challenge. realm and nonce are mandatory.

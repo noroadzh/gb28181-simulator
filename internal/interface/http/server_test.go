@@ -15,9 +15,9 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	platformconfig 	"github.com/your-org/gb28181-simulator/internal/platform/config"
-	"github.com/your-org/gb28181-simulator/internal/platform/observability/logging"
 	httpapi "github.com/your-org/gb28181-simulator/internal/interface/http"
+	platformconfig "github.com/your-org/gb28181-simulator/internal/platform/config"
+	"github.com/your-org/gb28181-simulator/internal/platform/observability/logging"
 )
 
 func TestNewServer_HealthAndVersion(t *testing.T) {

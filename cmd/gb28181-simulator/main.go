@@ -16,6 +16,7 @@ import (
 	"time"
 
 	sipauth "github.com/your-org/gb28181-simulator/internal/adapter/auth"
+	"github.com/your-org/gb28181-simulator/internal/adapter/manscdp"
 	"github.com/your-org/gb28181-simulator/internal/adapter/nodereg"
 	"github.com/your-org/gb28181-simulator/internal/adapter/siptransport"
 	"github.com/your-org/gb28181-simulator/internal/app"
@@ -102,6 +103,11 @@ func run() error {
 	// these variables resolved in Provide order.
 	var cfg *platformconfig.Config
 	var nodeSvc *app.NodeService
+	// Background work (keepalive, renewal) must not be tied to a request,
+	// so it runs on the process context and is stopped explicitly on the
+	// way out.
+	processCtx := context.Background()
+	var nodeKeeper *app.Keeper
 
 	c := servicectx.NewContainer().
 		Provide(configKey, func() (any, error) {
@@ -179,6 +185,19 @@ func run() error {
 			if _, err := svc.WithRegistrar(registrar); err != nil {
 				return nil, fmt.Errorf("node service: %w", err)
 			}
+			// Keepalive and renewal: same split — the notify body comes
+			// from an adapter, the scheduling lives in app. The keeper is
+			// provided under its own key so the container closes it on
+			// shutdown and no heartbeat outlives the process.
+			keeper, err := app.NewKeeper(processCtx, registry, lifecycle, registrar,
+				manscdp.NewKeepaliveCodec(), clock.Real(), clock.RealTicker(), logging.L())
+			if err != nil {
+				return nil, fmt.Errorf("keeper: %w", err)
+			}
+			if _, err := svc.WithKeeper(keeper); err != nil {
+				return nil, fmt.Errorf("node service: %w", err)
+			}
+			nodeKeeper = keeper
 			// Register every configured node; starting them is an explicit
 			// operation (design D9), so an empty list costs nothing.
 			for i, nc := range cfg.Nodes {
@@ -201,6 +220,10 @@ func run() error {
 						Expires:   r.Expires,
 						Timeout:   r.Timeout,
 						Transport: r.Transport,
+
+						HeartbeatInterval:    r.HeartbeatInterval,
+						HeartbeatTimeout:     r.HeartbeatTimeout,
+						HeartbeatMaxFailures: r.HeartbeatMaxFailures,
 					})
 					if regErr != nil {
 						return nil, fmt.Errorf("node[%d].registration: %w", i, regErr)
@@ -234,6 +257,15 @@ func run() error {
 		return fmt.Errorf("build container: %w", err)
 	}
 	defer cancel.Close()
+	// Registered after the container's own shutdown, so it runs first:
+	// heartbeats stop before anything they talk through is torn down.
+	defer func() {
+		if nodeKeeper != nil {
+			if err := nodeKeeper.Close(); err != nil {
+				logging.L().Warn("keeper shutdown", "error", err.Error())
+			}
+		}
+	}()
 
 	// Retrieve built services via MustGet.
 	_ = servicectx.MustGet[*logging.Hub](c, loggerKey)

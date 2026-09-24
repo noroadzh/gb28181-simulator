@@ -52,5 +52,39 @@ func (f *Fake) Advance(d time.Duration) {
 	f.now = f.now.Add(d)
 }
 
-// Compile-time check that Fake satisfies the domain port.
-var _ port.Clock = (*Fake)(nil)
+// RealTicker returns a TickerFactory backed by time.NewTicker. Injected
+// into use cases that run on a schedule; the returned tickers must be
+// stopped by their owner.
+func RealTicker() port.TickerFactory {
+	return func(d time.Duration) port.Ticker {
+		if d <= 0 {
+			d = time.Second
+		}
+		return &realTicker{t: time.NewTicker(d)}
+	}
+}
+
+type realTicker struct {
+	t       *time.Ticker
+	stopped bool
+	mu      sync.Mutex
+}
+
+func (r *realTicker) C() <-chan time.Time { return r.t.C }
+
+func (r *realTicker) Stop() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.stopped {
+		return
+	}
+	r.stopped = true
+	r.t.Stop()
+}
+
+// Compile-time checks that the platform types satisfy the domain ports.
+var (
+	_ port.Clock         = (*Fake)(nil)
+	_ port.Ticker        = (*realTicker)(nil)
+	_ port.TickerFactory = func(d time.Duration) port.Ticker { return RealTicker()(d) }
+)

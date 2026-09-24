@@ -306,3 +306,67 @@ func TestNode_RegistrationResult(t *testing.T) {
 		t.Error("expected an error for an unconstructed result")
 	}
 }
+
+// The keepalive that holds a registration open is configured the same way
+// as the registration itself: optional, with GB/T 28181 defaults.
+func TestNewRegistration_HeartbeatDefaults(t *testing.T) {
+	t.Parallel()
+	reg, err := NewRegistration(RegistrationParams{Server: "127.0.0.1:5060", Password: "s"})
+	if err != nil {
+		t.Fatalf("NewRegistration: %v", err)
+	}
+	if reg.HeartbeatInterval() != DefaultHeartbeatInterval {
+		t.Errorf("interval = %v, want %v", reg.HeartbeatInterval(), DefaultHeartbeatInterval)
+	}
+	if reg.HeartbeatTimeout() != DefaultHeartbeatTimeout {
+		t.Errorf("timeout = %v, want %v", reg.HeartbeatTimeout(), DefaultHeartbeatTimeout)
+	}
+	if reg.MaxHeartbeatFailures() != DefaultHeartbeatMaxFailures {
+		t.Errorf("max failures = %d, want %d", reg.MaxHeartbeatFailures(), DefaultHeartbeatMaxFailures)
+	}
+}
+
+func TestNewRegistration_HeartbeatValidation(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		p    RegistrationParams
+	}{
+		{"negative interval", RegistrationParams{HeartbeatInterval: -time.Second, HeartbeatTimeout: time.Second}},
+		{"negative timeout", RegistrationParams{HeartbeatInterval: 60 * time.Second, HeartbeatTimeout: -time.Second}},
+		{"timeout not shorter than interval", RegistrationParams{HeartbeatInterval: 5 * time.Second, HeartbeatTimeout: 5 * time.Second}},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			p := tc.p
+			p.Server = "127.0.0.1:5060"
+			p.Password = "secret"
+			if _, err := NewRegistration(p); err == nil {
+				t.Fatal("expected an error")
+			}
+		})
+	}
+}
+
+// The renewal schedule is derived from what the platform granted, falling
+// back to what was asked for when it stated nothing.
+func TestRegistrationResult_ExpiresAt(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)
+	res, err := NewRegistrationResult("127.0.0.1:5060", 600, now)
+	if err != nil {
+		t.Fatalf("NewRegistrationResult: %v", err)
+	}
+	if got := res.ExpiresAt(3600); !got.Equal(now.Add(600 * time.Second)) {
+		t.Errorf("ExpiresAt = %v, want %v", got, now.Add(600*time.Second))
+	}
+	unstated, err := NewRegistrationResult("127.0.0.1:5060", 0, now)
+	if err != nil {
+		t.Fatalf("NewRegistrationResult: %v", err)
+	}
+	if got := unstated.ExpiresAt(3600); !got.Equal(now.Add(3600 * time.Second)) {
+		t.Errorf("ExpiresAt with no grant = %v, want the requested lifetime", got)
+	}
+}

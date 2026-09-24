@@ -17,6 +17,15 @@ const (
 	DefaultTransport = "udp"
 )
 
+// Defaults for the keepalive that holds a registration open: a heartbeat
+// every minute, a bounded wait for its answer, and a tolerance for a few
+// lost answers before the node is declared unreachable.
+const (
+	DefaultHeartbeatInterval    = 60 * time.Second
+	DefaultHeartbeatTimeout     = 5 * time.Second
+	DefaultHeartbeatMaxFailures = 3
+)
+
 // Registration is an immutable description of how a node registers with an
 // upstream platform: where the platform is, which credentials to answer its
 // challenge with, and how long to wait. It is optional on a node — a zero
@@ -32,20 +41,29 @@ type Registration struct {
 	expires   uint32 // seconds requested from the platform
 	timeout   time.Duration
 	transport string // "udp" / "tcp"
+
+	// How the node holds the registration open once it is online.
+	heartbeatInterval    time.Duration
+	heartbeatTimeout     time.Duration
+	heartbeatMaxFailures uint32
 }
 
 // RegistrationParams is the flat input for NewRegistration. Zero values take
-// the documented defaults (expires 3600, timeout 5s, transport udp);
-// Server and Password have no defaults and are required.
+// the documented defaults (expires 3600, timeout 5s, transport udp,
+// heartbeat 60s / 5s / 3 failures); Server and Password have no defaults and
+// are required.
 type RegistrationParams struct {
-	Server    string
-	ServerID  string
-	Username  string
-	Password  string
-	GBVersion string
-	Expires   uint32
-	Timeout   time.Duration
-	Transport string
+	Server               string
+	ServerID             string
+	Username             string
+	Password             string
+	GBVersion            string
+	Expires              uint32
+	Timeout              time.Duration
+	Transport            string
+	HeartbeatInterval    time.Duration
+	HeartbeatTimeout     time.Duration
+	HeartbeatMaxFailures uint32
 }
 
 // NewRegistration validates params and returns the immutable Registration.
@@ -86,15 +104,42 @@ func NewRegistration(p RegistrationParams) (Registration, error) {
 	if transport != "udp" && transport != "tcp" {
 		return Registration{}, fmt.Errorf("model: unsupported registration transport %q", p.Transport)
 	}
+	interval := p.HeartbeatInterval
+	if interval == 0 {
+		interval = DefaultHeartbeatInterval
+	}
+	if interval <= 0 {
+		return Registration{}, fmt.Errorf("model: non-positive heartbeat interval %v", interval)
+	}
+	heartbeatTimeout := p.HeartbeatTimeout
+	if heartbeatTimeout == 0 {
+		heartbeatTimeout = DefaultHeartbeatTimeout
+	}
+	if heartbeatTimeout <= 0 {
+		return Registration{}, fmt.Errorf("model: non-positive heartbeat timeout %v", heartbeatTimeout)
+	}
+	// Waiting for an answer for as long as the interval itself would make
+	// one lost heartbeat swallow the next one.
+	if heartbeatTimeout >= interval {
+		return Registration{}, fmt.Errorf("model: heartbeat timeout %v must be shorter than the interval %v",
+			heartbeatTimeout, interval)
+	}
+	maxFailures := p.HeartbeatMaxFailures
+	if maxFailures == 0 {
+		maxFailures = DefaultHeartbeatMaxFailures
+	}
 	return Registration{
-		server:    server,
-		serverID:  strings.TrimSpace(p.ServerID),
-		username:  strings.TrimSpace(p.Username),
-		password:  p.Password,
-		gbVersion: strings.TrimSpace(p.GBVersion),
-		expires:   expires,
-		timeout:   timeout,
-		transport: transport,
+		server:               server,
+		serverID:             strings.TrimSpace(p.ServerID),
+		username:             strings.TrimSpace(p.Username),
+		password:             p.Password,
+		gbVersion:            strings.TrimSpace(p.GBVersion),
+		expires:              expires,
+		timeout:              timeout,
+		transport:            transport,
+		heartbeatInterval:    interval,
+		heartbeatTimeout:     heartbeatTimeout,
+		heartbeatMaxFailures: maxFailures,
 	}, nil
 }
 
@@ -126,6 +171,17 @@ func (r Registration) Timeout() time.Duration { return r.timeout }
 
 // Transport returns "udp" or "tcp".
 func (r Registration) Transport() string { return r.transport }
+
+// HeartbeatInterval returns how often an online node sends a keepalive.
+func (r Registration) HeartbeatInterval() time.Duration { return r.heartbeatInterval }
+
+// HeartbeatTimeout returns how long one keepalive waits for its answer. It
+// is always shorter than HeartbeatInterval.
+func (r Registration) HeartbeatTimeout() time.Duration { return r.heartbeatTimeout }
+
+// MaxHeartbeatFailures returns how many consecutive unanswered keepalives a
+// node tolerates before it is declared unreachable.
+func (r Registration) MaxHeartbeatFailures() uint32 { return r.heartbeatMaxFailures }
 
 // CredentialsFor builds the credentials used to answer a challenge issued
 // for realm. The realm only becomes known when the platform challenges us,
@@ -186,6 +242,17 @@ func (r RegistrationResult) GrantedExpiry() uint32 { return r.grantedExpiry }
 
 // RegisteredAt returns when the registration completed.
 func (r RegistrationResult) RegisteredAt() time.Time { return r.registeredAt }
+
+// ExpiresAt returns when the granted lifetime lapses. fallback — the
+// lifetime the node asked for — is used when the platform stated none, so a
+// renewal schedule can be computed without knowing the request.
+func (r RegistrationResult) ExpiresAt(fallback uint32) time.Time {
+	seconds := r.grantedExpiry
+	if seconds == 0 {
+		seconds = fallback
+	}
+	return r.registeredAt.Add(time.Duration(seconds) * time.Second)
+}
 
 // String renders a log-safe one-line summary.
 func (r RegistrationResult) String() string {

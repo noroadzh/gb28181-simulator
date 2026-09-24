@@ -10,8 +10,8 @@ import (
 
 	"github.com/ghettovoice/gosip/sip"
 
-	"github.com/your-org/gb28181-simulator/internal/sipprobe"
 	"github.com/your-org/gb28181-simulator/internal/adapter/siptransport"
+	"github.com/your-org/gb28181-simulator/internal/sipprobe"
 )
 
 // TestParseStatus covers the --expect-status flag parser.
@@ -21,16 +21,16 @@ func TestParseStatus(t *testing.T) {
 		want  int
 		isErr bool
 	}{
-		{"", 0, false},        // empty = any
-		{"100", 100, false},   // provisional
-		{"200", 200, false},   // success
-		{"404", 404, false},   // client error
-		{"503", 503, false},   // server error
-		{"699", 699, false},   // upper bound
-		{"0", 0, true},        // below range
-		{"700", 0, true},      // above range
-		{"abc", 0, true},      // non-numeric
-		{"-1", 0, true},       // negative
+		{"", 0, false},      // empty = any
+		{"100", 100, false}, // provisional
+		{"200", 200, false}, // success
+		{"404", 404, false}, // client error
+		{"503", 503, false}, // server error
+		{"699", 699, false}, // upper bound
+		{"0", 0, true},      // below range
+		{"700", 0, true},    // above range
+		{"abc", 0, true},    // non-numeric
+		{"-1", 0, true},     // negative
 	}
 	for _, tc := range cases {
 		got, err := sipprobe.ParseStatus(tc.in)

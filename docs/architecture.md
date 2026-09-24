@@ -211,6 +211,18 @@ the node when the platform refuses. A node without a registration stops at
 `registering`, which is also where the platform identities stay until their
 own stages land.
 
+Staying online is the keeper's job (`internal/app/keeper.go`): one goroutine
+per node, driven by an injected `port.Ticker`, sends a MANSCDP `Keepalive`
+as a SIP `MESSAGE` every `heartbeat_interval` and re-registers at half the
+granted lifetime (or a minute before it lapses, whichever is earlier). A run
+of `heartbeat_max_failures` unanswered beats faults the node; a failed
+renewal backs off (5s doubling to 60s) and leaves the node online, because
+its registration is still valid. `Unregister` sends `Expires: 0` and only
+then stops the goroutine and releases the listener — the reverse order would
+aim a heartbeat at a closed transport. The keeper is closed by the
+composition root on shutdown, and its root context is the process's, never a
+request's.
+
 ### Composition
 
 `cmd/gb28181-simulator` registers every `nodes:` entry at start-up and hands

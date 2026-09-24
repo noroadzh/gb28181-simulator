@@ -11,10 +11,10 @@ import (
 // pattern from gosip's own headers.go.
 type XGBVerHeader string
 
-func (h *XGBVerHeader) Name() string       { return "X-GB-Ver" }
-func (h *XGBVerHeader) Value() string      { return string(*h) }
-func (h *XGBVerHeader) String() string     { return "X-GB-Ver: " + string(*h) }
-func (h *XGBVerHeader) Clone() sip.Header  { v := *h; return &v }
+func (h *XGBVerHeader) Name() string      { return "X-GB-Ver" }
+func (h *XGBVerHeader) Value() string     { return string(*h) }
+func (h *XGBVerHeader) String() string    { return "X-GB-Ver: " + string(*h) }
+func (h *XGBVerHeader) Clone() sip.Header { v := *h; return &v }
 func (h *XGBVerHeader) Equals(o interface{}) bool {
 	switch v := o.(type) {
 	case *XGBVerHeader:

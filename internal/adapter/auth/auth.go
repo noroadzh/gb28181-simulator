@@ -10,12 +10,12 @@
 // Two modes are supported on the verification path:
 //
 //  1. RFC 7616 §3.4 (qop="auth"): the response field is computed as
-//        MD5(MD5(user:realm:password) : nonce : nc : cnonce : qop
-//            : MD5(method:uri))
+//     MD5(MD5(user:realm:password) : nonce : nc : cnonce : qop
+//     : MD5(method:uri))
 //     plus RFC 7616 §3.3 UTF-8 normalisation of `username` and `realm`.
 //
 //  2. RFC 2617 §3 (no qop): the response field is computed as
-//        MD5(MD5(user:realm:password) : nonce : MD5(method:uri))
+//     MD5(MD5(user:realm:password) : nonce : MD5(method:uri))
 //
 // Mode (1) is the default and matches GB/T 28181 §L.2 wording verbatim.
 // Mode (2) is the legacy fallback for old clients (e.g. some Hikvision

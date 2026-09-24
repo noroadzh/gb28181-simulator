@@ -70,6 +70,14 @@ faults the node and frees its port. Without the block — or for a platform
 identity, whose behaviour arrives in the next stages — a started node stays
 `registering`, exactly as before.
 
+Once online the node is kept open: it sends a MANSCDP `Keepalive` as a SIP
+`MESSAGE` every `heartbeat_interval`, renews its registration at half the
+lifetime the platform granted, and gives up after `heartbeat_max_failures`
+unanswered beats (faulting the node and freeing its port, as a failed
+registration does). `POST /v1/nodes/{id}/unregister` sends `Expires: 0`,
+stops the background work and takes the node `offline`; if the platform
+refuses, the node stays `online` and the error names the stage.
+
 ```yaml
 nodes:
   - id: "34020000011310000001"
@@ -83,6 +91,9 @@ nodes:
       expires: 3600                # optional; seconds, default 3600
       transport: udp               # optional; udp (default) or tcp
       timeout: 5s                  # optional; default 5s
+      heartbeat_interval: 60s      # optional; keepalive period, default 60s
+      heartbeat_timeout: 5s        # optional; default 5s; < interval
+      heartbeat_max_failures: 3    # optional; default 3
 ```
 
 ## Tech stack

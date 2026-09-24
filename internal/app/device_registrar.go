@@ -112,6 +112,31 @@ func (r *Registrar) Register(
 	node model.Node,
 	reg model.Registration,
 ) (model.RegistrationResult, error) {
+	return r.transaction(ctx, tr, node, reg, reg.Expires())
+}
+
+// Unregister ends a registration: the same transaction with `Expires: 0`,
+// which asks the platform to forget the node. A 401 is answered the same
+// way, so leaving costs exactly as many messages as joining.
+func (r *Registrar) Unregister(
+	ctx context.Context,
+	tr port.SIPTransport,
+	node model.Node,
+	reg model.Registration,
+) (model.RegistrationResult, error) {
+	return r.transaction(ctx, tr, node, reg, 0)
+}
+
+// transaction runs one REGISTER exchange asking for expires seconds. It is
+// the body of both Register and Unregister — the two differ only in the
+// lifetime they ask for.
+func (r *Registrar) transaction(
+	ctx context.Context,
+	tr port.SIPTransport,
+	node model.Node,
+	reg model.Registration,
+	expires uint32,
+) (model.RegistrationResult, error) {
 	id := node.ID()
 	profile := node.Profile()
 	callID := r.newCallID()
@@ -124,7 +149,7 @@ func (r *Registrar) Register(
 		contact:    profile.Addr(),
 		callID:     callID,
 		seqNo:      1,
-		expires:    reg.Expires(),
+		expires:    expires,
 		gbVersion:  reg.GBVersion(),
 	})
 	if err != nil {
@@ -138,7 +163,7 @@ func (r *Registrar) Register(
 		return model.RegistrationResult{}, &RegistrationError{Stage: StageSend, Err: err}
 	}
 	r.log.Info("registration sent", "node_id", id.String(), "server", reg.Server(),
-		"call_id", callID, "expires", reg.Expires())
+		"call_id", callID, "expires", expires)
 
 	authenticated := false
 	seqNo := uint32(1)
@@ -199,7 +224,7 @@ func (r *Registrar) Register(
 				contact:    profile.Addr(),
 				callID:     callID,
 				seqNo:      seqNo,
-				expires:    reg.Expires(),
+				expires:    expires,
 				gbVersion:  reg.GBVersion(),
 				extra:      []model.Header{auth},
 			})
@@ -214,7 +239,7 @@ func (r *Registrar) Register(
 				"node_id", id.String(), "cseq", seqNo)
 
 		case status >= 200 && status < 300:
-			granted := reg.Expires()
+			granted := expires
 			if h, ok := msg.Header("Expires"); ok {
 				if n, cerr := strconv.ParseUint(strings.TrimSpace(h.Value()), 10, 32); cerr == nil {
 					// The platform may shorten what we asked for; it wins.

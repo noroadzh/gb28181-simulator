@@ -33,6 +33,7 @@ type NodeService struct {
 	factory   TransportFactory
 	clock     port.Clock
 	registrar *Registrar
+	keeper    *Keeper
 
 	mu        sync.Mutex
 	changedAt map[string]time.Time
@@ -82,6 +83,17 @@ func (s *NodeService) WithRegistrar(r *Registrar) (*NodeService, error) {
 		return nil, fmt.Errorf("app: NodeService requires a non-nil Registrar")
 	}
 	s.registrar = r
+	return s, nil
+}
+
+// WithKeeper attaches the keepalive and renewal use case. Without one a
+// registered node still comes online — its registration simply is not held
+// open, which is what tests and the other identities want.
+func (s *NodeService) WithKeeper(k *Keeper) (*NodeService, error) {
+	if k == nil {
+		return nil, fmt.Errorf("app: NodeService requires a non-nil Keeper")
+	}
+	s.keeper = k
 	return s, nil
 }
 
@@ -150,8 +162,65 @@ func (s *NodeService) register(
 	if err := s.MarkOnline(ctx, id); err != nil {
 		return s.fault(ctx, id, err)
 	}
+	// From here on the node is held open: heartbeats go out and the
+	// registration is renewed before it lapses. The keeper runs on its own
+	// context, so it outlives this call.
+	if s.keeper != nil {
+		if err := s.keeper.Start(id, tr, reg, result); err != nil {
+			return s.fault(ctx, id, fmt.Errorf("app: start keepalive for node %s: %w", id, err))
+		}
+	}
 	s.stamp(id)
 	return nil
+}
+
+// Unregister asks the platform to forget the node: it sends a REGISTER with
+// `Expires: 0` and, only once the platform agrees, stops the node's
+// background work and releases its listener (`online → offline`).
+//
+// A failed unregistration leaves the node online — its registration is still
+// valid — and reports the stage it failed at, so the caller can retry.
+func (s *NodeService) Unregister(ctx context.Context, id model.NodeID) error {
+	node, ok := s.registry.Get(ctx, id)
+	if !ok {
+		return fmt.Errorf("app: unregister node %s: unknown node", id)
+	}
+	switch node.Status() {
+	case model.StatusOnline, model.StatusRegistered:
+	default:
+		return fmt.Errorf("app: unregister node %s: %w (status %s)",
+			id, model.ErrIllegalTransition, node.Status())
+	}
+	reg, wants := node.Registration()
+	if !wants {
+		return fmt.Errorf("app: unregister node %s: %w", id, ErrNotRegistered)
+	}
+	if s.registrar == nil {
+		return fmt.Errorf("app: unregister node %s: service has no registrar", id)
+	}
+	tr := s.lifecycle.Transport(id)
+	if tr == nil {
+		return fmt.Errorf("app: unregister node %s: no listener bound", id)
+	}
+	if _, err := s.registrar.Unregister(ctx, tr, node, reg); err != nil {
+		// The registration still stands: report and let the caller
+		// decide, rather than dropping a live node into fault.
+		return fmt.Errorf("app: unregister node %s: %w", id, err)
+	}
+	s.stopKeeping(id)
+	if err := s.lifecycle.Stop(ctx, id); err != nil {
+		return fmt.Errorf("app: unregister node %s: %w", id, err)
+	}
+	s.stamp(id)
+	return nil
+}
+
+// stopKeeping ends a node's background work before its listener is
+// released, so no heartbeat is aimed at a closed transport.
+func (s *NodeService) stopKeeping(id model.NodeID) {
+	if s.keeper != nil {
+		s.keeper.Stop(id)
+	}
 }
 
 // fault moves the node to StatusFault — releasing its listener — and
@@ -159,6 +228,7 @@ func (s *NodeService) register(
 // meantime) both failures are reported, so neither is swallowed.
 func (s *NodeService) fault(ctx context.Context, id model.NodeID, cause error) error {
 	s.stamp(id)
+	s.stopKeeping(id)
 	if err := s.lifecycle.Fail(ctx, id, cause); err != nil {
 		return fmt.Errorf("%v (and faulting node %s failed: %w)", cause, id, err)
 	}
@@ -166,7 +236,10 @@ func (s *NodeService) fault(ctx context.Context, id model.NodeID, cause error) e
 }
 
 // Stop releases the node's listener and advances it to StatusOffline.
+// Background work is stopped first, so the last heartbeat cannot race the
+// release.
 func (s *NodeService) Stop(ctx context.Context, id model.NodeID) error {
+	s.stopKeeping(id)
 	if err := s.lifecycle.Stop(ctx, id); err != nil {
 		return fmt.Errorf("app: stop node %s: %w", id, err)
 	}

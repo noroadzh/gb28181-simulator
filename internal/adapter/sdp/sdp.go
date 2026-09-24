@@ -71,6 +71,6 @@ type MediaBlock struct {
 // ErrMalformedBody is returned for unrecoverable format problems surfaced by
 // pion's parser.
 var (
-	ErrEmptyBody    = errors.New("sdp: empty body")
+	ErrEmptyBody     = errors.New("sdp: empty body")
 	ErrMalformedBody = errors.New("sdp: malformed body")
 )

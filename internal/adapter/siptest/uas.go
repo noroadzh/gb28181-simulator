@@ -32,6 +32,9 @@ type UAS struct {
 	realm         string
 	password      string
 	grantedExpiry uint32
+	// silentMessages makes the UAS ignore keepalives instead of answering
+	// them, which is how a test drives a node into "unreachable".
+	silentMessages bool
 
 	challenger *auth.Challenger
 	responder  *auth.Responder
@@ -48,6 +51,13 @@ type UASOption func(*UAS)
 // the one it asked for.
 func WithGrantedExpiry(seconds uint32) UASOption {
 	return func(u *UAS) { u.grantedExpiry = seconds }
+}
+
+// WithSilentMessages makes the UAS record keepalives but never answer them.
+// It stands in for a platform that has stopped responding, so a test can
+// watch a node give up after its tolerance runs out.
+func WithSilentMessages() UASOption {
+	return func(u *UAS) { u.silentMessages = true }
 }
 
 // NewUAS binds a listener on network ("udp" or "tcp") at addr and answers
@@ -85,8 +95,20 @@ func (u *UAS) Received() []model.Message {
 	return out
 }
 
-// Serve answers registrations until ctx is cancelled. It returns nil when
-// the context ends, and the receive error otherwise.
+// Keepalives returns the MESSAGEs the UAS has accepted — the heartbeats of
+// the devices that registered with it — in arrival order.
+func (u *UAS) Keepalives() []model.Message {
+	out := make([]model.Message, 0)
+	for _, m := range u.Received() {
+		if m.Method() == "MESSAGE" {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// Serve answers registrations and keepalives until ctx is cancelled. It
+// returns nil when the context ends, and the receive error otherwise.
 func (u *UAS) Serve(ctx context.Context) error {
 	for {
 		msg, peer, err := u.port.Receive(ctx)
@@ -100,13 +122,30 @@ func (u *UAS) Serve(ctx context.Context) error {
 		u.received = append(u.received, msg)
 		u.mu.Unlock()
 
-		if msg.Method() != "REGISTER" {
-			continue
-		}
-		if err := u.answer(ctx, msg, peer); err != nil {
-			return err
+		switch msg.Method() {
+		case "REGISTER":
+			if err := u.answer(ctx, msg, peer); err != nil {
+				return err
+			}
+		case "MESSAGE":
+			if err := u.answerKeepalive(ctx, msg, peer); err != nil {
+				return err
+			}
 		}
 	}
+}
+
+// answerKeepalive answers a device keepalive. A platform that has nothing
+// to say simply acknowledges it; WithSilentMessages turns even that off.
+func (u *UAS) answerKeepalive(ctx context.Context, req model.Message, peer string) error {
+	if u.silentMessages {
+		return nil
+	}
+	resp, err := model.NewResponse(200, "OK", echoHeaders(req), "")
+	if err != nil {
+		return err
+	}
+	return u.port.Send(ctx, resp, peer)
 }
 
 // answer handles one REGISTER: challenge it, or check the credential it

@@ -19,6 +19,7 @@ type NodeView interface {
 	Get(ctx context.Context, id model.NodeID) (model.Node, bool)
 	Start(ctx context.Context, id model.NodeID) error
 	Stop(ctx context.Context, id model.NodeID) error
+	Unregister(ctx context.Context, id model.NodeID) error
 }
 
 // nodeResponse is the JSON shape of a node. Deliberately flat and
@@ -92,6 +93,14 @@ func (s *Server) handleNodeStart(c echo.Context) error {
 // handleNodeStop stops one node, with the same status mapping as start.
 func (s *Server) handleNodeStop(c echo.Context) error {
 	return s.controlNode(c, "stop", NodeView.Stop)
+}
+
+// handleNodeUnregister asks the platform to forget one node. It shares the
+// start/stop mapping, so a refused unregistration is reported as a bad
+// gateway naming the stage, and unregistering a node that is not online is a
+// conflict.
+func (s *Server) handleNodeUnregister(c echo.Context) error {
+	return s.controlNode(c, "unregister", NodeView.Unregister)
 }
 
 // controlNode is the shared body of the start/stop endpoints.

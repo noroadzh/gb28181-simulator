@@ -79,9 +79,9 @@ type Config struct {
 //
 // The zero value is NOT usable; construct one via New.
 type Provider struct {
-	tp        *sdktrace.TracerProvider
-	noop      bool // true when Enabled is false; Tracer() returns otel no-op
-	closers   []func(context.Context) error
+	tp         *sdktrace.TracerProvider
+	noop       bool // true when Enabled is false; Tracer() returns otel no-op
+	closers    []func(context.Context) error
 	propagator propagation.TextMapPropagator
 }
 

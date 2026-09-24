@@ -56,6 +56,12 @@ nodes:
       expires: 3600                      # optional; seconds, default 3600
       transport: udp                     # optional; udp (default) or tcp
       timeout: 5s                        # optional; default 5s
+      # Holding the registration open (all optional):
+      heartbeat_interval: 60s            # MESSAGE keepalive period, default 60s
+      heartbeat_timeout: 5s              # wait for its answer, default 5s;
+                                         # must be shorter than the interval
+      heartbeat_max_failures: 3          # unanswered beats tolerated before
+                                         # the node falls back to fault
   - id: "34020000012000000001"
     kind: platform-large
     domain: "3402000000"

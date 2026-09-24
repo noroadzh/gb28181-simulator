@@ -97,6 +97,26 @@ func (f *fakeNodeView) Start(_ context.Context, id model.NodeID) error {
 	return nil
 }
 
+// Unregister mirrors the real service: only a node that is online (or at
+// least registered) may leave, anything else is an illegal transition.
+func (f *fakeNodeView) Unregister(_ context.Context, id model.NodeID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n, ok := f.nodes[id.String()]
+	if !ok {
+		return fmt.Errorf("unknown node %s", id)
+	}
+	if n.Status() != model.StatusOnline && n.Status() != model.StatusRegistered {
+		return fmt.Errorf("%w: %s -> %s", model.ErrIllegalTransition, n.Status(), model.StatusOffline)
+	}
+	next, err := n.WithStatus(model.StatusOffline)
+	if err != nil {
+		return err
+	}
+	f.nodes[id.String()] = next
+	return nil
+}
+
 func (f *fakeNodeView) Stop(_ context.Context, id model.NodeID) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

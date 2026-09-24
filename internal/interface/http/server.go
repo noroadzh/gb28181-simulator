@@ -14,9 +14,9 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 
+	"github.com/your-org/gb28181-simulator/internal/interface/webui"
 	platformconfig "github.com/your-org/gb28181-simulator/internal/platform/config"
 	"github.com/your-org/gb28181-simulator/internal/platform/observability/logging"
-	"github.com/your-org/gb28181-simulator/internal/interface/webui"
 )
 
 // Version metadata is injected by the CLI entrypoint (ldflags / defaults).
@@ -84,6 +84,7 @@ func (s *Server) registerRoutes(e *echo.Echo) {
 	e.GET("/v1/nodes/:id", s.handleNodeDetail)
 	e.POST("/v1/nodes/:id/start", s.handleNodeStart)
 	e.POST("/v1/nodes/:id/stop", s.handleNodeStop)
+	e.POST("/v1/nodes/:id/unregister", s.handleNodeUnregister)
 
 	// Legacy /healthz and /metrics for smoke tests (per §7.3)
 	e.GET("/healthz", s.handleHealth)
