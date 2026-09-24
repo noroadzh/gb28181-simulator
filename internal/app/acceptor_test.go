@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -171,6 +172,8 @@ func (d *fakeDevices) Lookup(ctx context.Context, nodeID model.NodeID, deviceID 
 	return dev, ok
 }
 
+// List honours the port's contract — ordered by device id — so a test that
+// reads a table gets the same sequence the real registry would give it.
 func (d *fakeDevices) List(ctx context.Context, nodeID model.NodeID) []model.DownstreamDevice {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -178,6 +181,7 @@ func (d *fakeDevices) List(ctx context.Context, nodeID model.NodeID) []model.Dow
 	for _, dev := range d.byNode[nodeID.String()] {
 		out = append(out, dev)
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].DeviceID() < out[j].DeviceID() })
 	return out
 }
 
@@ -223,7 +227,8 @@ func acceptorFixture(t *testing.T, auth *fakeAuthenticator) (
 	creds := newFakeCredentials()
 	devices := newFakeDevices()
 	clock := newSyncClock(time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC))
-	acceptor, err := NewAcceptor(context.Background(), clock, &fakeChallenger{}, auth, creds, devices, discardLogger())
+	acceptor, err := NewAcceptor(context.Background(), clock, &fakeChallenger{}, auth, creds,
+		devices, newFakeMANSCDP(), nil, discardLogger())
 	if err != nil {
 		t.Fatalf("NewAcceptor: %v", err)
 	}
@@ -533,7 +538,8 @@ func TestAcceptor_RefusesRequestWithoutCaller(t *testing.T) {
 
 func TestAcceptor_ServeValidates(t *testing.T) {
 	acceptor, err := NewAcceptor(context.Background(), newSyncClock(time.Now()), &fakeChallenger{},
-		&fakeAuthenticator{}, newFakeCredentials(), newFakeDevices(), discardLogger())
+		&fakeAuthenticator{}, newFakeCredentials(), newFakeDevices(), newFakeMANSCDP(), nil,
+		discardLogger())
 	if err != nil {
 		t.Fatalf("NewAcceptor: %v", err)
 	}
@@ -582,7 +588,8 @@ func TestAcceptor_StopAndClose(t *testing.T) {
 // other.
 func TestAcceptor_NodesAreIndependent(t *testing.T) {
 	acceptor, err := NewAcceptor(context.Background(), newSyncClock(time.Now()), &fakeChallenger{},
-		&fakeAuthenticator{}, newFakeCredentials(), newFakeDevices(), discardLogger())
+		&fakeAuthenticator{}, newFakeCredentials(), newFakeDevices(), newFakeMANSCDP(), nil,
+		discardLogger())
 	if err != nil {
 		t.Fatalf("NewAcceptor: %v", err)
 	}

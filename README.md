@@ -82,6 +82,12 @@ node's online device table, readable at `GET /v1/nodes/{id}/devices`;
 `Expires: 0` removes it. Stopping the platform ends the serving goroutine
 before its port is released and clears the table.
 
+A platform also **receives heartbeats, answers catalog queries and sweeps
+out expired devices**: a downstream's `Keepalive` notify refreshes its row
+without extending the lifetime it was granted, a `Catalog` query is answered
+with that platform's own online devices, and a device that stops
+re-registering is dropped once the granted lifetime lapses.
+
 ```yaml
   - id: "34020000002000000001"
     kind: platform-large

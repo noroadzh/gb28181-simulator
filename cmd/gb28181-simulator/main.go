@@ -262,7 +262,7 @@ func run() error {
 				return nil, fmt.Errorf("challenger: %w", err)
 			}
 			acceptor, err := app.NewAcceptor(processCtx, clock.Real(), challenger, authenticator,
-				accounts, devices, logging.L())
+				accounts, devices, manscdp.NewMANSCDPCodec(), clock.RealTicker(), logging.L())
 			if err != nil {
 				return nil, fmt.Errorf("acceptor: %w", err)
 			}

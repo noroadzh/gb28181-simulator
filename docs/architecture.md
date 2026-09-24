@@ -263,6 +263,39 @@ HTTP GET /v1/nodes/:id/devices ─▶ NodeService.Devices ─▶ Acceptor.Device
   `Acceptor.Stop` (which joins the goroutine and clears the table) and only
   then lets the lifecycle release the listener.
 
+### MESSAGE dispatch and sweeping (Change 6, part two)
+
+A registration is not the end of the conversation: a downstream that stays
+online sends MANSCDP `MESSAGE`s, and a platform that never cleans up goes on
+reporting devices that went silent. Both live in the same serving loop.
+
+```
+device ──MESSAGE(Keepalive)──▶ Acceptor ──MANSCDPCodec.DecodeNotify──▶ refresh
+                                                                        └─ DownstreamRegistry.Upsert(WithSeen)
+device ──MESSAGE(Catalog)────▶ Acceptor ──MarshalCatalog──▶ 200 OK + body
+sweeper goroutine ──Ticker──▶ sweep: Drop rows with now ≥ ExpiresAt
+```
+
+- **Read is separate from write.** `port.MANSCDPCodec` pairs the notify a
+  downstream sends with the catalog answer the platform gives back. It is
+  deliberately not `port.KeepaliveCodec`, which only renders: forcing every
+  device node to carry a parser it never calls would be a dependency nobody
+  asked for.
+- **An unreadable message is ignored, not answered.** A body produced by
+  another vendor's device is data; a platform that answers an error the peer
+  cannot interpret — or panics — can be switched off remotely. The loop
+  decodes, and on failure logs at `debug` and goes on to the next message.
+- **A heartbeat is not a re-registration.** `refresh` moves `last_seen_at`
+  and leaves the granted lifetime and expiry alone, so a device cannot
+  extend its registration by beating faster.
+- **The catalog is per node.** It is built from that node's own online
+  table, so two platforms sharing a process cannot see each other's
+  downstreams.
+- **Sweeping is bounded by the policy.** The beat is half the shortest
+  lifetime the node grants, inside `[1s, 30s]`, so a silent device is gone
+  within half a lifetime. The sweeper is a goroutine of the serving node and
+  is joined by `Stop` / `Close`, so a stopped platform owns no goroutine.
+
 ## Observability
 
 ### Logging

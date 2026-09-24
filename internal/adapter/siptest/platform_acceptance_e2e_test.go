@@ -20,8 +20,11 @@ import (
 // platformService wires the real pieces of both identities over real
 // sockets: a device that registers and a platform that accepts it. Closing
 // the returned function stops both sides' background work.
+// The keeper is handed back as well, so a test can end the device side's
+// background work — heartbeats and renewals — while the platform keeps
+// serving, which is what a registration that lapses looks like.
 func platformService(t *testing.T, ctx context.Context, accounts *credstore.Store, devices *devicereg.Registry) (
-	*app.NodeService, func(),
+	*app.NodeService, *app.Keeper, func(),
 ) {
 	t.Helper()
 	registry := nodereg.New()
@@ -67,14 +70,14 @@ func platformService(t *testing.T, ctx context.Context, accounts *credstore.Stor
 		t.Fatalf("challenger: %v", err)
 	}
 	acceptor, err := app.NewAcceptor(ctx, clock.Real(), challenger, authenticator,
-		accounts, devices, discardLogger())
+		accounts, devices, manscdp.NewMANSCDPCodec(), clock.RealTicker(), discardLogger())
 	if err != nil {
 		t.Fatalf("NewAcceptor: %v", err)
 	}
 	if _, err := svc.WithAcceptor(acceptor); err != nil {
 		t.Fatalf("WithAcceptor: %v", err)
 	}
-	return svc, func() {
+	return svc, keeper, func() {
 		_ = acceptor.Close()
 		_ = keeper.Close()
 	}
@@ -106,7 +109,7 @@ func TestPlatformAcceptsDeviceRegistration(t *testing.T) {
 
 	accounts := credstore.New()
 	devices := devicereg.New()
-	svc, stop := platformService(t, ctx, accounts, devices)
+	svc, _, stop := platformService(t, ctx, accounts, devices)
 	defer stop()
 
 	platformID, err := model.ParseNodeID(e2eServer)
@@ -181,7 +184,7 @@ func TestPlatformClearsDevicesWhenStopped(t *testing.T) {
 
 	accounts := credstore.New()
 	devices := devicereg.New()
-	svc, stop := platformService(t, ctx, accounts, devices)
+	svc, _, stop := platformService(t, ctx, accounts, devices)
 	defer stop()
 
 	platformID, err := model.ParseNodeID(e2eServer)
@@ -245,7 +248,7 @@ func TestPlatformRefusesUnknownDevice(t *testing.T) {
 
 	accounts := credstore.New()
 	devices := devicereg.New()
-	svc, stop := platformService(t, ctx, accounts, devices)
+	svc, _, stop := platformService(t, ctx, accounts, devices)
 	defer stop()
 
 	platformID, err := model.ParseNodeID(e2eServer)

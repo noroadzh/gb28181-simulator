@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <CmdType>Catalog</CmdType>
+  <SN>7</SN>
+  <DeviceID>34020000002000000001</DeviceID>
+  <SumNum>1</SumNum>
+  <DeviceList Num="1">
+    <Item>
+      <DeviceID>34020000011310000001</DeviceID>
+      <Name>34020000011310000001</Name>
+      <Manufacturer>gb28181-simulator</Manufacturer>
+      <Model>simulator</Model>
+      <CivilCode>340200</CivilCode>
+      <Address>127.0.0.1:15060</Address>
+      <Parental>0</Parental>
+      <SafetyWay>0</SafetyWay>
+      <RegisterWay>1</RegisterWay>
+      <Secrecy>0</Secrecy>
+      <Status>ON</Status>
+    </Item>
+  </DeviceList>
+</Response>

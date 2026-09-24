@@ -114,7 +114,8 @@ func (d DownstreamDevice) WithGranted(granted uint32, at time.Time) DownstreamDe
 }
 
 // WithSeen returns a copy whose last-seen time moved to at. Used when a
-// device checks in without re-registering (a keepalive, in a later change).
+// device checks in without re-registering — a keepalive — which is evidence
+// that it is there but not a reason to extend the lifetime it was granted.
 func (d DownstreamDevice) WithSeen(at time.Time) DownstreamDevice {
 	cp := d
 	cp.lastSeenAt = at

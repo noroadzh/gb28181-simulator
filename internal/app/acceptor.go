@@ -21,6 +21,19 @@ import (
 // sent on the wire: the peer learns only that it was refused (403).
 var ErrNoDownstreamAccount = fmt.Errorf("app: no account for the downstream")
 
+// Sweeping bounds how stale the online table may get. A device is thrown
+// out soon after the lifetime it was granted lapses — half that lifetime
+// at the latest — but a platform with a long window must not spend its
+// time re-reading a large table, so the beat is kept inside these bounds.
+const (
+	sweepMinInterval = time.Second
+	sweepMaxInterval = 30 * time.Second
+)
+
+// contentTypeMANSCDP is what a MANSCDP body announces itself as, in the
+// spelling GB/T 28181 uses.
+const contentTypeMANSCDP = "Application/MANSCDP+XML"
+
 // Acceptor is the UAS half of the simulator: for every platform-large node
 // it runs one goroutine that receives REGISTERs on that node's transport,
 // challenges them the way GB/T 28181 §L.2 prescribes, and records the
@@ -30,6 +43,10 @@ var ErrNoDownstreamAccount = fmt.Errorf("app: no account for the downstream")
 // because every node owns its own listener, and the root context is the
 // process's rather than a request's: serving must outlive the call that
 // started the node. Close ends everything.
+//
+// Besides registrations it answers the MANSCDP messages a registered
+// downstream sends — keepalives refresh the row, catalog queries get the
+// online table — and sweeps out rows whose granted lifetime lapsed.
 type Acceptor struct {
 	ctx           context.Context
 	clock         port.Clock
@@ -37,6 +54,8 @@ type Acceptor struct {
 	authenticator port.Authenticator
 	creds         port.CredentialStore
 	devices       port.DownstreamRegistry
+	manscdp       port.MANSCDPCodec
+	newTicker     port.TickerFactory
 	log           *slog.Logger
 
 	mu      sync.Mutex
@@ -45,17 +64,19 @@ type Acceptor struct {
 
 // platform is one node's serving goroutine and the settings it serves with.
 type platform struct {
-	id     model.NodeID
-	tr     port.SIPTransport
-	realm  string
-	policy model.ExpiresPolicy
-	cancel context.CancelFunc
-	done   chan struct{}
+	id         model.NodeID
+	tr         port.SIPTransport
+	realm      string
+	policy     model.ExpiresPolicy
+	sweepEvery time.Duration
+	cancel     context.CancelFunc
+	done       chan struct{}
 }
 
 // NewAcceptor builds an Acceptor whose serving is bounded by ctx.
-// challenger, authenticator, creds and devices are required; clock and log
-// fall back to the real clock and the default slog logger.
+// challenger, authenticator, creds, devices and manscdp are required;
+// clock, newTicker and log fall back to the real clock, a real ticker and
+// the default slog logger.
 func NewAcceptor(
 	ctx context.Context,
 	clock port.Clock,
@@ -63,6 +84,8 @@ func NewAcceptor(
 	authenticator port.Authenticator,
 	creds port.CredentialStore,
 	devices port.DownstreamRegistry,
+	manscdp port.MANSCDPCodec,
+	newTicker port.TickerFactory,
 	log *slog.Logger,
 ) (*Acceptor, error) {
 	if ctx == nil {
@@ -80,8 +103,14 @@ func NewAcceptor(
 	if devices == nil {
 		return nil, fmt.Errorf("app: acceptor requires a DownstreamRegistry")
 	}
+	if manscdp == nil {
+		return nil, fmt.Errorf("app: acceptor requires a MANSCDPCodec")
+	}
 	if clock == nil {
 		clock = realClock{}
+	}
+	if newTicker == nil {
+		newTicker = realTickerFactory()
 	}
 	if log == nil {
 		log = slog.Default()
@@ -93,6 +122,8 @@ func NewAcceptor(
 		authenticator: authenticator,
 		creds:         creds,
 		devices:       devices,
+		manscdp:       manscdp,
+		newTicker:     newTicker,
 		log:           log,
 		serving:       make(map[string]*platform),
 	}, nil
@@ -122,12 +153,13 @@ func (a *Acceptor) Serve(id model.NodeID, tr port.SIPTransport, realm string, po
 	defer a.mu.Unlock()
 	runCtx, cancel := context.WithCancel(a.ctx)
 	p := &platform{
-		id:     id,
-		tr:     tr,
-		realm:  realm,
-		policy: policy,
-		cancel: cancel,
-		done:   make(chan struct{}),
+		id:         id,
+		tr:         tr,
+		realm:      realm,
+		policy:     policy,
+		sweepEvery: sweepIntervalFor(policy),
+		cancel:     cancel,
+		done:       make(chan struct{}),
 	}
 	a.serving[key] = p
 	go a.run(runCtx, p)
@@ -196,9 +228,24 @@ func (a *Acceptor) Close() error {
 var _ io.Closer = (*Acceptor)(nil)
 
 // run is one node's serving loop. It reads until the transport or the
-// context ends; every REGISTER gets exactly one answer.
+// context ends; every REGISTER and every understood MESSAGE gets exactly
+// one answer.
+//
+// Besides serving it runs the sweeper that throws out devices whose granted
+// lifetime lapsed. The sweeper is a goroutine of its own because reading
+// from the transport blocks, and it is joined before run returns so a
+// stopped node owns no goroutine and touches no table.
 func (a *Acceptor) run(ctx context.Context, p *platform) {
 	defer close(p.done)
+	// Leaving the loop for any reason — context cancelled, transport
+	// closed, read failed — must end the sweeper with it.
+	defer p.cancel()
+	swept := make(chan struct{})
+	go func() {
+		defer close(swept)
+		a.sweepLoop(ctx, p)
+	}()
+	defer func() { <-swept }()
 
 	for {
 		msg, peer, err := p.tr.Receive(ctx)
@@ -212,25 +259,189 @@ func (a *Acceptor) run(ctx context.Context, p *platform) {
 		if !msg.IsRequest() {
 			continue
 		}
-		if msg.Method() != "REGISTER" {
-			// Heartbeats and the rest belong to later changes; a
-			// platform that does not understand a message must not
-			// answer it with an error, so it is dropped quietly.
-			a.log.Debug("ignoring a non-REGISTER request",
+		var resp model.Message
+		switch msg.Method() {
+		case "REGISTER":
+			resp, err = a.handle(ctx, p, msg, peer)
+			if err != nil {
+				a.log.Error("cannot answer a REGISTER",
+					"node_id", p.id.String(), "peer", peer, "error", err.Error())
+				continue
+			}
+		case "MESSAGE":
+			var answered bool
+			resp, answered = a.handleMessage(ctx, p, msg, peer)
+			if !answered {
+				continue
+			}
+		default:
+			// A method this platform does not serve must not be
+			// answered with an error, so it is dropped quietly.
+			a.log.Debug("ignoring an unsupported request",
 				"node_id", p.id.String(), "method", msg.Method(), "peer", peer)
 			continue
 		}
-		resp, err := a.handle(ctx, p, msg, peer)
-		if err != nil {
-			a.log.Error("cannot answer a REGISTER",
-				"node_id", p.id.String(), "peer", peer, "error", err.Error())
-			continue
-		}
 		if err := p.tr.Send(ctx, resp, peer); err != nil {
-			a.log.Warn("cannot send the answer to a REGISTER",
-				"node_id", p.id.String(), "peer", peer, "error", err.Error())
+			a.log.Warn("cannot send the answer",
+				"node_id", p.id.String(), "peer", peer,
+				"method", msg.Method(), "error", err.Error())
 		}
 	}
+}
+
+// sweepLoop wakes the sweeper on the node's beat until the context ends.
+func (a *Acceptor) sweepLoop(ctx context.Context, p *platform) {
+	ticker := a.newTicker(p.sweepEvery)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C():
+			a.sweep(ctx, p)
+		}
+	}
+}
+
+// sweep throws out every device of p whose granted lifetime has lapsed. A
+// device that keeps registering is never touched; one that went silent
+// disappears, so the catalog stops reporting it as online.
+func (a *Acceptor) sweep(ctx context.Context, p *platform) {
+	now := a.clock.Now()
+	for _, d := range a.devices.List(ctx, p.id) {
+		expiresAt := d.ExpiresAt()
+		if expiresAt.IsZero() || now.Before(expiresAt) {
+			continue
+		}
+		if err := a.devices.Remove(ctx, p.id, d.DeviceID()); err != nil {
+			a.log.Warn("cannot sweep an expired device",
+				"node_id", p.id.String(), "device_id", d.DeviceID(), "error", err.Error())
+			continue
+		}
+		a.log.Info("downstream timed out", "node_id", p.id.String(),
+			"device_id", d.DeviceID(), "overdue", now.Sub(expiresAt).Round(time.Second).String())
+	}
+}
+
+// sweepIntervalFor turns a node's expires window into the beat its sweeper
+// runs on: half the shortest lifetime it grants, so a device is thrown out
+// within half a lifetime of going silent, inside the bounds above.
+func sweepIntervalFor(policy model.ExpiresPolicy) time.Duration {
+	d := time.Duration(policy.Min()) * time.Second / 2
+	if d < sweepMinInterval {
+		return sweepMinInterval
+	}
+	if d > sweepMaxInterval {
+		return sweepMaxInterval
+	}
+	return d
+}
+
+// handleMessage answers the MANSCDP messages a downstream sends. The second
+// result is false when there is nothing to answer: an unreadable body, or a
+// command this platform does not serve. A platform that cannot read a
+// message stays silent rather than answering an error the peer will not
+// understand.
+func (a *Acceptor) handleMessage(
+	ctx context.Context,
+	p *platform,
+	req model.Message,
+	peer string,
+) (model.Message, bool) {
+	notify, err := a.manscdp.DecodeNotify(req.Body())
+	if err != nil {
+		a.log.Debug("ignoring an unreadable MESSAGE",
+			"node_id", p.id.String(), "peer", peer, "error", err.Error())
+		return model.Message{}, false
+	}
+	switch {
+	case notify.IsKeepalive():
+		return a.refresh(ctx, p, req, notify)
+	case notify.IsCatalogQuery():
+		return a.answerCatalog(ctx, p, req, notify)
+	default:
+		a.log.Debug("ignoring an unsupported command",
+			"node_id", p.id.String(), "cmd", notify.CmdType(), "device_id", notify.DeviceID())
+		return model.Message{}, false
+	}
+}
+
+// refresh answers a keepalive: the device's row is stamped as seen and the
+// granted lifetime is left alone, because a heartbeat is not a
+// re-registration and must not extend it.
+//
+// A keepalive from a device that is not in the table is ignored rather than
+// answered: a platform that grants nothing cannot say "OK" to it.
+func (a *Acceptor) refresh(
+	ctx context.Context,
+	p *platform,
+	req model.Message,
+	notify model.Notify,
+) (model.Message, bool) {
+	deviceID := notify.DeviceID()
+	dev, ok := a.devices.Lookup(ctx, p.id, deviceID)
+	if !ok {
+		a.log.Warn("ignoring a keepalive from a device that is not registered",
+			"node_id", p.id.String(), "device_id", deviceID)
+		return model.Message{}, false
+	}
+	now := a.clock.Now()
+	if err := a.devices.Upsert(ctx, p.id, dev.WithSeen(now)); err != nil {
+		a.log.Warn("cannot refresh a downstream",
+			"node_id", p.id.String(), "device_id", deviceID, "error", err.Error())
+		return model.Message{}, false
+	}
+	a.log.Debug("downstream keepalive", "node_id", p.id.String(),
+		"device_id", deviceID, "sn", notify.SN())
+	resp, err := buildResponse(200, "OK", req, nil, "")
+	if err != nil {
+		a.log.Warn("cannot answer a keepalive",
+			"node_id", p.id.String(), "device_id", deviceID, "error", err.Error())
+		return model.Message{}, false
+	}
+	return resp, true
+}
+
+// answerCatalog answers a catalog query with the online device table of the
+// node it arrived at — never with another node's, so two platforms sharing
+// a process cannot see each other's downstreams.
+//
+// A query without an SN is ignored: the answer could not be matched to the
+// question, and a platform guessing one would only confuse the peer.
+func (a *Acceptor) answerCatalog(
+	ctx context.Context,
+	p *platform,
+	req model.Message,
+	notify model.Notify,
+) (model.Message, bool) {
+	if !notify.HasSN() {
+		a.log.Warn("ignoring a catalog query without a sequence number",
+			"node_id", p.id.String(), "device_id", notify.DeviceID())
+		return model.Message{}, false
+	}
+	catalog, err := model.NewCatalogFromDevices(p.id.String(), notify.SN(), a.devices.List(ctx, p.id))
+	if err != nil {
+		a.log.Warn("cannot build a catalog answer",
+			"node_id", p.id.String(), "error", err.Error())
+		return model.Message{}, false
+	}
+	body, err := a.manscdp.MarshalCatalog(catalog)
+	if err != nil {
+		a.log.Warn("cannot render a catalog answer",
+			"node_id", p.id.String(), "error", err.Error())
+		return model.Message{}, false
+	}
+	a.log.Debug("answering a catalog query", "node_id", p.id.String(),
+		"sn", notify.SN(), "sum", catalog.SumNum())
+	resp, err := buildResponse(200, "OK", req, []model.Header{
+		model.NewHeader("Content-Type", contentTypeMANSCDP),
+	}, body)
+	if err != nil {
+		a.log.Warn("cannot answer a catalog query",
+			"node_id", p.id.String(), "error", err.Error())
+		return model.Message{}, false
+	}
+	return resp, true
 }
 
 // handle decides one REGISTER: challenge it, refuse it, or grant it and
@@ -241,7 +452,7 @@ func (a *Acceptor) handle(ctx context.Context, p *platform, req model.Message, p
 		// Without a caller there is nobody to look up and nothing worth
 		// challenging: refuse rather than hand out a nonce to a stranger.
 		a.log.Warn("refusing a REGISTER without a caller", "node_id", p.id.String())
-		return buildResponse(403, "Forbidden", req, nil)
+		return buildResponse(403, "Forbidden", req, nil, "")
 	}
 	if _, ok := req.Header("Authorization"); !ok {
 		a.log.Debug("challenging a REGISTER", "node_id", p.id.String(), "username", username)
@@ -251,7 +462,7 @@ func (a *Acceptor) handle(ctx context.Context, p *platform, req model.Message, p
 	if !ok {
 		a.log.Warn("refusing a REGISTER for an unknown account",
 			"node_id", p.id.String(), "username", username)
-		return buildResponse(403, "Forbidden", req, nil)
+		return buildResponse(403, "Forbidden", req, nil, "")
 	}
 	if err := a.authenticator.Verify(req, cred); err != nil {
 		// A header we cannot read may be a transient botch, so it is
@@ -264,7 +475,7 @@ func (a *Acceptor) handle(ctx context.Context, p *platform, req model.Message, p
 		}
 		a.log.Warn("refusing a REGISTER with a bad response",
 			"node_id", p.id.String(), "username", username, "error", err.Error())
-		return buildResponse(403, "Forbidden", req, nil)
+		return buildResponse(403, "Forbidden", req, nil, "")
 	}
 	return a.grant(ctx, p, req, username, peer)
 }
@@ -282,7 +493,7 @@ func (a *Acceptor) challenge(req model.Message, p *platform) (model.Message, err
 	}
 	return buildResponse(401, "Unauthorized", req, []model.Header{
 		model.NewHeader("WWW-Authenticate", value),
-	})
+	}, "")
 }
 
 // grant answers 200 OK and records the device — or, when the request asks
@@ -306,7 +517,7 @@ func (a *Acceptor) grant(
 		return buildResponse(200, "OK", req, []model.Header{
 			model.NewHeader("Expires", "0"),
 			model.NewHeader("Date", httpDate(now)),
-		})
+		}, "")
 	}
 
 	granted := p.policy.Negotiate(requested)
@@ -349,13 +560,20 @@ func (a *Acceptor) grant(
 	if contact != "" {
 		hdrs = append(hdrs, model.NewHeader("Contact", contact))
 	}
-	return buildResponse(200, "OK", req, hdrs)
+	return buildResponse(200, "OK", req, hdrs, "")
 }
 
 // buildResponse echoes the transaction headers a response must carry and
 // adds the ones the answer itself needs. Via, From, To (tagged), Call-ID
-// and CSeq are what let the peer match the answer to its transaction.
-func buildResponse(status int, reason string, req model.Message, extra []model.Header) (model.Message, error) {
+// and CSeq are what let the peer match the answer to its transaction. body
+// is the message body, "" for answers that carry none.
+func buildResponse(
+	status int,
+	reason string,
+	req model.Message,
+	extra []model.Header,
+	body string,
+) (model.Message, error) {
 	hdrs := make([]model.Header, 0, 6+len(extra))
 	for _, name := range []string{"Via", "From", "To", "Call-ID", "CSeq"} {
 		h, ok := req.Header(name)
@@ -369,7 +587,7 @@ func buildResponse(status int, reason string, req model.Message, extra []model.H
 		hdrs = append(hdrs, h)
 	}
 	hdrs = append(hdrs, extra...)
-	return model.NewResponse(status, reason, hdrs, "")
+	return model.NewResponse(status, reason, hdrs, body)
 }
 
 // requestUser returns the user part of the request's From URI — the device

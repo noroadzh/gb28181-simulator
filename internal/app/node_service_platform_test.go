@@ -28,7 +28,7 @@ func platformFixture(t *testing.T, tr *acceptorTransport) (
 	}
 	devices := newFakeDevices()
 	acceptor, err := NewAcceptor(context.Background(), newSyncClock(time.Now()), &fakeChallenger{},
-		&fakeAuthenticator{}, newFakeCredentials(), devices, discardLogger())
+		&fakeAuthenticator{}, newFakeCredentials(), devices, newFakeMANSCDP(), nil, discardLogger())
 	if err != nil {
 		t.Fatalf("NewAcceptor: %v", err)
 	}
