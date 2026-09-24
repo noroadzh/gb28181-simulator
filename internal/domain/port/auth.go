@@ -2,7 +2,23 @@
 package port
 
 import (
+	"errors"
+
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
+)
+
+// How a verification failed decides what a UAS may do next, so the two
+// outcomes are distinguishable without importing the adapter that produced
+// them:
+//
+//   - ErrMalformedCredentials — the header could not be parsed. Nothing was
+//     proven wrong about the peer, so it MAY be challenged again (401).
+//   - ErrInvalidCredentials   — the header parsed and did not match. Per
+//     GB/T 28181 §L.2 a wrong response MUST NOT trigger a re-challenge, so
+//     the caller answers 403.
+var (
+	ErrMalformedCredentials = errors.New("port: malformed credentials")
+	ErrInvalidCredentials   = errors.New("port: invalid credentials")
 )
 
 // Authenticator verifies an inbound Authorization header against a

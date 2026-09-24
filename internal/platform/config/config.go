@@ -42,6 +42,34 @@ type NodeConfig struct {
 	// its listener and stops at `registering` — the behaviour it had
 	// before registration existed.
 	Registration *NodeRegistrationConfig `mapstructure:"registration"`
+
+	// Platform is optional and only meaningful for a platform-large
+	// node: how it serves its own downstreams. Without it the node serves
+	// in its own domain with the default lifetime window.
+	Platform *NodePlatformConfig `mapstructure:"platform"`
+}
+
+// NodePlatformConfig is the `platform:` sub-section of a node entry: the
+// realm the platform challenges in, the accounts it accepts, and the
+// lifetime window it grants. Every field is optional; a platform without
+// accounts accepts nobody, which is explicit rather than accidental.
+type NodePlatformConfig struct {
+	// Realm is a pointer so that "declared but blank" — a configuration
+	// mistake worth reporting — is distinguishable from "not declared",
+	// which simply means "use the node's home domain".
+	Realm    *string               `mapstructure:"realm"`
+	Accounts []NodePlatformAccount `mapstructure:"accounts"`
+	Min      uint32                `mapstructure:"min_expires"`
+	Default  uint32                `mapstructure:"default_expires"`
+	Max      uint32                `mapstructure:"max_expires"`
+}
+
+// NodePlatformAccount is one account a platform accepts: a downstream's
+// username and the password it must prove. Passwords never reach a log, an
+// error body or an HTTP response.
+type NodePlatformAccount struct {
+	Username string `mapstructure:"username"`
+	Password string `mapstructure:"password"`
 }
 
 // NodeRegistrationConfig is the `registration:` sub-section of a node
@@ -76,6 +104,11 @@ func (c Config) ValidateNodes() error {
 		if _, err := model.ParseNodeKind(n.Kind); err != nil {
 			return fmt.Errorf("config: nodes[%d].kind: %w", i, err)
 		}
+		if n.Platform != nil {
+			if err := validateNodePlatform(i, n.Platform); err != nil {
+				return err
+			}
+		}
 		if n.Registration != nil {
 			r := n.Registration
 			if _, err := model.NewRegistration(model.RegistrationParams{
@@ -97,6 +130,35 @@ func (c Config) ValidateNodes() error {
 				return fmt.Errorf("config: nodes[%d].registration: %w", i, err)
 			}
 		}
+	}
+	return nil
+}
+
+// validateNodePlatform checks one `platform:` sub-section. A platform's
+// accounts are how it decides who may join, so a section that declares one
+// badly is a configuration error — never a silently ignored account.
+func validateNodePlatform(index int, p *NodePlatformConfig) error {
+	if p.Realm != nil && strings.TrimSpace(*p.Realm) == "" {
+		return fmt.Errorf("config: nodes[%d].platform.realm: empty realm", index)
+	}
+	seen := make(map[string]bool, len(p.Accounts))
+	for j, acc := range p.Accounts {
+		if strings.TrimSpace(acc.Username) == "" {
+			return fmt.Errorf("config: nodes[%d].platform.accounts[%d].username: empty username", index, j)
+		}
+		if acc.Password == "" {
+			// Never echo the value: say which field is wrong, not what
+			// it holds.
+			return fmt.Errorf("config: nodes[%d].platform.accounts[%d].password: empty password", index, j)
+		}
+		if seen[acc.Username] {
+			return fmt.Errorf("config: nodes[%d].platform.accounts[%d].username: duplicate account %q",
+				index, j, acc.Username)
+		}
+		seen[acc.Username] = true
+	}
+	if _, err := model.NewExpiresPolicy(p.Min, p.Default, p.Max); err != nil {
+		return fmt.Errorf("config: nodes[%d].platform: %w", index, err)
 	}
 	return nil
 }

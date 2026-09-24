@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
@@ -20,6 +21,8 @@ type NodeView interface {
 	Start(ctx context.Context, id model.NodeID) error
 	Stop(ctx context.Context, id model.NodeID) error
 	Unregister(ctx context.Context, id model.NodeID) error
+	Devices(ctx context.Context, id model.NodeID) ([]model.DownstreamDevice, error)
+	Device(ctx context.Context, id model.NodeID, deviceID string) (model.DownstreamDevice, error)
 }
 
 // nodeResponse is the JSON shape of a node. Deliberately flat and
@@ -101,6 +104,82 @@ func (s *Server) handleNodeStop(c echo.Context) error {
 // conflict.
 func (s *Server) handleNodeUnregister(c echo.Context) error {
 	return s.controlNode(c, "unregister", NodeView.Unregister)
+}
+
+// deviceResponse is the JSON shape of one row of a platform's online
+// device table. It carries what an operator needs to see — who is
+// connected, from where, until when — and deliberately nothing about how
+// that device proved itself.
+type deviceResponse struct {
+	DeviceID     string `json:"device_id"`
+	Addr         string `json:"addr"`
+	Contact      string `json:"contact,omitempty"`
+	Transport    string `json:"transport,omitempty"`
+	GBVersion    string `json:"gb_version,omitempty"`
+	Expires      uint32 `json:"expires"`
+	RegisteredAt string `json:"registered_at"`
+	ExpiresAt    string `json:"expires_at"`
+	LastSeenAt   string `json:"last_seen_at"`
+}
+
+func newDeviceResponse(d model.DownstreamDevice) deviceResponse {
+	return deviceResponse{
+		DeviceID:     d.DeviceID(),
+		Addr:         d.Addr(),
+		Contact:      d.Contact(),
+		Transport:    d.Transport(),
+		GBVersion:    d.GBVersion(),
+		Expires:      d.GrantedExpiry(),
+		RegisteredAt: d.RegisteredAt().UTC().Format(time.RFC3339),
+		ExpiresAt:    d.ExpiresAt().UTC().Format(time.RFC3339),
+		LastSeenAt:   d.LastSeenAt().UTC().Format(time.RFC3339),
+	}
+}
+
+// handleNodeDevices lists the devices registered with a platform-large
+// node. An unknown node is 404; a node with no devices is an empty array,
+// never null.
+func (s *Server) handleNodeDevices(c echo.Context) error {
+	id, err := s.nodeIDParam(c)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, errorBody{Error: err.Error()})
+	}
+	devices, err := s.nodes.Devices(c.Request().Context(), id)
+	if err != nil {
+		if errors.Is(err, model.ErrUnknownNode) {
+			return c.JSON(http.StatusNotFound, errorBody{Error: "unknown node " + id.String()})
+		}
+		return c.JSON(http.StatusInternalServerError, errorBody{Error: err.Error()})
+	}
+	out := make([]deviceResponse, 0, len(devices))
+	for _, d := range devices {
+		out = append(out, newDeviceResponse(d))
+	}
+	return c.JSON(http.StatusOK, out)
+}
+
+// handleNodeDevice returns one device of a platform-large node, or 404 when
+// the node or the device is unknown.
+func (s *Server) handleNodeDevice(c echo.Context) error {
+	id, err := s.nodeIDParam(c)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, errorBody{Error: err.Error()})
+	}
+	deviceID := c.Param("deviceID")
+	if deviceID == "" {
+		return c.JSON(http.StatusBadRequest, errorBody{Error: "empty device id"})
+	}
+	dev, err := s.nodes.Device(c.Request().Context(), id, deviceID)
+	if err != nil {
+		if errors.Is(err, model.ErrUnknownNode) {
+			return c.JSON(http.StatusNotFound, errorBody{Error: "unknown node " + id.String()})
+		}
+		if errors.Is(err, model.ErrUnknownDevice) {
+			return c.JSON(http.StatusNotFound, errorBody{Error: "unknown device " + deviceID})
+		}
+		return c.JSON(http.StatusInternalServerError, errorBody{Error: err.Error()})
+	}
+	return c.JSON(http.StatusOK, newDeviceResponse(dev))
 }
 
 // controlNode is the shared body of the start/stop endpoints.

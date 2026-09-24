@@ -66,9 +66,36 @@ Omitting `nodes:` runs with zero nodes. Statuses advance through
 A `device` node registers as soon as it is started: add a `registration:`
 block and it sends REGISTER, answers the platform's 401 challenge with a
 Digest credential and goes `online`; a failure (timeout, refusal, 5xx)
-faults the node and frees its port. Without the block — or for a platform
-identity, whose behaviour arrives in the next stages — a started node stays
-`registering`, exactly as before.
+faults the node and frees its port. Without the block — or for a
+platform-small identity, whose behaviour arrives in the next stages — a
+started node stays `registering`, exactly as before.
+
+A `platform-large` node is the other half: it **accepts** registrations.
+Starting one launches a serving goroutine on its listener and takes the node
+`online` (meaning: the platform is serving). A REGISTER without credentials
+is answered `401` with a Digest challenge; one whose `Authorization` cannot
+be read is challenged again; a username the platform has no account for, or
+a well-formed response that does not match, is refused `403` without a
+second challenge, as GB/T 28181 §L.2 requires. A device that gets through is
+granted a lifetime clamped to the platform's window and recorded in the
+node's online device table, readable at `GET /v1/nodes/{id}/devices`;
+`Expires: 0` removes it. Stopping the platform ends the serving goroutine
+before its port is released and clears the table.
+
+```yaml
+  - id: "34020000002000000001"
+    kind: platform-large
+    domain: "3402000000"
+    addr: "127.0.0.1:15061"
+    platform:                      # optional; defaults below
+      realm: "3402000000"          # default: the node's domain
+      accounts:                    # a platform without accounts accepts nobody
+        - username: "34020000011310000001"
+          password: "change-me"    # never logged
+      min_expires: 60              # default 60
+      default_expires: 3600        # default 3600
+      max_expires: 86400           # default 86400
+```
 
 Once online the node is kept open: it sends a MANSCDP `Keepalive` as a SIP
 `MESSAGE` every `heartbeat_interval`, renews its registration at half the

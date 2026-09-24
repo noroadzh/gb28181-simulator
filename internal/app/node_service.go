@@ -34,6 +34,7 @@ type NodeService struct {
 	clock     port.Clock
 	registrar *Registrar
 	keeper    *Keeper
+	acceptor  *Acceptor
 
 	mu        sync.Mutex
 	changedAt map[string]time.Time
@@ -97,6 +98,17 @@ func (s *NodeService) WithKeeper(k *Keeper) (*NodeService, error) {
 	return s, nil
 }
 
+// WithAcceptor attaches the platform-large use case: accepting downstream
+// registrations. Without one a platform node still starts — it simply does
+// not serve, which is what the other identities and the tests want.
+func (s *NodeService) WithAcceptor(a *Acceptor) (*NodeService, error) {
+	if a == nil {
+		return nil, fmt.Errorf("app: NodeService requires a non-nil Acceptor")
+	}
+	s.acceptor = a
+	return s, nil
+}
+
 // Create registers a node from profile and returns it in StatusIdle.
 func (s *NodeService) Create(ctx context.Context, profile model.NodeProfile) (model.Node, error) {
 	node, err := s.registry.Register(ctx, profile)
@@ -125,10 +137,55 @@ func (s *NodeService) Start(ctx context.Context, id model.NodeID) error {
 		return fmt.Errorf("app: start node %s: node disappeared after binding", id)
 	}
 	reg, wants := node.Registration()
-	if !wants || node.ID().Kind() != model.NodeKindDevice {
+	if wants && node.ID().Kind() == model.NodeKindDevice {
+		return s.register(ctx, id, node, reg)
+	}
+	// A platform does not register with anyone: it accepts registrations
+	// instead, which is its own way of coming online.
+	if node.ID().Kind() == model.NodeKindPlatformLarge {
+		return s.serve(ctx, id, node)
+	}
+	return nil
+}
+
+// serve starts accepting downstream registrations on a platform-large node
+// and brings it online — "online" meaning the platform is serving. A node
+// that cannot serve is faulted, so a half-started platform never keeps its
+// port.
+func (s *NodeService) serve(ctx context.Context, id model.NodeID, node model.Node) error {
+	if s.acceptor == nil {
+		// No acceptor means no serving: the node stays where the
+		// lifecycle left it rather than pretending to be online.
 		return nil
 	}
-	return s.register(ctx, id, node, reg)
+	tr := s.lifecycle.Transport(id)
+	if tr == nil {
+		return s.fault(ctx, id, fmt.Errorf("app: no listener bound for node %s", id))
+	}
+	serving, ok := node.PlatformServing()
+	if !ok {
+		// An undeclared `platform:` section is not a reason to refuse:
+		// the node serves in its own domain with the default window.
+		var err error
+		if serving, err = model.DefaultPlatformServing(node.Profile().Domain()); err != nil {
+			return s.fault(ctx, id, fmt.Errorf("app: serving defaults for node %s: %w", id, err))
+		}
+	}
+	if err := s.acceptor.Serve(id, tr, serving.Realm(), serving.Policy()); err != nil {
+		return s.fault(ctx, id, fmt.Errorf("app: start serving on node %s: %w", id, err))
+	}
+	// The state machine has no `registering → online` edge: a platform is
+	// first "registered" (bound and ready), then serving.
+	if err := s.MarkRegistered(ctx, id); err != nil {
+		s.stopServing(id)
+		return s.fault(ctx, id, err)
+	}
+	if err := s.MarkOnline(ctx, id); err != nil {
+		s.stopServing(id)
+		return s.fault(ctx, id, err)
+	}
+	s.stamp(id)
+	return nil
 }
 
 // register runs one registration transaction: it records what the platform
@@ -221,6 +278,16 @@ func (s *NodeService) stopKeeping(id model.NodeID) {
 	if s.keeper != nil {
 		s.keeper.Stop(id)
 	}
+	s.stopServing(id)
+}
+
+// stopServing ends a platform node's serving goroutine and forgets the
+// devices it accepted. It runs before the listener is released, so no
+// answer is ever aimed at a closed transport.
+func (s *NodeService) stopServing(id model.NodeID) {
+	if s.acceptor != nil {
+		s.acceptor.Stop(id)
+	}
 }
 
 // fault moves the node to StatusFault — releasing its listener — and
@@ -245,6 +312,34 @@ func (s *NodeService) Stop(ctx context.Context, id model.NodeID) error {
 	}
 	s.stamp(id)
 	return nil
+}
+
+// Devices returns the online device table of a platform-large node,
+// ordered by device id. It is a read-only view: an unknown node is an
+// error, an unknown platform simply has no devices.
+func (s *NodeService) Devices(ctx context.Context, id model.NodeID) ([]model.DownstreamDevice, error) {
+	if _, ok := s.registry.Get(ctx, id); !ok {
+		return nil, fmt.Errorf("app: devices of node %s: %w", id, model.ErrUnknownNode)
+	}
+	if s.acceptor == nil {
+		return nil, nil
+	}
+	return s.acceptor.Devices(ctx, id), nil
+}
+
+// Device returns one row of a platform-large node's online device table.
+func (s *NodeService) Device(ctx context.Context, id model.NodeID, deviceID string) (model.DownstreamDevice, error) {
+	if _, ok := s.registry.Get(ctx, id); !ok {
+		return model.DownstreamDevice{}, fmt.Errorf("app: device %s of node %s: %w", deviceID, id, model.ErrUnknownNode)
+	}
+	if s.acceptor == nil {
+		return model.DownstreamDevice{}, model.ErrUnknownDevice
+	}
+	dev, ok := s.acceptor.Device(ctx, id, deviceID)
+	if !ok {
+		return model.DownstreamDevice{}, model.ErrUnknownDevice
+	}
+	return dev, nil
 }
 
 // MarkRegistered advances a node to StatusRegistered. Start calls it once a

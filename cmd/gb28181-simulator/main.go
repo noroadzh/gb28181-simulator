@@ -16,6 +16,8 @@ import (
 	"time"
 
 	sipauth "github.com/your-org/gb28181-simulator/internal/adapter/auth"
+	"github.com/your-org/gb28181-simulator/internal/adapter/credstore"
+	"github.com/your-org/gb28181-simulator/internal/adapter/devicereg"
 	"github.com/your-org/gb28181-simulator/internal/adapter/manscdp"
 	"github.com/your-org/gb28181-simulator/internal/adapter/nodereg"
 	"github.com/your-org/gb28181-simulator/internal/adapter/siptransport"
@@ -83,6 +85,50 @@ func bindTransport(addr string) (port.SIPTransport, error) {
 	return siptransport.NewPortAdapter(tr), nil
 }
 
+// applyPlatformSection turns one node's `platform:` section into the
+// serving description carried on the profile plus the accounts the platform
+// accepts. It is separate from the loop that calls it so the wiring — where
+// a configured password becomes a credential — can be tested without
+// starting a process.
+func applyPlatformSection(
+	profile model.NodeProfile,
+	pc *platformconfig.NodePlatformConfig,
+	accounts *credstore.Store,
+) (model.NodeProfile, error) {
+	policy, err := model.NewExpiresPolicy(pc.Min, pc.Default, pc.Max)
+	if err != nil {
+		return model.NodeProfile{}, err
+	}
+	realm := profile.Domain()
+	if pc.Realm != nil {
+		realm = *pc.Realm
+	}
+	serving, err := model.NewPlatformServing(realm, policy)
+	if err != nil {
+		return model.NodeProfile{}, err
+	}
+	profile, err = profile.WithPlatformServing(serving)
+	if err != nil {
+		return model.NodeProfile{}, err
+	}
+	for j, acc := range pc.Accounts {
+		// The store keeps the secret out of sight, so an empty one has
+		// to be caught here: a platform that accepted it would be
+		// accepting everybody.
+		if acc.Password == "" {
+			return model.NodeProfile{}, fmt.Errorf("accounts[%d]: empty password", j)
+		}
+		cred, err := model.NewCredentials(acc.Username, realm, acc.Password)
+		if err != nil {
+			return model.NodeProfile{}, fmt.Errorf("accounts[%d]: %w", j, err)
+		}
+		if err := accounts.Add(profile.ID(), cred); err != nil {
+			return model.NodeProfile{}, fmt.Errorf("accounts[%d]: %w", j, err)
+		}
+	}
+	return profile, nil
+}
+
 func run() error {
 	cfgPath := flag.String("config", os.Getenv("GB28181_SIMULATOR_CONFIG"), "path to YAML config (defaults to XDG/AppData path)")
 	showVersion := flag.Bool("version", false, "print version and exit")
@@ -108,6 +154,9 @@ func run() error {
 	// way out.
 	processCtx := context.Background()
 	var nodeKeeper *app.Keeper
+	// Serving (accepting downstream registrations) is background work too,
+	// and it is closed the same way.
+	var nodeAcceptor *app.Acceptor
 
 	c := servicectx.NewContainer().
 		Provide(configKey, func() (any, error) {
@@ -198,6 +247,30 @@ func run() error {
 				return nil, fmt.Errorf("node service: %w", err)
 			}
 			nodeKeeper = keeper
+
+			// platform-large: the same split again — the online device
+			// table and the account store are adapters, the UAS use case
+			// lives in app, and the app never sees either concrete type.
+			devices := devicereg.New()
+			accounts := credstore.New()
+			authenticator, err := sipauth.NewAuthenticatorAdapter(sipauth.NewResponder(nil))
+			if err != nil {
+				return nil, fmt.Errorf("authenticator: %w", err)
+			}
+			challenger, err := sipauth.NewChallengerAdapter(sipauth.NewChallenger(nil))
+			if err != nil {
+				return nil, fmt.Errorf("challenger: %w", err)
+			}
+			acceptor, err := app.NewAcceptor(processCtx, clock.Real(), challenger, authenticator,
+				accounts, devices, logging.L())
+			if err != nil {
+				return nil, fmt.Errorf("acceptor: %w", err)
+			}
+			if _, err := svc.WithAcceptor(acceptor); err != nil {
+				return nil, fmt.Errorf("node service: %w", err)
+			}
+			nodeAcceptor = acceptor
+
 			// Register every configured node; starting them is an explicit
 			// operation (design D9), so an empty list costs nothing.
 			for i, nc := range cfg.Nodes {
@@ -233,6 +306,18 @@ func run() error {
 						return nil, fmt.Errorf("node[%d].registration: %w", i, err)
 					}
 				}
+				// A `platform:` section is what makes a platform-large node
+				// serve: the realm it challenges in, the lifetime window it
+				// grants, and the accounts it accepts. Without one it still
+				// serves, in its own domain with the default window.
+				if nc.Platform != nil {
+					profile, err = applyPlatformSection(profile, nc.Platform, accounts)
+					if err != nil {
+						return nil, fmt.Errorf("node[%d].platform: %w", i, err)
+					}
+					logging.L().Info("platform accounts loaded", "node", profile.ID().String(),
+						"accounts", len(nc.Platform.Accounts))
+				}
 				if _, err := svc.Create(context.Background(), profile); err != nil {
 					return nil, fmt.Errorf("register node[%d]: %w", i, err)
 				}
@@ -263,6 +348,11 @@ func run() error {
 		if nodeKeeper != nil {
 			if err := nodeKeeper.Close(); err != nil {
 				logging.L().Warn("keeper shutdown", "error", err.Error())
+			}
+		}
+		if nodeAcceptor != nil {
+			if err := nodeAcceptor.Close(); err != nil {
+				logging.L().Warn("acceptor shutdown", "error", err.Error())
 			}
 		}
 	}()

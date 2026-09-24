@@ -67,3 +67,16 @@ nodes:
     domain: "3402000000"
     addr: "127.0.0.1:15061"
     vendor: acme
+    # Optional. Present means "serve the downstreams below": the node
+    # answers REGISTER with a 401 Digest challenge, checks the answer
+    # against these accounts and grants a lifetime inside the window.
+    # Omit the whole block and the node still serves — in its own domain,
+    # with the default window, and with no account accepted.
+    platform:
+      realm: "3402000000"                # optional; defaults to the domain
+      accounts:                          # optional; passwords are never logged
+        - username: "34020000011310000001"
+          password: "change-me"
+      min_expires: 60                    # optional; default 60
+      default_expires: 3600              # optional; default 3600
+      max_expires: 86400                 # optional; default 86400

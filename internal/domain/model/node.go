@@ -137,6 +137,11 @@ type NodeProfile struct {
 	// zero NodeProfile keeps its original meaning.
 	registration *Registration
 	result       *RegistrationResult
+
+	// serving is how a platform node accepts its own downstreams; nil
+	// means "not configured", which a platform-large node fills with
+	// defaults at start-up.
+	serving *PlatformServing
 }
 
 // NewNodeProfile validates id with ParseNodeID and requires a non-empty
@@ -239,6 +244,28 @@ func (p NodeProfile) RegistrationResult() (RegistrationResult, bool) {
 	return *p.result, true
 }
 
+// WithPlatformServing returns a copy that serves downstreams as described.
+// An unconstructed serving description is refused.
+func (p NodeProfile) WithPlatformServing(serving PlatformServing) (NodeProfile, error) {
+	if !serving.HasServing() {
+		return p, fmt.Errorf("model: empty platform serving for node %s", p.id)
+	}
+	cp := p
+	cp.serving = &serving
+	return cp, nil
+}
+
+// PlatformServing returns how the node serves its downstreams, and whether
+// it was configured to. The second result is false for a node that never
+// declared a `platform:` section; a platform-large node then falls back to
+// DefaultPlatformServing(domain).
+func (p NodeProfile) PlatformServing() (PlatformServing, bool) {
+	if p.serving == nil {
+		return PlatformServing{}, false
+	}
+	return *p.serving, true
+}
+
 // String renders a log-safe one-line summary; never contains secrets.
 func (p NodeProfile) String() string {
 	return fmt.Sprintf("NodeProfile<id=%s kind=%s addr=%s domain=%s vendor=%q>",
@@ -287,6 +314,10 @@ func (n Node) Registration() (Registration, bool) { return n.profile.Registratio
 func (n Node) RegistrationResult() (RegistrationResult, bool) {
 	return n.profile.RegistrationResult()
 }
+
+// PlatformServing is a convenience accessor for the profile's serving
+// configuration.
+func (n Node) PlatformServing() (PlatformServing, bool) { return n.profile.PlatformServing() }
 
 // WithRegistrationResult returns a copy of the node whose profile records
 // res. It is separate from WithStatus because a registration outcome is

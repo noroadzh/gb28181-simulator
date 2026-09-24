@@ -85,6 +85,8 @@ func (s *Server) registerRoutes(e *echo.Echo) {
 	e.POST("/v1/nodes/:id/start", s.handleNodeStart)
 	e.POST("/v1/nodes/:id/stop", s.handleNodeStop)
 	e.POST("/v1/nodes/:id/unregister", s.handleNodeUnregister)
+	e.GET("/v1/nodes/:id/devices", s.handleNodeDevices)
+	e.GET("/v1/nodes/:id/devices/:deviceID", s.handleNodeDevice)
 
 	// Legacy /healthz and /metrics for smoke tests (per §7.3)
 	e.GET("/healthz", s.handleHealth)

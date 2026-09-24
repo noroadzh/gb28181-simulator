@@ -7,8 +7,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
 	httpapi "github.com/your-org/gb28181-simulator/internal/interface/http"
@@ -20,12 +22,16 @@ import (
 // table, so the HTTP layer's status-code mapping is exercised against the
 // same rules the domain uses.
 type fakeNodeView struct {
-	mu    sync.Mutex
-	nodes map[string]model.Node
+	mu      sync.Mutex
+	nodes   map[string]model.Node
+	devices map[string]map[string]model.DownstreamDevice
 }
 
 func newFakeNodeView() *fakeNodeView {
-	return &fakeNodeView{nodes: map[string]model.Node{}}
+	return &fakeNodeView{
+		nodes:   map[string]model.Node{},
+		devices: map[string]map[string]model.DownstreamDevice{},
+	}
 }
 
 // seed registers a node and drives it to status through legal transitions.
@@ -99,6 +105,57 @@ func (f *fakeNodeView) Start(_ context.Context, id model.NodeID) error {
 
 // Unregister mirrors the real service: only a node that is online (or at
 // least registered) may leave, anything else is an illegal transition.
+// seedDevice puts one device in a node's online table, which is what the
+// device endpoints read.
+func (f *fakeNodeView) seedDevice(t *testing.T, nodeID, deviceID, addr string) model.DownstreamDevice {
+	t.Helper()
+	dev, err := model.NewDownstreamDevice(model.DownstreamDeviceParams{
+		DeviceID: deviceID,
+		Addr:     addr,
+		Contact:  "<sip:" + deviceID + "@" + addr + ">",
+		Now:      time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("NewDownstreamDevice: %v", err)
+	}
+	dev = dev.WithGranted(3600, dev.RegisteredAt())
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.devices[nodeID] == nil {
+		f.devices[nodeID] = map[string]model.DownstreamDevice{}
+	}
+	f.devices[nodeID][deviceID] = dev
+	return dev
+}
+
+func (f *fakeNodeView) Devices(_ context.Context, id model.NodeID) ([]model.DownstreamDevice, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.nodes[id.String()]; !ok {
+		return nil, fmt.Errorf("%w: %s", model.ErrUnknownNode, id)
+	}
+	rows := f.devices[id.String()]
+	out := make([]model.DownstreamDevice, 0, len(rows))
+	for _, dev := range rows {
+		out = append(out, dev)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].DeviceID() < out[j].DeviceID() })
+	return out, nil
+}
+
+func (f *fakeNodeView) Device(_ context.Context, id model.NodeID, deviceID string) (model.DownstreamDevice, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.nodes[id.String()]; !ok {
+		return model.DownstreamDevice{}, fmt.Errorf("%w: %s", model.ErrUnknownNode, id)
+	}
+	dev, ok := f.devices[id.String()][deviceID]
+	if !ok {
+		return model.DownstreamDevice{}, fmt.Errorf("%w: %s", model.ErrUnknownDevice, deviceID)
+	}
+	return dev, nil
+}
+
 func (f *fakeNodeView) Unregister(_ context.Context, id model.NodeID) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

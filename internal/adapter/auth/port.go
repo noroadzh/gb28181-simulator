@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -35,9 +36,18 @@ func NewAuthenticatorAdapter(r *Responder) (*AuthenticatorAdapter, error) {
 func (a *AuthenticatorAdapter) Verify(req model.Message, cred model.Credentials) error {
 	h, ok := req.Header("Authorization")
 	if !ok {
-		return ErrMalformedAuthorization
+		return fmt.Errorf("%w: %w", port.ErrMalformedCredentials, ErrMalformedAuthorization)
 	}
-	return a.responder.Verify(reqStub{method: req.Method(), auth: h.Value()}, cred.Password())
+	err := a.responder.Verify(reqStub{method: req.Method(), auth: h.Value()}, cred.Password())
+	if err == nil {
+		return nil
+	}
+	// Only a parse failure may be challenged again; everything else —
+	// including an algorithm we refuse to compute — is a refusal.
+	if errors.Is(err, ErrMalformedAuthorization) {
+		return fmt.Errorf("%w: %w", port.ErrMalformedCredentials, err)
+	}
+	return fmt.Errorf("%w: %w", port.ErrInvalidCredentials, err)
 }
 
 // ChallengerAdapter implements port.Challenger by delegating to the legacy

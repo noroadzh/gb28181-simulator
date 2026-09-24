@@ -231,6 +231,38 @@ the service to the HTTP layer. Node lifecycle events are *not* yet written to
 wire-level transmission and cannot carry a status change, so that integration
 is deferred to Change 13.
 
+## Platform acceptance (Change 6, part one)
+
+A `platform-large` node plays the UAS. `app.Acceptor` runs one goroutine per
+platform node over that node's transport: `Receive` → dispatch REGISTER →
+`Send` the answer back to the peer the request came from. Nothing in the
+transport layer changed — `model.NewResponse` plus `PortAdapter.Send` already
+covered responses.
+
+```
+device (UAC) ──REGISTER──▶ transport ──Receive(msg, peer)──▶ Acceptor
+                                                              ├─ CredentialStore.Lookup(node, username)
+                                                              ├─ Challenger.Challenge(realm)      → 401
+                                                              ├─ Authenticator.Verify(msg, cred)  → 403 / 200
+                                                              └─ DownstreamRegistry.Upsert/Remove
+HTTP GET /v1/nodes/:id/devices ─▶ NodeService.Devices ─▶ Acceptor.Devices
+```
+
+- **Credentials never touch the node.** `model.PlatformServing` (realm,
+  expires window) hangs off `NodeProfile`, but accounts live in
+  `adapter/credstore` behind `port.CredentialStore`, partitioned by node, so
+  a password can never reach HTTP, a log line or an error body.
+- **The failure mode decides the answer.** `port.ErrMalformedCredentials`
+  (unreadable header) may be re-challenged; `port.ErrInvalidCredentials`
+  (parsed and wrong) must not be, per §L.2. The sentinels live in `port` so
+  the use case can branch without importing the adapter that produced them.
+- **Lifetime is policy, not arithmetic.** `model.ExpiresPolicy` clamps the
+  request into `[min, max]`; `Expires: 0` is intercepted before it, because
+  an explicit goodbye is not the same as asking for the default.
+- **Serving stops before the port does.** `NodeService.Stop` calls
+  `Acceptor.Stop` (which joins the goroutine and clears the table) and only
+  then lets the lifecycle release the listener.
+
 ## Observability
 
 ### Logging
