@@ -26,3 +26,6 @@ coverage.html
 # Node
 node_modules/
 .npm/
+
+# CodeBuddy project data
+.codebuddy/

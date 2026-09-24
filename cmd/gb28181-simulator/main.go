@@ -19,6 +19,7 @@ import (
 	"github.com/your-org/gb28181-simulator/internal/adapter/credstore"
 	"github.com/your-org/gb28181-simulator/internal/adapter/devicereg"
 	"github.com/your-org/gb28181-simulator/internal/adapter/manscdp"
+	"github.com/your-org/gb28181-simulator/internal/adapter/media"
 	"github.com/your-org/gb28181-simulator/internal/adapter/nodereg"
 	"github.com/your-org/gb28181-simulator/internal/adapter/siptransport"
 	"github.com/your-org/gb28181-simulator/internal/app"
@@ -157,6 +158,10 @@ func run() error {
 	// Serving (accepting downstream registrations) is background work too,
 	// and it is closed the same way.
 	var nodeAcceptor *app.Acceptor
+	// MediaService is the composition root for the four adapter media
+	// sources and the PS/RTP pipeline. It lives for the process lifetime
+	// and is closed after every node is stopped on shutdown.
+	var mediaService *app.MediaService
 
 	c := servicectx.NewContainer().
 		Provide(configKey, func() (any, error) {
@@ -278,6 +283,19 @@ func run() error {
 				return nil, fmt.Errorf("node service: %w", err)
 			}
 			nodeAcceptor = acceptor
+
+			// Compose the four media source adapters behind a single factory
+					// so the app layer never has to import internal/adapter directly.
+					// The SSRC used here is a process-default; per-session SDP can
+					// override it later when INVITE handling (#9) lands.
+					const defaultSSRC uint32 = 0xABCDEF01
+					mediaService = app.NewMediaService(
+						func(cfg model.MediaConfig) port.MediaSource { return media.NewFileSource(cfg) },
+						func() port.PSPacketizer { return media.NewPSPacketizer() },
+						func(mtu int) port.RTPizer { return media.NewRTPizer(defaultSSRC, mtu) },
+						logging.L(),
+					)
+					defer func() { _ = mediaService.Close() }()
 
 			// Register every configured node; starting them is an explicit
 			// operation (design D9), so an empty list costs nothing.
