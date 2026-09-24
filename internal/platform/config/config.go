@@ -38,21 +38,27 @@ type NodeConfig struct {
 	Addr   string `mapstructure:"addr"`
 	Vendor string `mapstructure:"vendor"`
 
-	// Registration is optional. When it is absent the node starts, binds
-	// its listener and stops at `registering` — the behaviour it had
-	// before registration existed.
+	// Registration is optional. When it is absent the node does not
+	// register with an upstream: a device stays at `registering` — the
+	// behaviour it had before registration existed — and a platform-small
+	// serves its own downstreams and nobody's subordinate.
 	Registration *NodeRegistrationConfig `mapstructure:"registration"`
 
-	// Platform is optional and only meaningful for a platform-large
-	// node: how it serves its own downstreams. Without it the node serves
-	// in its own domain with the default lifetime window.
+	// Platform is optional and meaningful for either platform kind —
+	// platform-large and platform-small: how the node serves its own
+	// downstreams. Without it a platform serves in its own domain with
+	// the default lifetime window; being a platform is what makes a node
+	// serve, so there is no way to say "do not serve".
 	Platform *NodePlatformConfig `mapstructure:"platform"`
 }
 
 // NodePlatformConfig is the `platform:` sub-section of a node entry: the
 // realm the platform challenges in, the accounts it accepts, and the
-// lifetime window it grants. Every field is optional; a platform without
-// accounts accepts nobody, which is explicit rather than accidental.
+// lifetime window it grants. It applies to a platform-small exactly as it
+// does to a platform-large — the middle of a cascade serves its
+// downstreams the same way a centre does. Every field is optional; a
+// platform without accounts accepts nobody, which is explicit rather than
+// accidental.
 type NodePlatformConfig struct {
 	// Realm is a pointer so that "declared but blank" — a configuration
 	// mistake worth reporting — is distinguishable from "not declared",
@@ -72,9 +78,13 @@ type NodePlatformAccount struct {
 	Password string `mapstructure:"password"`
 }
 
-// NodeRegistrationConfig is the `registration:` sub-section of a node
-// entry. Server is required (it is what makes the node register at all);
-// everything else falls back to model defaults.
+// NodeRegistrationConfig is the `registration:` sub-section of a node entry:
+// where the node registers and how it holds that registration open. It is
+// what a device is, and it is also what makes a platform-small a link in a
+// cascade rather than a platform that stands alone — a platform-small with
+// both this and `platform:` serves its own downstreams and registers with
+// its upstream. Server is required (it is what makes the node register at
+// all); everything else falls back to model defaults.
 type NodeRegistrationConfig struct {
 	Server    string        `mapstructure:"server"`
 	ServerID  string        `mapstructure:"server_id"`

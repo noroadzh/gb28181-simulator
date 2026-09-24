@@ -296,6 +296,64 @@ sweeper goroutine ──Ticker──▶ sweep: Drop rows with now ≥ ExpiresAt
   within half a lifetime. The sweeper is a goroutine of the serving node and
   is joined by `Stop` / `Close`, so a stopped platform owns no goroutine.
 
+## Platform-small: one node, two halves (Change 7, part one)
+
+A cascade `A → B → C` needs B to be two things: the platform below it and
+the subordinate above it. `platform-small` is that node. It reuses both use
+cases unchanged — `Acceptor` for the half below, `Registrar` + `Keeper` for
+the half above — and what is new lives in `NodeService`: the order the halves
+are established in, the way one node advances once for two halves, and the
+sorting of what arrives on the shared listener.
+
+```
+Start ──▶ serve (Acceptor.Serve)  ──▶ advanceOnline ──▶ online
+      └──▶ register (Registrar)   ──▶ advanceOnline ──▶ (already online)
+                                  └──▶ Keeper.Start
+```
+
+- **Serve first, register second.** Serving almost never fails; registering
+  meets an unreachable or refusing peer every day. Putting the failing half
+  second keeps its rollback to "stop the serving", which is the same unwind
+  an already-established `Stop` performs. Registering first would have to
+  withdraw from the upstream as part of the rollback, and the upstream would
+  briefly see a subordinate that disappears at once.
+- **One state machine, advanced once.** `serve` and `register` both end by
+  bringing the node online, but the table has no `online → online` edge.
+  `advanceOnline` makes the advance idempotent — whatever the node still
+  needs is done, whatever is already true is skipped — instead of widening
+  the table for every kind.
+- **Either half failing faults the node.** A half-served platform is not a
+  state worth reporting, so the other half is unwound (serving goroutine
+  stopped, online table cleared) and the node faults. The error names the
+  half that failed, and so does the log.
+- **Both halves are optional and independently configured.** `platform:` on a
+  platform-small means "serve", `registration:` means "register upstream";
+  an omitted `platform:` still serves with the defaults, because being a
+  platform is what makes a node serve.
+
+### One listener, two readers
+
+Both halves run over the node's own listener, as they must: the peer above
+and the peer below see one node on one address. But a socket hands each
+datagram to whoever reads first, and the serving half reads all the time —
+it would take the `401` and `200 OK` the registering half is waiting for,
+decide they are not requests, drop them, and the registration would never
+finish.
+
+`splitTransport` (`internal/app/node_split_transport.go`) is the answer: one
+reader owns the socket and sorts what it reads — requests to the serving
+half, responses to the registering one — and both halves send over the same
+socket. The node keeps one splitter per node id; it is created when the node
+starts and ended whenever the node stops or faults, so nothing is left
+reading a listener that has been given back. A half that is not reading does
+not jam the other: messages nobody wants are dropped rather than queued in
+front of the ones somebody does.
+
+This is a sorting of one socket, not a SIP transaction layer. When later
+changes give a platform-small requests of its own to receive upstream
+(`INVITE`, `SUBSCRIBE`), the sort has to become a match on transaction
+rather than on direction.
+
 ## Observability
 
 ### Logging

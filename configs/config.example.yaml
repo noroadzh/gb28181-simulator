@@ -77,6 +77,44 @@ nodes:
       accounts:                          # optional; passwords are never logged
         - username: "34020000011310000001"
           password: "change-me"
+        # The platform-small below registers here too, so it needs an
+        # account of its own on this platform.
+        - username: "34020000002160000001"
+          password: "change-me"
       min_expires: 60                    # optional; default 60
       default_expires: 3600              # optional; default 3600
       max_expires: 86400                 # optional; default 86400
+  # A platform-small is the link in the middle of a cascade: it declares both
+  # halves, and each half is optional on its own. `platform:` is how it serves
+  # the downstreams below it, exactly as a platform-large does;
+  # `registration:` is how it registers with the upstream above it, exactly as
+  # a device does. Declare both and the node relays:
+  # device → platform-small → platform-large. Declare only `platform:` and it
+  # is a platform that answers to nobody above it; declare only
+  # `registration:` and it still serves — with the defaults — while being
+  # somebody's subordinate.
+  - id: "34020000002160000001"
+    kind: platform-small
+    domain: "3402000000"
+    addr: "127.0.0.1:15062"
+    vendor: acme
+    platform:
+      realm: "3402000000"
+      accounts:
+        # A device that registers with this platform instead of with the
+        # platform-large above.
+        - username: "34020000011310000002"
+          password: "change-me"
+      min_expires: 60
+      default_expires: 3600
+      max_expires: 86400
+    registration:
+      server: "127.0.0.1:15061"          # the platform-large above
+      server_id: "34020000002000000001"
+      password: "change-me"
+      expires: 3600
+      transport: udp
+      timeout: 5s
+      heartbeat_interval: 60s
+      heartbeat_timeout: 5s
+      heartbeat_max_failures: 3

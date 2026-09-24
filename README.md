@@ -66,9 +66,8 @@ Omitting `nodes:` runs with zero nodes. Statuses advance through
 A `device` node registers as soon as it is started: add a `registration:`
 block and it sends REGISTER, answers the platform's 401 challenge with a
 Digest credential and goes `online`; a failure (timeout, refusal, 5xx)
-faults the node and frees its port. Without the block — or for a
-platform-small identity, whose behaviour arrives in the next stages — a
-started node stays `registering`, exactly as before.
+faults the node and frees its port. Without the block a started node
+stays `registering`, exactly as before.
 
 A `platform-large` node is the other half: it **accepts** registrations.
 Starting one launches a serving goroutine on its listener and takes the node
@@ -101,6 +100,38 @@ re-registering is dropped once the granted lifetime lapses.
       min_expires: 60              # default 60
       default_expires: 3600        # default 3600
       max_expires: 86400           # default 86400
+```
+
+A `platform-small` node is both halves at once — the link in the middle of a
+cascade `A → B → C`. Declare `platform:` and it **serves** the downstreams
+below it exactly as a platform-large does; declare `registration:` and it
+**registers** with the platform above it exactly as a device does. Declare
+both and the node relays: a device registers with the small platform, which
+is itself registered with the large one. Each platform's online table holds
+the level directly below it and only that level, so the platform at the top
+can ask the platform in the middle for a catalogue and be told about the
+devices that registered with it.
+
+Both halves run over the node's one listener, and the node is still one
+node: it comes `online` once, whichever half gets there first, and if either
+half fails the node faults and the other half is unwound rather than left
+running alone. Stopping it withdraws from the platform above (`Expires: 0`)
+before it ends the serving below.
+
+```yaml
+  - id: "34020000002160000001"
+    kind: platform-small
+    domain: "3402000000"
+    addr: "127.0.0.1:15062"
+    platform:                      # optional; the half below it
+      realm: "3402000000"
+      accounts:
+        - username: "34020000011310000002"
+          password: "change-me"
+    registration:                  # optional; the half above it
+      server: "127.0.0.1:15061"
+      server_id: "34020000002000000001"
+      password: "change-me"
 ```
 
 Once online the node is kept open: it sends a MANSCDP `Keepalive` as a SIP

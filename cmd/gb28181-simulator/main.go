@@ -220,6 +220,13 @@ func run() error {
 			if err != nil {
 				return nil, err
 			}
+			// Node lifecycle reporting — which half of a two-halved node
+			// failed, what could not be undone on the way out — goes
+			// through the process logger, so it is filtered and redacted
+			// like every other line.
+			if _, err := svc.WithLogger(logging.L()); err != nil {
+				return nil, fmt.Errorf("node service: %w", err)
+			}
 			// Device registration: the use case lives in app, the Digest
 			// client behind it is an adapter, and the app sees only the
 			// domain port.
@@ -248,9 +255,10 @@ func run() error {
 			}
 			nodeKeeper = keeper
 
-			// platform-large: the same split again — the online device
-			// table and the account store are adapters, the UAS use case
-			// lives in app, and the app never sees either concrete type.
+			// Either platform kind — large or small: the same split again
+			// — the online device table and the account store are
+			// adapters, the UAS use case lives in app, and the app never
+			// sees either concrete type.
 			devices := devicereg.New()
 			accounts := credstore.New()
 			authenticator, err := sipauth.NewAuthenticatorAdapter(sipauth.NewResponder(nil))

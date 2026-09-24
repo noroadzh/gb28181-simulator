@@ -4,6 +4,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -32,9 +33,16 @@ type NodeService struct {
 	advancer  port.NodeAdvancer
 	factory   TransportFactory
 	clock     port.Clock
+	log       *slog.Logger
 	registrar *Registrar
 	keeper    *Keeper
 	acceptor  *Acceptor
+
+	// splits holds the message splitter of every node that is both halves
+	// of a cascade. A platform-small serves and registers over one
+	// listener, so something has to sort what arrives; a node that has no
+	// splitter reads its own socket directly.
+	splits *splitters
 
 	mu        sync.Mutex
 	changedAt map[string]time.Time
@@ -70,8 +78,22 @@ func NewNodeService(
 		advancer:  advancer,
 		factory:   factory,
 		clock:     clock,
+		log:       slog.Default(),
+		splits:    newSplitters(),
 		changedAt: make(map[string]time.Time),
 	}, nil
+}
+
+// WithLogger replaces the logger the service reports through: which half of
+// a two-halved node failed, and what could not be undone on the way out. It
+// defaults to slog.Default(), so the composition root is the only caller
+// that needs it.
+func (s *NodeService) WithLogger(l *slog.Logger) (*NodeService, error) {
+	if l == nil {
+		return nil, fmt.Errorf("app: NodeService requires a non-nil logger")
+	}
+	s.log = l
+	return s, nil
 }
 
 // WithRegistrar attaches the device registration use case to an existing
@@ -119,13 +141,20 @@ func (s *NodeService) Create(ctx context.Context, profile model.NodeProfile) (mo
 	return node, nil
 }
 
-// Start binds the node's listener and advances it to StatusRegistering.
-// A device node that carries a registration then completes its
-// registration before Start returns: success leaves it StatusOnline, a
-// failure StatusFault with the listener released (design D1). A node
-// without a registration, or one that is not a device, stays at
-// StatusRegistering exactly as before — the other identities arrive in
-// later changes.
+// Start binds the node's listener and advances it to StatusRegistering,
+// then lets the node's identity decide what else it must do to come
+// online:
+//
+//   - a device with a registration completes it — success leaves the node
+//     StatusOnline, a failure StatusFault with the listener released
+//     (design D1);
+//   - a platform-large accepts registrations, which is its own way of
+//     coming online;
+//   - a platform-small does both: it serves first, then registers with its
+//     upstream when one is declared. Either half failing faults the node
+//     and unwinds the other.
+//
+// A node with nothing to do for its identity stays at StatusRegistering.
 func (s *NodeService) Start(ctx context.Context, id model.NodeID) error {
 	if err := s.lifecycle.Start(ctx, id); err != nil {
 		return fmt.Errorf("app: start node %s: %w", id, err)
@@ -137,28 +166,90 @@ func (s *NodeService) Start(ctx context.Context, id model.NodeID) error {
 		return fmt.Errorf("app: start node %s: node disappeared after binding", id)
 	}
 	reg, wants := node.Registration()
-	if wants && node.ID().Kind() == model.NodeKindDevice {
-		return s.register(ctx, id, node, reg)
-	}
-	// A platform does not register with anyone: it accepts registrations
-	// instead, which is its own way of coming online.
-	if node.ID().Kind() == model.NodeKindPlatformLarge {
-		return s.serve(ctx, id, node)
+	switch node.ID().Kind() {
+	case model.NodeKindDevice:
+		if wants {
+			return s.register(ctx, id, node, reg, s.lifecycle.Transport(id))
+		}
+		return nil
+	case model.NodeKindPlatformLarge:
+		// A platform-large does not register with anyone: it accepts
+		// registrations instead.
+		return s.serve(ctx, id, node, s.lifecycle.Transport(id))
+	case model.NodeKindPlatformSmall:
+		return s.startPlatformSmall(ctx, id, node, reg, wants, s.lifecycle.Transport(id))
 	}
 	return nil
 }
 
-// serve starts accepting downstream registrations on a platform-large node
-// and brings it online — "online" meaning the platform is serving. A node
+// startPlatformSmall establishes both halves of a platform-small node —
+// the link in the middle of a cascade, which is a UAS to its downstreams
+// and a UAC to its upstream.
+//
+// Serving comes first because it is the half that hardly ever fails; the
+// registration is the half that meets an unreachable or refusing peer, so
+// putting it second makes its failure path "unwind the serving" and nothing
+// more. A failed half faults the node and the other half is unwound: one
+// node has one state, so a half-started platform is not a state we can
+// report. The error names the half that failed.
+//
+// Both halves run over the node's one listener. They are given different
+// views of it — the serving half reads what arrives unasked, the upstream
+// half reads the answers to what it sent — because the socket gives each
+// datagram to whichever half reads first, and the serving half, which reads
+// all the time, would otherwise swallow the answers and the registration
+// would never finish.
+func (s *NodeService) startPlatformSmall(
+	ctx context.Context,
+	id model.NodeID,
+	node model.Node,
+	reg model.Registration,
+	wants bool,
+	tr port.SIPTransport,
+) error {
+	if tr == nil {
+		return s.fault(ctx, id, fmt.Errorf("app: no listener bound for node %s", id))
+	}
+	split := s.splits.forNode(id, tr)
+	if err := s.serve(ctx, id, node, split.Serving()); err != nil {
+		s.log.Error("platform-small cannot serve its downstreams",
+			"node_id", id.String(), "error", err.Error())
+		return fmt.Errorf("app: platform-small node %s, serving half: %w", id, err)
+	}
+	if !wants {
+		// No upstream declared: the node is a platform to its own
+		// downstreams and registers with nobody. Serving alone is a
+		// complete start.
+		return nil
+	}
+	if err := s.register(ctx, id, node, reg, split.Upstream()); err != nil {
+		s.log.Error("platform-small cannot register with its upstream, unwinding the serving half",
+			"node_id", id.String(), "error", err.Error())
+		// register faults the node, which ends the serving too, but
+		// the serving half owns a goroutine and a device table of its
+		// own: end it here as well, so the reason a faulted node is
+		// not serving does not depend on how fault unwinds.
+		s.stopServing(id)
+		return fmt.Errorf("app: platform-small node %s, upstream half: %w", id, err)
+	}
+	return nil
+}
+
+// serve starts accepting downstream registrations on a platform node and
+// brings it online — "online" meaning the platform is serving. A node
 // that cannot serve is faulted, so a half-started platform never keeps its
 // port.
-func (s *NodeService) serve(ctx context.Context, id model.NodeID, node model.Node) error {
+func (s *NodeService) serve(
+	ctx context.Context,
+	id model.NodeID,
+	node model.Node,
+	tr port.SIPTransport,
+) error {
 	if s.acceptor == nil {
 		// No acceptor means no serving: the node stays where the
 		// lifecycle left it rather than pretending to be online.
 		return nil
 	}
-	tr := s.lifecycle.Transport(id)
 	if tr == nil {
 		return s.fault(ctx, id, fmt.Errorf("app: no listener bound for node %s", id))
 	}
@@ -174,13 +265,7 @@ func (s *NodeService) serve(ctx context.Context, id model.NodeID, node model.Nod
 	if err := s.acceptor.Serve(id, tr, serving.Realm(), serving.Policy()); err != nil {
 		return s.fault(ctx, id, fmt.Errorf("app: start serving on node %s: %w", id, err))
 	}
-	// The state machine has no `registering → online` edge: a platform is
-	// first "registered" (bound and ready), then serving.
-	if err := s.MarkRegistered(ctx, id); err != nil {
-		s.stopServing(id)
-		return s.fault(ctx, id, err)
-	}
-	if err := s.MarkOnline(ctx, id); err != nil {
+	if err := s.advanceOnline(ctx, id); err != nil {
 		s.stopServing(id)
 		return s.fault(ctx, id, err)
 	}
@@ -196,12 +281,12 @@ func (s *NodeService) register(
 	id model.NodeID,
 	node model.Node,
 	reg model.Registration,
+	tr port.SIPTransport,
 ) error {
 	if s.registrar == nil {
 		return s.fault(ctx, id, fmt.Errorf(
 			"app: node %s is configured to register but the service has no registrar", id))
 	}
-	tr := s.lifecycle.Transport(id)
 	if tr == nil {
 		return s.fault(ctx, id, fmt.Errorf("app: no listener bound for node %s", id))
 	}
@@ -212,11 +297,9 @@ func (s *NodeService) register(
 	if _, err := s.registry.RecordRegistration(ctx, id, result); err != nil {
 		return s.fault(ctx, id, fmt.Errorf("app: record registration of node %s: %w", id, err))
 	}
-	// Only now does the node count as registered, and then online.
-	if err := s.MarkRegistered(ctx, id); err != nil {
-		return s.fault(ctx, id, err)
-	}
-	if err := s.MarkOnline(ctx, id); err != nil {
+	// Only now does the node count as registered, and then online — unless
+	// another half of this node already brought it there.
+	if err := s.advanceOnline(ctx, id); err != nil {
 		return s.fault(ctx, id, err)
 	}
 	// From here on the node is held open: heartbeats go out and the
@@ -255,7 +338,7 @@ func (s *NodeService) Unregister(ctx context.Context, id model.NodeID) error {
 	if s.registrar == nil {
 		return fmt.Errorf("app: unregister node %s: service has no registrar", id)
 	}
-	tr := s.lifecycle.Transport(id)
+	tr := s.upstreamSocket(id)
 	if tr == nil {
 		return fmt.Errorf("app: unregister node %s: no listener bound", id)
 	}
@@ -273,12 +356,30 @@ func (s *NodeService) Unregister(ctx context.Context, id model.NodeID) error {
 }
 
 // stopKeeping ends a node's background work before its listener is
-// released, so no heartbeat is aimed at a closed transport.
+// released, so no heartbeat is aimed at a closed transport. A node that
+// sorted its socket between two halves stops sorting it too: nothing is left
+// reading a listener that is about to be given back.
 func (s *NodeService) stopKeeping(id model.NodeID) {
 	if s.keeper != nil {
 		s.keeper.Stop(id)
 	}
 	s.stopServing(id)
+	s.splits.end(id)
+}
+
+// upstreamSocket is the socket the node speaks to its upstream through: the
+// upstream half's view of a shared listener when the node has one, the
+// listener itself otherwise. Reading the socket directly while a splitter is
+// reading it would race the splitter for the answers.
+func (s *NodeService) upstreamSocket(id model.NodeID) port.SIPTransport {
+	tr := s.lifecycle.Transport(id)
+	if tr == nil {
+		return nil
+	}
+	if split, ok := s.splits.lookup(id); ok {
+		return split.Upstream()
+	}
+	return tr
 }
 
 // stopServing ends a platform node's serving goroutine and forgets the
@@ -305,13 +406,58 @@ func (s *NodeService) fault(ctx context.Context, id model.NodeID, cause error) e
 // Stop releases the node's listener and advances it to StatusOffline.
 // Background work is stopped first, so the last heartbeat cannot race the
 // release.
+//
+// A platform-small says goodbye to its upstream before that: it is the one
+// identity that both serves and is registered somewhere, so stopping it has
+// to end both halves. A goodbye that does not get through does not keep the
+// node running — it is logged, and the stop goes on.
 func (s *NodeService) Stop(ctx context.Context, id model.NodeID) error {
+	s.unregisterUpstream(ctx, id)
 	s.stopKeeping(id)
 	if err := s.lifecycle.Stop(ctx, id); err != nil {
 		return fmt.Errorf("app: stop node %s: %w", id, err)
 	}
 	s.stamp(id)
 	return nil
+}
+
+// unregisterUpstream sends the upstream platform a REGISTER with
+// `Expires: 0` when the node has an upstream to say goodbye to, and does
+// nothing otherwise: a device is unregistered through Unregister, which
+// reports failure to its caller, and a platform-large has no upstream.
+//
+// Nothing here can fail the stop. The node is going down either way; what
+// is left behind is a platform that still thinks the node is registered
+// until its own lifetime lapses, which is why it is worth a warning.
+func (s *NodeService) unregisterUpstream(ctx context.Context, id model.NodeID) {
+	node, ok := s.registry.Get(ctx, id)
+	if !ok {
+		return
+	}
+	if node.ID().Kind() != model.NodeKindPlatformSmall {
+		return
+	}
+	reg, wants := node.Registration()
+	if !wants {
+		return
+	}
+	switch node.Status() {
+	case model.StatusOnline, model.StatusRegistered:
+	default:
+		// A node that never got registered has nothing to withdraw.
+		return
+	}
+	if s.registrar == nil {
+		return
+	}
+	tr := s.upstreamSocket(id)
+	if tr == nil {
+		return
+	}
+	if _, err := s.registrar.Unregister(ctx, tr, node, reg); err != nil {
+		s.log.Warn("platform-small stopped without saying goodbye to its upstream",
+			"node_id", id.String(), "error", err.Error())
+	}
 }
 
 // Devices returns the online device table of a platform-large node,
@@ -349,10 +495,40 @@ func (s *NodeService) MarkRegistered(ctx context.Context, id model.NodeID) error
 	return s.advance(ctx, id, model.StatusRegistered)
 }
 
-// MarkOnline advances a node to StatusOnline. It exists for the identity
-// implementations and tests; Start never calls it.
+// MarkOnline advances a node to StatusOnline. The identity implementations
+// reach it through advanceOnline, which skips it when the node is already
+// there; it stays exported for tests.
 func (s *NodeService) MarkOnline(ctx context.Context, id model.NodeID) error {
 	return s.advance(ctx, id, model.StatusOnline)
+}
+
+// advanceOnline brings a node online once, whichever half of it got there
+// first. The state machine has no `online → online` edge and no
+// `online → registered` one either, so a second half that advances the same
+// node would fail on a transition that has already been made: serving
+// brings a platform-small online, and the upstream registration that
+// follows must be able to record its result without asking for that edge
+// again. Advancing is therefore idempotent — whatever is still missing is
+// done, whatever is already true is skipped — and the conversion table
+// itself is left alone.
+func (s *NodeService) advanceOnline(ctx context.Context, id model.NodeID) error {
+	node, ok := s.registry.Get(ctx, id)
+	if !ok {
+		return fmt.Errorf("app: advance node %s to %s: %w", id, model.StatusOnline, model.ErrUnknownNode)
+	}
+	switch node.Status() {
+	case model.StatusOnline:
+		return nil
+	case model.StatusRegistered:
+		return s.MarkOnline(ctx, id)
+	default:
+		// The state machine has no `registering → online` edge: a
+		// node is first "registered" (bound and ready), then online.
+		if err := s.MarkRegistered(ctx, id); err != nil {
+			return err
+		}
+		return s.MarkOnline(ctx, id)
+	}
 }
 
 func (s *NodeService) advance(ctx context.Context, id model.NodeID, to model.Status) error {
