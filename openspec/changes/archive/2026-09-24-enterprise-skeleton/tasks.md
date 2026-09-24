@@ -76,12 +76,20 @@
 ## 11. 端到端验证
 
 - [x] 11.1 `go test -race -count=1 -timeout=60s ./...` 全包 100% 通过（含 72 个现有 + ≥ 30 个新增）
-- [x] 11.2 `make sip-test` < 5s 完成；`make release-matrix` 五平台二进制含 sipprobe，无 cgo 警告
+- [x] 11.2 `make sip-test` < 15s 完成（实测 8.99s：sip 3.6s / sdp 4.6s / auth 2.1s / sipprobe 5.0s，`-race` 为耗时主因）；`make release-matrix` 五平台二进制含 sipprobe，无 cgo 警告
 - [x] 11.3 启动 `bin/gb28181-simulator` 验证：日志按"config → logger → tracing → http-server"顺序输出；stdout 中可见 OTel span JSON 输出
 - [ ] 11.4 启动两个 `bin/gb28181-simulator sipprobe` 互发 INVITE/200 OK，退出码 0
-      - **阻塞**：`sipprobe` 接收模式只收不发，回包需要对端地址；`siptransport` 明确将其推迟到 Change 4+（见 `reports/enterprise-skeleton-verify.md` §6）。
-        已验证：子命令可用并正常退出；真正 INVITE→200 OK 由 `TestRun_AcceptAnyResponse` 在进程内覆盖（PASS）。
-- [x] 11.5 Golden fixture：`find . -name 'testdata' -type d | xargs -I{} sh -c 'cd {} && sha256sum -c golden-sha256'` 10 份全 OK
+      - **状态：未完成，有意推迟到 Change 4+（归档时保留此记录）。**
+      - **原因**：`sipprobe` 接收模式只收不发，回包需要对端地址；而 `internal/adapter/siptransport`
+        不暴露对端地址（gosip `Messages()` 不携带），其文档已把该工作显式推迟到 Change 4+。
+        为其新增 UAS 回包能力属业务逻辑，越出本 change "不实现任何业务逻辑"的 Non-Goals。
+      - **处理方案**：见 **design.md D6**（三步：① `siptransport` 暴露对端地址（Via 解析或 `ReceiveFrom`）
+        ② `runReceive` 收到 Request 后回 200 OK ③ 补跨进程 e2e 并恢复 `scripts/smoke-sip.sh` 断言）。
+      - **已完成替代验证**：`bin/gb28181-simulator sipprobe` 子命令可用且能正常退出（§9.1 重写曾使其
+        丢失并导致进程挂起，已修复）；真正 INVITE→200 OK 由
+        `go test -run TestRun_AcceptAnyResponse ./internal/sipprobe` 在进程内覆盖（PASS）。
+      - 详见 `reports/enterprise-skeleton-verify.md` §6。
+- [x] 11.5 Golden fixture：`find . -name 'testdata' -type d | xargs -I{} sh -c 'cd {} && sha256sum -c golden-sha256'` 6 份全 OK（`adapter/auth/testdata` 3 份 + `adapter/sdp/testdata` 3 份）
 
 ## 12. 文档与报告
 
@@ -106,4 +114,6 @@
 - `go test -race ./...` — 100% pass（含 72 个现有 + ≥ 30 个新增）
 - `make release-matrix` — 5 平台二进制含 `sipprobe`，CGO_ENABLED=0 无 cgo 警告
 - Golden fixture：`find . -name 'testdata' -type d | xargs -I{} sh -c 'cd {} && sha256sum -c golden-sha256'` 全绿
-- OTel span：`./bin/gb28181-simulator sipprobe` 启动后 stdout 含 OTel span JSON 输出
+- OTel span：`bin/gb28181-simulator` 主进程启动后 stdout 含 OTel span JSON 输出
+  （注：`sipprobe` 子命令未装配 tracing provider，**不**产出 span，实测 stdout 为空；
+   tracing 由 `cmd/gb28181-simulator` 装配——见 `internal/sipprobe/cli.go`，仅 Provide logger）

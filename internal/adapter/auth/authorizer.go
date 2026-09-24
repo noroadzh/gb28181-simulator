@@ -1,0 +1,163 @@
+package auth
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"strings"
+
+	"github.com/your-org/gb28181-simulator/internal/domain/model"
+)
+
+// Authorizer builds the client side of a Digest exchange: it turns a
+// challenge received from a platform plus this node's credentials into an
+// Authorization header value. It mirrors Responder, which does the same
+// from the server's side.
+type Authorizer struct {
+	responder *Responder
+	newCNonce func() (string, error)
+}
+
+// NewAuthorizer returns an Authorizer using the supplied HashFunc (nil
+// means MD5). cnonce generation can be overridden by tests through
+// WithCNonceFunc.
+func NewAuthorizer(hash HashFunc, opts ...AuthorizerOption) *Authorizer {
+	a := &Authorizer{
+		responder: NewResponder(hash),
+		newCNonce: NewCNonce,
+	}
+	for _, opt := range opts {
+		opt(a)
+	}
+	return a
+}
+
+// AuthorizerOption customises an Authorizer.
+type AuthorizerOption func(*Authorizer)
+
+// WithCNonceFunc replaces the cnonce generator. Intended for tests that
+// need a deterministic Authorization header.
+func WithCNonceFunc(f func() (string, error)) AuthorizerOption {
+	return func(a *Authorizer) { a.newCNonce = f }
+}
+
+// Authorization builds a complete Authorization header value for one
+// request. Each call mints a fresh cnonce and counts nc from 1, i.e. one
+// call per registration transaction.
+func (a *Authorizer) Authorization(cred model.Credentials, ch model.Challenge, method, uri string) (string, error) {
+	cnonce, err := a.newCNonce()
+	if err != nil {
+		return "", err
+	}
+	hash := MD5Hash
+	if a.responder != nil {
+		hash = a.responder.hash
+	}
+	return BuildAuthorizationWithHash(hash, cred, ch, method, uri, FormatNC(1), cnonce)
+}
+
+// BuildAuthorization renders an Authorization header value with the
+// default (MD5) hash. See BuildAuthorizationWithHash.
+func BuildAuthorization(cred model.Credentials, ch model.Challenge, method, uri, nc, cnonce string) (string, error) {
+	return BuildAuthorizationWithHash(MD5Hash, cred, ch, method, uri, nc, cnonce)
+}
+
+// BuildAuthorizationWithHash renders the value of an Authorization header
+// answering ch for the given request, e.g.
+//
+//	Digest username="34020000001320000001", realm="3402000000",
+//	       nonce="...", uri="sip:34020000002000000001@3402000000",
+//	       response="...", algorithm=MD5, qop=auth, nc=00000001,
+//	       cnonce="..."
+//
+// When the challenge offers no qop the RFC 2617 §3 form is used and nc /
+// cnonce are omitted. An algorithm other than MD5 / MD5-sess is an error
+// rather than a silent downgrade — computing the wrong digest would only
+// produce a rejection the operator cannot diagnose.
+func BuildAuthorizationWithHash(
+	hash HashFunc,
+	cred model.Credentials,
+	ch model.Challenge,
+	method, uri, nc, cnonce string,
+) (string, error) {
+	if hash == nil {
+		hash = MD5Hash
+	}
+	if method == "" {
+		return "", fmt.Errorf("auth: empty method")
+	}
+	if uri == "" {
+		return "", fmt.Errorf("auth: empty URI")
+	}
+	alg := ch.Algorithm()
+	if alg == "" {
+		alg = DefaultAlgorithm
+	}
+	if !strings.EqualFold(alg, "MD5") && !strings.EqualFold(alg, "MD5-sess") {
+		return "", fmt.Errorf("%w: %s", ErrUnknownAlgorithm, alg)
+	}
+	qop := ch.Qop()
+
+	// The realm comes from the challenge: the platform decides the
+	// protection space, the credential only supplies username/password.
+	response := (&Responder{hash: hash}).ComputeResponse(
+		method, cred.Username(), ch.Realm(), cred.Password(),
+		ch.Nonce(), uri, qop, nc, cnonce,
+	)
+
+	fields := make([]string, 0, 10)
+	fields = append(fields,
+		`username=`+quote(cred.Username()),
+		`realm=`+quote(ch.Realm()),
+		`nonce=`+quote(ch.Nonce()),
+		`uri=`+quote(uri),
+		`response=`+quote(response),
+		`algorithm=`+alg,
+	)
+	if qop != "" {
+		fields = append(fields,
+			`qop=`+qop,
+			`nc=`+nc,
+			`cnonce=`+quote(cnonce),
+		)
+	}
+	if opaque := ch.Opaque(); opaque != "" {
+		fields = append(fields, `opaque=`+quote(opaque))
+	}
+	return "Digest " + strings.Join(fields, ", "), nil
+}
+
+// NewCNonce returns a fresh client nonce: 8 random bytes, hex-encoded.
+// It must differ per transaction so two registrations cannot be replayed
+// as one another.
+func NewCNonce() (string, error) {
+	buf := make([]byte, 8)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("auth: read random: %w", err)
+	}
+	return hex.EncodeToString(buf), nil
+}
+
+// FormatNC renders a Digest nonce-count as the fixed-width 8-digit hex
+// value required by RFC 7616 §3.4 (e.g. 1 → "00000001").
+func FormatNC(n uint32) string {
+	return fmt.Sprintf("%08x", n)
+}
+
+// quote wraps a header parameter value in double quotes, escaping the
+// characters that would otherwise break the parameter list.
+func quote(value string) string {
+	var sb strings.Builder
+	sb.WriteByte('"')
+	for i := 0; i < len(value); i++ {
+		switch value[i] {
+		case '"', '\\':
+			sb.WriteByte('\\')
+			sb.WriteByte(value[i])
+		default:
+			sb.WriteByte(value[i])
+		}
+	}
+	sb.WriteByte('"')
+	return sb.String()
+}

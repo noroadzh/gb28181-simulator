@@ -11,8 +11,11 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/spf13/viper"
+
+	"github.com/your-org/gb28181-simulator/internal/domain/model"
 )
 
 // Config is the top-level configuration tree. Other internal packages should
@@ -22,6 +25,69 @@ type Config struct {
 	Log     LogConfig     `mapstructure:"log"`
 	Storage StorageConfig `mapstructure:"storage"`
 	Tracing TracingConfig `mapstructure:"tracing"`
+	Nodes   []NodeConfig  `mapstructure:"nodes"`
+}
+
+// NodeConfig is one entry of the optional `nodes:` list. Every field except
+// Vendor is mandatory: an entry with an illegal id or an unknown kind fails
+// configuration loading rather than being skipped silently (design D7).
+type NodeConfig struct {
+	ID     string `mapstructure:"id"`
+	Kind   string `mapstructure:"kind"`
+	Domain string `mapstructure:"domain"`
+	Addr   string `mapstructure:"addr"`
+	Vendor string `mapstructure:"vendor"`
+
+	// Registration is optional. When it is absent the node starts, binds
+	// its listener and stops at `registering` — the behaviour it had
+	// before registration existed.
+	Registration *NodeRegistrationConfig `mapstructure:"registration"`
+}
+
+// NodeRegistrationConfig is the `registration:` sub-section of a node
+// entry. Server is required (it is what makes the node register at all);
+// everything else falls back to model defaults.
+type NodeRegistrationConfig struct {
+	Server    string        `mapstructure:"server"`
+	ServerID  string        `mapstructure:"server_id"`
+	Username  string        `mapstructure:"username"`
+	Password  string        `mapstructure:"password"`
+	GBVersion string        `mapstructure:"gb_version"`
+	Expires   uint32        `mapstructure:"expires"`
+	Timeout   time.Duration `mapstructure:"timeout"`
+	Transport string        `mapstructure:"transport"`
+}
+
+// ValidateNodes checks every `nodes:` entry and returns an error naming the
+// entry index and the offending field, so an operator can fix the file
+// without guessing. An absent list is valid and means "zero nodes".
+func (c Config) ValidateNodes() error {
+	for i, n := range c.Nodes {
+		if _, err := model.ParseNodeID(n.ID); err != nil {
+			return fmt.Errorf("config: nodes[%d].id: %w", i, err)
+		}
+		if _, err := model.ParseNodeKind(n.Kind); err != nil {
+			return fmt.Errorf("config: nodes[%d].kind: %w", i, err)
+		}
+		if n.Registration != nil {
+			r := n.Registration
+			if _, err := model.NewRegistration(model.RegistrationParams{
+				Server:    r.Server,
+				ServerID:  r.ServerID,
+				Username:  r.Username,
+				Password:  r.Password,
+				GBVersion: r.GBVersion,
+				Expires:   r.Expires,
+				Timeout:   r.Timeout,
+				Transport: r.Transport,
+			}); err != nil {
+				// The model never echoes the password, so this message
+				// cannot leak it either.
+				return fmt.Errorf("config: nodes[%d].registration: %w", i, err)
+			}
+		}
+	}
+	return nil
 }
 
 // TracingConfig configures the OpenTelemetry trace pipeline. Added in
@@ -30,7 +96,7 @@ type Config struct {
 // honour the flag or short-circuit.
 type TracingConfig struct {
 	Enabled      bool    `mapstructure:"enabled"`
-	SampleRatio  float64 `mapstructure:"sample_ratio"` // 0.0 .. 1.0; 0 disables sampling
+	SampleRatio  float64 `mapstructure:"sample_ratio"`  // 0.0 .. 1.0; 0 disables sampling
 	OTLPEndpoint string  `mapstructure:"otlp_endpoint"` // host:port for OTLP gRPC; empty = stdout only
 	ServiceName  string  `mapstructure:"service_name"`  // defaults to "gb28181-simulator"
 }
@@ -120,6 +186,16 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Log.File == "" {
 		cfg.Log.File = DefaultLogPath(*cfg)
+	}
+	if cfg.Nodes == nil {
+		// Never leave a nil slice behind: callers iterate without a nil
+		// check, and "no nodes" must be indistinguishable from "empty".
+		cfg.Nodes = []NodeConfig{}
+	}
+	// An illegal node entry fails loading: silently skipping it would start
+	// the process with fewer nodes than the operator asked for (design D7).
+	if err := cfg.ValidateNodes(); err != nil {
+		return nil, err
 	}
 	return cfg, nil
 }

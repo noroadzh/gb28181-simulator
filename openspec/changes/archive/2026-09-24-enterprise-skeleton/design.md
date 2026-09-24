@@ -260,10 +260,64 @@ func main() {
 - 启动顺序明确（`sc.order`），优雅关闭反序
 - ~50 行 vs 之前的 ~150 行（之前的散落各包 init）
 
+### D6. §11.4 双进程 INVITE/200 OK 验收推迟到 Change 4+（未完成，已记录）
+
+任务 §11.4 要求"启动两个 `bin/gb28181-simulator sipprobe` 互发 INVITE/200 OK，退出码 0"。
+**本 change 不完成该项**，tasks.md 中保持未勾选。
+
+**实测现象：**
+
+```
+A  sipprobe --bind udp://127.0.0.1:15060                        → 收到 INVITE，退出 0
+B  sipprobe --bind udp://127.0.0.1:15061 --send-to …:15060
+   --expect-status 200                                           → "timeout waiting for
+                                                                   status=200"，退出 2
+```
+
+**根因**：`sipprobe` 接收模式（`runReceive`）只收不发，从不回包。回包需要**对端地址**，
+而 `internal/adapter/siptransport` 不提供——gosip 的 `Messages()` channel 不携带远端地址，
+该 transport 自己的文档注释已把这项工作显式推迟：
+
+> "The remote endpoint is not carried by gosip's Messages() channel; callers
+> needing the peer address should parse it from the topmost Via header
+> (Change 4+)."
+
+**决策与理由**：本 change 的 Non-Goals 明确"不实现任何业务逻辑"，是纯结构改造。
+为通过验收去修改 Change 2 的 `siptransport` 语义或给 `sipprobe` 增加 UAS 行为，
+属于新增业务能力，超出本 change 边界，且会污染 Change 2 已稳定的测试。故推迟。
+
+**处理方案（Change 4+ 执行，三步）：**
+
+1. `internal/adapter/siptransport` 暴露对端地址。二选一：
+   - 解析最顶层 `Via` 头（RFC 3261 §18.2.2：`received` 参数优先，否则取 `sent-by` 的 host:port）；
+   - 或新增 `ReceiveFrom(ctx) (msg, addr string, err error)`，在接收循环里保留远端地址。
+2. `internal/sipprobe` 的 `runReceive` 在收到 `sip.Request` 后回 200 OK：
+   `sip.NewResponseFromRequest("", req, 200, "OK", "")`，用步骤 1 的地址 `tr.Send` 回去。
+   （`waitForResponse` 需一并返回原始 `sip.Message`，该改动仅限包内未导出函数。）
+3. 补一个跨进程 e2e 测试，并恢复 `scripts/smoke-sip.sh` 的原始断言
+   （A 接收、B 发送并期望 200），使 `make sip-smoke` 按设计通过。
+
+**当前替代验证（已完成）：**
+
+- 真正的 INVITE → 200 OK 由进程内测试覆盖：
+  `go test -run TestRun_AcceptAnyResponse ./internal/sipprobe` — PASS
+  （测试内 fake UAS 回 200 OK）
+- 子命令可用性已修复：见下方"附：§9.1 引入的子命令回归"。
+
+**附：§9.1 引入的子命令回归（已修复）**
+
+`cmd/gb28181-simulator/main.go` 按 §9.1 重写后丢失了 `sipprobe` 子命令分发。
+由于 Go 的 `flag` 包遇到非 `-` 前缀参数即停止解析，`sipprobe` 被当作位置参数忽略，
+`bin/gb28181-simulator sipprobe …` 会直接启动 HTTP 服务并**永久阻塞**（表现为进程挂起）。
+
+**修复**：`main()` 在 `flag.Parse()` 前检查 `os.Args[1] == "sipprobe"` 并分发；
+CLI 逻辑收敛到 `internal/sipprobe.RunCLI(args, Version)`，由 `cmd/sipprobe` 与
+`cmd/gb28181-simulator` 共用，两个二进制都保持为薄装配入口（仍满足 §9/D5）。
+
 ## Risks / Trade-offs
 
 - **R1**：搬迁路径后 git blame 历史断裂。**Mitigation**：用 `git log --follow` 跟踪；README 加 CHANGELOG 标注。
-- **R2**：OTel SDK 升级可能破坏 API。**Mitigation**：在 `go.mod` 锁定 `v1.28.0`（2026-09 LTS）。
+- **R2**：OTel SDK 升级可能破坏 API。**Mitigation**：在 `go.mod` 锁定 `v1.26.0`（otel / sdk / stdouttrace / otlptracegrpc 四项一致，见任务 10.2 记录）。
 - **R3**：ServiceContext 无自动依赖图，main.go 写错顺序编译期发现不了。**Mitigation**：每个 provider 函数内显式 `MustGet` 依赖；CI 加 lint 规则检查 `MustGet` 在 `Build` 前不调用。
 - **R4**：端口接口粒度不当导致 Change 4 还要再调。**Mitigation**：在 design 阶段参考 Change 4 proposal 草案（若已存在），否则保守 5 接口、Change 4 扩展。
 - **R5**：现有测试 3500 行搬迁后 import 路径更新漏改。**Mitigation**：用 `gofmt -r 'internal/sip -> internal/adapter/sip' -w ./...` 一次性替换 + 编译验证。
@@ -288,3 +342,5 @@ func main() {
 - **Q1**：`internal/storage` 是 adapter 还是独立 domain 依赖？（倾向 adapter，因为 SQLite 是具体技术）
 - **Q2**：`internal/interface/webui` 是否需要端口化？目前只是 embed FS，没调用其它包（倾向暂不端口化）
 - **Q3**：OTel trace 配置放 `config.Tracing` 还是单独 `tracing.yaml`？（倾向 `config.Tracing` 子节，复用 viper）
+- **Q4**：**待办（由 Change 4+ 承接）**——`siptransport` 对端地址暴露方式选 Via 解析还是 `ReceiveFrom` API？
+  决定后才可完成 §11.4 的双进程 INVITE/200 OK 验收。详见 **D6**。

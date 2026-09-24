@@ -23,3 +23,41 @@ tracing:
   sample_ratio: 1.0       # 0.0..1.0; 1.0 samples everything (dev), 0.01 default
   otlp_endpoint: ""       # host:port for OTLP gRPC; empty = stdout only
   service_name: ""        # defaults to "gb28181-simulator"
+
+# Optional node inventory (Change 4). Omit the whole section to run with zero
+# nodes — then behaviour is identical to Change 3.
+#
+# Every entry is mandatory except vendor:
+#   id     20 digits: 8 centre + 2 industry + 3 type + 1 network + 6 serial.
+#          The 3-digit type code decides the kind (131/132/... device,
+#          200 platform-large, 216 platform-small).
+#   kind   device | platform-large | platform-small
+#   domain home domain the node registers against
+#   addr   signalling address the node listens on; must be unique per node —
+#          a duplicate is rejected at load time with the incumbent node id.
+#
+# An illegal entry (bad id length, unknown kind) fails config loading rather
+# than being skipped silently, so the process never starts with fewer nodes
+# than configured.
+nodes:
+  - id: "34020000011310000001"
+    kind: device
+    domain: "3402000000"
+    addr: "127.0.0.1:15060"
+    vendor: acme
+    # Optional. Present means "register on start": the node sends REGISTER
+    # to the platform, answers its 401 challenge and only then goes online.
+    # Omit the whole block to keep the node unregistered.
+    registration:
+      server: "127.0.0.1:15061"   # host:port of the upstream platform
+      server_id: "34020000002000000001"  # optional; used in the Request-URI
+      # username: "34020000011310000001" # optional; defaults to the node id
+      password: "change-me"              # never logged (see log.redact_keys)
+      expires: 3600                      # optional; seconds, default 3600
+      transport: udp                     # optional; udp (default) or tcp
+      timeout: 5s                        # optional; default 5s
+  - id: "34020000012000000001"
+    kind: platform-large
+    domain: "3402000000"
+    addr: "127.0.0.1:15061"
+    vendor: acme

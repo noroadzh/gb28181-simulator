@@ -1,0 +1,10 @@
+REGISTER sip:34020000002000000001@3402000000 SIP/2.0
+CSeq: 1 REGISTER
+From: <sip:34020000011310000001@3402000000>;tag=<tag>
+To: <sip:34020000011310000001@3402000000>
+Call-ID: <call-id>
+Via: SIP/2.0/UDP <local>;branch=<branch>;received=127.0.0.1
+Max-Forwards: 70
+User-Agent: gb28181-simulator/0.0.0-dev
+Contact: <sip:34020000011310000001@<local>>
+Expires: 3600

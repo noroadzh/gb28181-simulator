@@ -3,10 +3,10 @@
 package servicectx
 
 import (
+	"github.com/your-org/gb28181-simulator/internal/domain/port"
 	platformconfig "github.com/your-org/gb28181-simulator/internal/platform/config"
 	"github.com/your-org/gb28181-simulator/internal/platform/observability/logging"
 	"github.com/your-org/gb28181-simulator/internal/platform/observability/tracing"
-	"github.com/your-org/gb28181-simulator/internal/storage"
 )
 
 // Well-known service keys for dependency injection.
@@ -20,6 +20,9 @@ var (
 	// TracingKey is the key for the tracing provider.
 	TracingKey = NewKey[*tracing.Provider]("tracing")
 
-	// StorageKey is the key for the storage store.
-	StorageKey = NewKey[*storage.Store]("storage")
+	// StorageKey is the key for the storage store. The value type is the
+	// domain port rather than the concrete *storage.Store: this package is
+	// platform infrastructure and must not depend on an adapter, otherwise
+	// the layering it exists to protect is broken (design D10).
+	StorageKey = NewKey[port.Storage]("storage")
 )

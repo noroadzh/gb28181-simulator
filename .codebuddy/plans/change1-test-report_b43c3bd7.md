@@ -1,61 +1,39 @@
 ---
 name: change1-test-report
 overview: 编写 Change 1（init-project-skeleton）的端到端测试报告：重跑全部验收命令后生成 reports/change1-test.md，包含 11 个任务的逐条验收矩阵与证据。
+todos:
+  - id: verify-dist-fix
+    content: 验证 internal/webui/dist.go 修复已生效并强制 rebuild 二进制使 embed 内容生效
+    status: completed
+  - id: rerun-go-tests
+    content: 重跑 go test -race ./... 收集 logger/config/storage/api 全部输出
+    status: completed
+  - id: e2e-curl-ws
+    content: 启动服务并执行 curl health/version/首页/SPA/静态资源 + WS 脱敏验证
+    status: completed
+  - id: cross-compile
+    content: 执行 make release-matrix 跨平台编译并启动各平台产物 smoke test
+    status: completed
+  - id: write-report
+    content: 撰写 reports/change1-test.md 完整 11 任务验收矩阵并嵌入证据
+    status: completed
+  - id: tick-tasks
+    content: 更新 openspec/changes/init-project-skeleton/tasks.md checkbox 与 evidence 链接
+    status: completed
 ---
 
-]<]minimax[>[</item>
-<item id="rerun-go-tests" deps="verify-dist-fix">重跑 go test -race ./... 收集 logger/config/storage/api 全部输出]<]minimax[>[</item>
-<item id="e2e-curl-ws" deps="verify-dist-fix">启动服务并执行 curl health/version/首页/SPA/静态资源 + WS 脱敏验证]<]minimax[>[</item>
-<item id="cross-compile" deps="verify-dist-fix">执行 make release-matrix 跨平台编译并启动各平台产物 smoke test]<]minimax[>[</item>
-<item id="write-report" deps="rerun-go-tests,e2e-curl-ws,cross-compile">撰写 reports/change1-test.md 完整 11 任务验收矩阵并嵌入证据]<]minimax[>[</item>
-<item id="tick-tasks" deps="write-report">更新 openspec/changes/init-project-skeleton/tasks.md checkbox 与 evidence 链接]<]minimax[>[</item>
-</todolist>
-</plan_result>
-
-```
-
-Hmm, this is getting long. Let me trim it down. Also let me reconsider the task list - maybe consolidate.
-
-Actually 6 items is fine per the guidance (3-7 items).
-
-Let me also double check if there are extensions I should use. Looking at the skills:
-- openspec-verify-change: This is for verifying OpenSpec change artifacts. After we generate the report, we could use this to validate the report itself. But it's more for the workflow of "before archiving". Not strictly needed.
-
-Actually I think the openspec-verify-change skill could be useful at the end to cross-check the report. But the user didn't ask for openspec workflow, just for a report.
-
-Let me NOT include extensions since the work is straightforward CLI commands + markdown writing.
-
-Let me finalize the plan. Let me also ensure the language is concise and the structure follows the schema.
-
-Wait, looking at the format spec again:
-- `<req>`: Core functional requirements, described in markdown
-- `<tech>`: Technology stack description, in markdown
-- `<design>`: Omitted (not UI)
-- `<extensions>`: Omitted (none used)
-- `<todolist>`: Task list
-
-For tech section, since this is mostly documentation/test work, the "tech stack" doesn't apply in the traditional sense. I'll describe the verification methodology instead.
-
-Let me also think about whether to use the create_plan tool. The system prompt earlier said:
-"Use the create_plan tool to create the plan"
-
-But looking at the available tools, I don't see create_plan in my function list. The available tools are:
-- list_dir, search_content, search_file, read_file, read_lints, RAG_search
-
-So create_plan is not available. I'll just output the plan_result XML directly.
-
-Let me write the final plan```xml
-<plan_result>
-<req>
 ## 用户需求
-为 Change 1（init-project-skeleton）生成归档前的完整端到端测试报告，作为后续 openspec-archive 的验收证据。
+
+为 Change 1（`init-project-skeleton`）生成归档前的完整端到端测试报告，作为后续 `openspec-archive` 的验收证据。
 
 ## 报告产出
+
 - 文件位置：`/Users/noroadzh/code/jfys/go/gb28181-simulator/reports/change1-test.md`（仓库内结构化 Markdown）
 - 覆盖范围：完整 11 个任务、35 条验收点，逐条对照 `openspec/changes/init-project-skeleton/tasks.md`
 - 每条验收点包含：复跑命令、fresh 输出、通过/失败判定、产物/日志路径指针
 
 ## 验收维度
+
 1. 仓库 bootstrap（go.mod、目录骨架、.gitignore）
 2. 依赖与编译（echo/websocket/viper/sqlite + CGO_ENABLED=0）
 3. internal/logger（5 级别过滤、password 脱敏、Hub fan-out）
@@ -69,13 +47,15 @@ Let me write the final plan```xml
 11. 端到端：curl health/version/静态资源、WS 脱敏 `***REDACTED***`、跨平台编译可启动
 
 ## 副产物
+
 - 同步更新 `openspec/changes/init-project-skeleton/tasks.md` 的 checkbox（全部勾选 + 报告链接）。
-</req>
-<tech>
+
 ## 验证策略
+
 所有本地可执行命令**重跑一遍**，fresh 输出落到 `/tmp/gb28181-e2e/` 后嵌入报告代码块。
 
 ### 关键命令清单
+
 - 1.1~1.3：`go mod tidy`、`tree -L 2 -I 'node_modules|web/dist'`、`git status --ignored`
 - 2.1~2.3：`go list -m all`、`CGO_ENABLED=0 go build ./...`、`go vet ./...`（如无 golangci-lint）
 - 3.1~3.3：`go test -race -v ./internal/logger/...`
@@ -87,12 +67,12 @@ Let me write the final plan```xml
 - 9.1~9.3：解析 `.github/workflows/{ci,release}.yml` 结构 + `make -n release-matrix`
 - 10.1~10.2：`cat README.md`、`make -n fmt lint test web build`
 - 11.1：`curl /api/health`、`curl /api/version`、`curl /`、`curl /some/spa/path`、`curl /assets/index-*.{css,js}`
-- 11.2：临时 Go 脚本订阅 `ws://127.0.0.1:18181/api/logs/stream` +触发含 `password` 字段的日志，验证 `***REDACTED***`
+- 11.2：临时 Go 脚本订阅 `ws://127.0.0.1:18181/api/logs/stream` + 触发含 `password` 字段的日志，验证 `***REDACTED***`
 - 11.3：`make release-matrix`（darwin/linux/windows × amd64/arm64），本机可启动的平台执行 smoke test
 
 ### 报告结构
-```
 
+```
 # Change 1 Test Report — init-project-skeleton
 
 - Meta: 日期/分支/commit
@@ -100,20 +80,9 @@ Let me write the final plan```xml
 - Acceptance Matrix: 表格形式列出 35 行
 - Per-section raw output: 代码块原样嵌入
 - Limitations: GitHub Actions 触发需远程、Linux/Windows 二进制 smoke test 受 host OS 限制
-
 ```
 
 ### 已知限制（报告中需明确标注）
+
 - GitHub Actions 本身无法本地触发 → "Workflow YAML validated locally; full PR/tag run pending remote"
 - Linux/Windows 二进制在 macOS 上无法原生执行 → "binary built; smoke test deferred to CI"
-</tech>
-<todolist>
-<item id="verify-dist-fix" deps="">验证 internal/webui/dist.go修复已生效并强制 rebuild 二进制使 embed 内容生效]<]minimax[>[</item>
-<item id="rerun-go-tests" deps="verify-dist-fix">重跑 go test -race ./... 收集 logger/config/storage/api 全部输出]<]minimax[>[</item>
-<item id="e2e-curl-ws" deps="verify-dist-fix">启动服务并执行 curl health/version/首页/SPA fallback/静态资源 + WS 脱敏验证]<]minimax[>[</item>
-<item id="cross-compile" deps="verify-dist-fix">执行 make release-matrix 跨平台编译并对可启动平台做 smoke test]<]minimax[>[</item>
-<item id="write-report" deps="rerun-go-tests,e2e-curl-ws,cross-compile">撰写 reports/change1-test.md 完整 11 任务验收矩阵并嵌入证据]<]minimax[>[</item>
-<item id="tick-tasks" deps="write-report">更新 openspec/changes/init-project-skeleton/tasks.md checkbox 与 evidence 链接]<]minimax[>[</item>
-</todolist>
-</plan_result>
-```

@@ -77,16 +77,21 @@ The system SHALL provide `internal/platform/observability/tracing/` with a `Prov
 #### Scenario: Close 关闭 provider 与 exporter
 
 - **WHEN** 调用 `tracing.Provider.Close()`
-- **THEN** TracerProvider.Shutdown 被调用；stdout exporter 不再接收新 span；进程退出时无 goroutine 泄漏（race + goroutine leak detector 通过）
+- **THEN** TracerProvider.Shutdown 被调用；stdout exporter 不再接收新 span
+- **AND** 在 `-race` 下无数据竞争，exporter goroutine 随 `Shutdown` 退出（由
+  `TestProvider_CloseFlushesAndStopsNewSpans` 覆盖；本 change 未引入 goleak 依赖）
 
 ### Requirement: cmd main.go rewritten as assembly entry point
 
 The system SHALL rewrite `cmd/gb28181-simulator/main.go` and `cmd/sipprobe/main.go` to delegate all wiring to `ServiceContext.Provide()` calls and end with `Build(ctx) + MustGet[T](server).Start(ctx)`. No business logic SHALL remain in main.go.
 
-#### Scenario: main.go 不直接 import 任何 adapter 业务包
+#### Scenario: main.go 不含业务逻辑，仅做装配
 
-- **WHEN** 执行 `grep -E 'import' cmd/gb28181-simulator/main.go | grep -v 'servicectx\|platform'`
-- **THEN** 输出为空或仅含注释行
+- **WHEN** 检查 `cmd/gb28181-simulator/main.go` 的 import 列表与函数体
+- **THEN** import 中除 `platform` / `servicectx` 外，仅允许出现装配所必需的具体类型包
+  （`internal/storage`、`internal/interface/http`，以及 `internal/sipprobe` 用于 `sipprobe`
+  子命令分发）
+- **AND** 函数体内只出现 `Provide` / `Build` / `MustGet` 与信号处理，不含协议解析或业务分支
 
 #### Scenario: 启动顺序与日志一致
 

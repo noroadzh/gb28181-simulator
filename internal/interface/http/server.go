@@ -31,6 +31,7 @@ type Server struct {
 	cfg   platformconfig.Config
 	hub   *logging.Hub
 	ver   Version
+	nodes NodeView
 	echo  *echo.Echo
 	http  *http.Server
 	lnErr error
@@ -43,8 +44,10 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(_ *http.Request) bool { return true },
 }
 
-// NewServer returns a configured but not-yet-started Echo server.
-func NewServer(cfg platformconfig.Config, hub *logging.Hub, ver Version) *Server {
+// NewServer returns a configured but not-yet-started Echo server. nodes may
+// be nil, in which case the /v1/nodes endpoints report an empty inventory
+// (the process was started without any configured node).
+func NewServer(cfg platformconfig.Config, hub *logging.Hub, ver Version, nodes NodeView) *Server {
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
@@ -59,10 +62,11 @@ func NewServer(cfg platformconfig.Config, hub *logging.Hub, ver Version) *Server
 	}))
 
 	s := &Server{
-		cfg:  cfg,
-		hub:  hub,
-		ver:  ver,
-		echo: e,
+		cfg:   cfg,
+		hub:   hub,
+		ver:   ver,
+		nodes: nodes,
+		echo:  e,
 	}
 	s.registerRoutes(e)
 	return s
@@ -73,6 +77,13 @@ func (s *Server) registerRoutes(e *echo.Echo) {
 	e.GET("/v1/health", s.handleHealth)
 	e.GET("/v1/version", s.handleVersion)
 	e.GET("/v1/logs/stream", WSHandler(s.hub))
+
+	// Node inventory and per-node control (Change 4). These are registered
+	// unconditionally: with no nodes they simply report an empty list.
+	e.GET("/v1/nodes", s.handleNodeList)
+	e.GET("/v1/nodes/:id", s.handleNodeDetail)
+	e.POST("/v1/nodes/:id/start", s.handleNodeStart)
+	e.POST("/v1/nodes/:id/stop", s.handleNodeStop)
 
 	// Legacy /healthz and /metrics for smoke tests (per §7.3)
 	e.GET("/healthz", s.handleHealth)

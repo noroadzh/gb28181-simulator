@@ -32,6 +32,58 @@ Override with `-config /path/to/config.yaml` or env
 - `GET /v1/version` — version metadata
 - `WS  /v1/logs/stream` — JSON-encoded structured log stream
 - `GET /` — embedded Dashboard (Vue 3 + Element Plus)
+- `GET /v1/nodes` — node inventory (`id`, `kind`, `status`, `addr`)
+- `GET /v1/nodes/{id}` — one node; `404` with `{"error":...}` for an unknown id
+- `POST /v1/nodes/{id}/start` — bind the listener, status → `registering`
+- `POST /v1/nodes/{id}/stop` — release the listener, status → `offline`
+
+An illegal status transition returns `409` with the node's current status:
+
+```json
+{"error":"app: start node 34020000011310000001: model: illegal node status transition: registering -> registering","status":"registering","action":"start"}
+```
+
+## Nodes
+
+Declare GB/T 28181 nodes in the config; each node owns its own signalling
+listener and lifecycle, and starting one never affects another. See
+[`configs/config.example.yaml`](configs/config.example.yaml) for a complete
+file.
+
+```yaml
+nodes:
+  - id: "34020000011310000001"   # 20 digits; the 3-digit type code sets the kind
+    kind: device                 # device | platform-large | platform-small
+    domain: "3402000000"
+    addr: "127.0.0.1:15060"      # must be unique across nodes
+    vendor: acme                 # optional
+```
+
+Omitting `nodes:` runs with zero nodes. Statuses advance through
+`idle → registering → registered → online`, stop lands on `offline`, and
+`fault` is recoverable only back to `idle` or `offline`.
+
+A `device` node registers as soon as it is started: add a `registration:`
+block and it sends REGISTER, answers the platform's 401 challenge with a
+Digest credential and goes `online`; a failure (timeout, refusal, 5xx)
+faults the node and frees its port. Without the block — or for a platform
+identity, whose behaviour arrives in the next stages — a started node stays
+`registering`, exactly as before.
+
+```yaml
+nodes:
+  - id: "34020000011310000001"
+    kind: device
+    domain: "3402000000"
+    addr: "127.0.0.1:15060"
+    registration:
+      server: "127.0.0.1:15061"    # host:port of the upstream platform
+      server_id: "34020000002000000001"  # optional; used in the Request-URI
+      password: "change-me"        # never logged (see log.redact_keys)
+      expires: 3600                # optional; seconds, default 3600
+      transport: udp               # optional; udp (default) or tcp
+      timeout: 5s                  # optional; default 5s
+```
 
 ## Tech stack
 
@@ -59,8 +111,8 @@ contract list and ServiceContext usage.
 ```
 cmd/gb28181-simulator      entrypoint
 cmd/sipprobe               SIP diagnostic CLI (Change 2 §7)
-internal/adapter           SIP / SDP / Digest / Transport / Audit adapters
-internal/app               use-case orchestration (reserved for Change 4+)
+internal/adapter           SIP / SDP / Digest / Transport / Audit / Node registry adapters
+internal/app               use-case orchestration (NodeService, Change 4)
 internal/domain            domain model + port interfaces
 internal/interface/http    HTTP/WS server (Echo + gorilla/websocket)
 internal/interface/webui   embedded Dashboard (Vue 3 + Element Plus, embed.FS)

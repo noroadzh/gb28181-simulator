@@ -8,7 +8,12 @@
 
 ### Requirement: SIP message round-trip preserves wire bytes
 
-The system SHALL build and parse SIP request and response messages whose on-the-wire byte representation matches GB/T 28181 §L.1 (RFC 3261) for the message-start line, header fields, and SDP body, **without** lossy reformatting.
+The system SHALL build and parse SIP request and response messages whose on-the-wire byte
+representation matches GB/T 28181 §L.1 (RFC 3261) for the message-start line, header fields,
+and SDP body, **without** lossy reformatting. Headers explicitly supplied by the caller MUST
+survive every conversion the stack performs, including the hand-off from the domain message
+type to the wire encoder: dropping a caller-supplied header (e.g. `Contact`, `Expires`,
+`Authorization`) is a defect, not a permitted simplification.
 
 #### Scenario: 构建并解析一条 REGISTER 后字节一致
 
@@ -19,6 +24,16 @@ The system SHALL build and parse SIP request and response messages whose on-the-
 
 - **WHEN** 收到一条 `Content-Type: Application/SDP` 的 INVITE 请求
 - **THEN** 解析后 `Body()` 返回的字符串与入参 byte 字节一致，`GetHeader("Content-Type")` 返回 `Application/SDP`，`ContentLength()` 等于入参 body 字节数
+
+#### Scenario: 调用方显式给出的头部经传输层转换后不丢失
+
+- **WHEN** 上层以领域消息类型携带 `Contact`、`Expires`、`Authorization`、`From`、`To`、`Call-ID` 等头部交给传输层发送
+- **THEN** 对端收到的报文中这些头部全部存在且取值与调用方给出的一致；不因"重建消息"而被丢弃或替换为自动生成的默认值
+
+#### Scenario: Via 的传输协议与实际传输一致
+
+- **WHEN** 以 TCP 传输发送一条由上层构造的请求
+- **THEN** `Via` 头中的传输协议为 `TCP`（而非固定 `UDP`）；未指定传输时沿用默认 UDP，行为不变
 
 ### Requirement: GB/T 28181 mandatory headers auto-filled
 
@@ -64,7 +79,7 @@ The system SHALL marshal an SDP body that includes `y=` and `f=` lines per GB/T 
 
 ### Requirement: Digest challenge and response (RFC 2617 / RFC 7616 / GB28181)
 
-The system SHALL produce a Digest `WWW-Authenticate` challenge containing `realm`, `nonce`, `qop=auth`, `algorithm=MD5`, and `opaque` (optional), and compute the matching `Authorization` response including the `qop=auth` mode (with `nc`, `cnonce`, `response`).
+The system SHALL cover both directions of GB/T 28181 Digest authentication. Server side: produce a `WWW-Authenticate` challenge containing `realm`, `nonce`, `qop=auth`, `algorithm=MD5`, and `opaque` (optional). Client side: parse such a challenge (including one received from a third-party platform), and produce the matching `Authorization` header value — computing `response` per RFC 7616 §3.4 when `qop=auth` is offered (with `nc`, `cnonce`) and per RFC 2617 §3 otherwise, and rendering the complete header with correctly quoted fields. Unsupported `algorithm` values MUST surface an explicit error instead of silently falling back.
 
 #### Scenario: server 生成 challenge
 
@@ -92,6 +107,28 @@ The system SHALL produce a Digest `WWW-Authenticate` challenge containing `realm
 - **WHEN** 客户端送上 `Authorization` 中**没有** `qop` 字段（旧客户端实现）
 - **THEN** `expected = MD5(MD5(username:realm:password) : nonce : MD5(method:uri))`，与请求 `response` 字段逐字节相等时返回 `nil`，否则返回 `ErrInvalidResponse`
 
+#### Scenario: 解析第三方平台下发的 WWW-Authenticate
+
+- **WHEN** 收到 `WWW-Authenticate: Digest realm="3402000000", nonce="...", qop="auth", algorithm=MD5, opaque="..."`
+- **THEN** 解析结果给出 realm、nonce、opaque、qop、algorithm 各字段，与原文逐字段相等；带引号与不带引号的取值、字段间多余空白、大小写不同的 `Digest` 方案名均可正确解析
+
+#### Scenario: 挑战缺少必需字段时报错
+
+- **WHEN** `WWW-Authenticate` 缺少 `realm` 或 `nonce`，或其值无法解析
+- **THEN** 返回错误并指出缺失/非法的字段，不返回零值结构让上层静默发出错误凭据
+
+#### Scenario: 组装完整的 Authorization 头
+
+- **WHEN** 上层以凭据、方法、请求 URI 与已解析的挑战触发 Authorization 生成
+- **THEN** 输出形如 `Digest username="...", realm="...", nonce="...", uri="...", response="...", algorithm=MD5, qop=auth, nc=00000001, cnonce="..."` 的完整头值
+- **AND** `nc` 与 `cnonce` 由实现生成（`cnonce` 每次事务不同），`username` / `realm` / `nonce` / `uri` / `opaque` 中的特殊字符被引号包裹并转义
+- **AND** 该头值可被本 capability 的解析路径反向解析且字段一致
+
+#### Scenario: 挑战声明不支持的算法时报错
+
+- **WHEN** `WWW-Authenticate` 的 `algorithm` 为 MD5 / MD5-sess 之外的值
+- **THEN** 生成 Authorization 返回"算法不支持"的错误，不静默按 MD5 计算
+
 ### Requirement: Multiple in-process transport listeners
 
 The system SHALL support binding more than one SIP transport listener in the same process on independent local addresses, each with its own TCP/UDP socket and isolated send/receive queue.
@@ -105,6 +142,33 @@ The system SHALL support binding more than one SIP transport listener in the sam
 
 - **WHEN** 调用 `Transport.Close()`
 - **THEN** 原绑定端口可被后续 `Transport(bind=<same>)` 立即重新绑定（无 TIME_WAIT 阻塞）
+
+### Requirement: SIP transport exposes peer and destination addresses
+
+The system SHALL make remote endpoints explicit: sending a message SHALL accept a destination
+address, and receiving SHALL report the address the message arrived from. Addresses are
+`host:port` strings (optionally prefixed by a transport scheme). A transport that cannot
+determine the peer address MUST surface an explicit error rather than returning an empty string.
+
+#### Scenario: Send 使用显式目标地址
+
+- **WHEN** 调用传输层发送接口并传入目标地址 `127.0.0.1:5060`
+- **THEN** 报文被发往该地址；不再依赖从报文 URI 反推目标；返回值仅表达传输层错误
+
+#### Scenario: Receive 返回对端地址
+
+- **WHEN** 传输层收到一条来自 `127.0.0.1:5061` 的报文
+- **THEN** 接收结果同时给出报文与该对端地址 `127.0.0.1:5061`；UDP 与 TCP 两种传输均如此
+
+#### Scenario: 对端地址可用于直接回包
+
+- **WHEN** 以接收到的对端地址作为目标发回报文
+- **THEN** 报文到达原发送方，无需额外配置路由
+
+#### Scenario: 无法判定地址时显式报错
+
+- **WHEN** 传输实现无法确定对端地址
+- **THEN** 返回错误（而非返回空地址让调用方静默发往错误目标）
 
 ### Requirement: SIP audit log produces wire-byte events
 
@@ -122,7 +186,7 @@ The system SHALL emit a structured log record for every received and transmitted
 
 ### Requirement: Diagnostic CLI `sipprobe` for golden tests
 
-The system SHALL provide a `sipprobe` subcommand capable of binding a UDP/TCP listener and sending a single SIP message, then printing the first received response to stdout, used by CI golden tests and developer smoke checks.
+The system SHALL provide a `sipprobe` subcommand capable of binding a UDP/TCP listener and sending a single SIP message, then printing the first received response to stdout, used by CI golden tests and developer smoke checks. In receive-only mode it SHALL additionally be able to answer inbound SIP requests with a 200 OK response when invoked with `--answer`, so that two `sipprobe` processes can complete a request/response exchange without any third process. Answering SHALL be opt-in: without `--answer` the observable behaviour is unchanged.
 
 #### Scenario: sipprobe 接收一条 INVITE 后打印 200 OK
 
@@ -133,6 +197,17 @@ The system SHALL provide a `sipprobe` subcommand capable of binding a UDP/TCP li
 
 - **WHEN** 5 秒内未收到响应
 - **THEN** sipprobe 退出码为 2，stderr 输出 `timeout waiting for status=200`，stdout 为空
+
+#### Scenario: 以 --answer 回应入站请求
+
+- **WHEN** 执行 `gb28181-simulator sipprobe --bind udp://127.0.0.1:15060 --answer` 并收到一条入站 `sip.Request`
+- **THEN** sipprobe 向该请求的对端地址回送一条 200 OK（`sip.NewResponseFromRequest`），请求方收到后退出 0
+
+#### Scenario: 两个 sipprobe 互发 INVITE/200 OK
+
+- **WHEN** 进程 A 执行 `sipprobe --bind udp://127.0.0.1:15060 --answer`，
+  进程 B 执行 `sipprobe --bind udp://127.0.0.1:15061 --send-to udp://127.0.0.1:15060 --expect-status 200`
+- **THEN** B 收到 200 OK 并退出 0；A 回应后退出 0；`scripts/smoke-sip.sh` 的原始断言通过
 
 ### Requirement: CGO-free build on all supported platforms
 

@@ -33,6 +33,8 @@ func RunCLI(args []string, ver Version) int {
 	timeout := fs.Duration("timeout", 5*time.Second, "max time to wait for a single inbound message")
 	from := fs.String("from", "", "From header URI for the INVITE (default: sip:probe@127.0.0.1)")
 	to := fs.String("to", "", "To header URI for the INVITE (default: derived from --send-to)")
+	answer := fs.Bool("answer", false,
+		"receive mode: reply 200 OK to an inbound request using its peer address (default: receive only)")
 	showVersion := fs.Bool("version", false, "print version and exit")
 
 	if err := fs.Parse(args); err != nil {
@@ -77,6 +79,7 @@ func RunCLI(args []string, ver Version) int {
 		Timeout:      *timeout,
 		From:         *from,
 		To:           *to,
+		Answer:       *answer,
 	}
 	res, code := Run(context.Background(), opts)
 	if code == ExitOK {

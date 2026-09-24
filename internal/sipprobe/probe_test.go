@@ -158,7 +158,7 @@ func TestRun_AcceptAnyResponse(t *testing.T) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		msg, err := bTransport.Receive(ctx)
+		msg, _, err := bTransport.Receive(ctx)
 		if err != nil {
 			return
 		}

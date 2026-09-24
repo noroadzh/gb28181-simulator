@@ -2,6 +2,7 @@ package auth
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
 	"github.com/your-org/gb28181-simulator/internal/domain/port"
@@ -73,6 +74,45 @@ func (a *ChallengerAdapter) Challenge(realm string) (model.Challenge, error) {
 	return model.NewChallenge(realm, nonce, "MD5", "", "auth")
 }
 
+// AuthorizerAdapter implements port.Authorizer by wrapping the Authorizer
+// that renders client-side Digest credentials. It is what lets the app
+// layer answer a 401 without importing this package: the app sees only the
+// domain port and a model.Header.
+type AuthorizerAdapter struct {
+	authorizer *Authorizer
+}
+
+var _ port.Authorizer = (*AuthorizerAdapter)(nil)
+
+// NewAuthorizerAdapter returns a port.Authorizer backed by a. A nil
+// Authorizer is rejected so a mis-wired composition root fails fast
+// instead of emitting empty Authorization headers.
+func NewAuthorizerAdapter(a *Authorizer) (*AuthorizerAdapter, error) {
+	if a == nil {
+		return nil, fmt.Errorf("auth: nil Authorizer")
+	}
+	return &AuthorizerAdapter{authorizer: a}, nil
+}
+
+// Authorize implements port.Authorizer. It delegates to the Authorizer and
+// wraps the rendered value in a model.Header named "Authorization".
+func (a *AuthorizerAdapter) Authorize(challenge string, cred model.Credentials, method, uri string) (model.Header, error) {
+	ch, err := ParseChallenge(challenge)
+	if err != nil {
+		return model.Header{}, err
+	}
+	value, err := a.authorizer.Authorization(cred, ch, method, uri)
+	if err != nil {
+		return model.Header{}, err
+	}
+	// model.NewHeader panics on CR/LF, and a credential is attacker- or
+	// operator-controlled text, so refuse it as an error instead.
+	if strings.ContainsAny(value, "\r\n") {
+		return model.Header{}, fmt.Errorf("%w: rendered Authorization contains CR/LF", ErrMalformedAuthorization)
+	}
+	return model.NewHeader("Authorization", value), nil
+}
+
 // reqStub is the minimum contract the legacy Responder.Verify needs from a
 // SIP request. It is never exposed outside this package.
 type reqStub struct {
@@ -81,4 +121,4 @@ type reqStub struct {
 }
 
 func (r reqStub) Method() string        { return r.method }
-func (r reqStub) Authorization() string  { return r.auth }
+func (r reqStub) Authorization() string { return r.auth }

@@ -3,6 +3,9 @@ package sip
 
 import (
 	"fmt"
+	"net"
+	"strconv"
+	"strings"
 
 	"github.com/ghettovoice/gosip/sip"
 	"github.com/ghettovoice/gosip/sip/parser"
@@ -10,17 +13,22 @@ import (
 
 // buildConfig accumulates options for BuildRequest / BuildResponse.
 type buildConfig struct {
-	headers     []sip.Header
-	body        string
-	contentType string
-	viaHost     string
-	from        string
-	to          string
-	callID      string
-	seqNo       uint32
-	maxForwards uint32
-	userAgent   string
-	xGBVer      string
+	headers      []sip.Header
+	body         string
+	contentType  string
+	viaHost      string
+	viaTransport string
+	via          string
+	from         string
+	to           string
+	contact      string
+	callID       string
+	seqNo        uint32
+	cseqMethod   string
+	maxForwards  uint32
+	userAgent    string
+	expires      *uint32
+	xGBVer       string
 }
 
 // BuildOption customises a single BuildRequest / BuildResponse call.
@@ -50,6 +58,14 @@ func WithViaHost(host string) BuildOption {
 	return func(c *buildConfig) { c.viaHost = host }
 }
 
+// WithVia supplies a complete Via header value, e.g.
+// "SIP/2.0/UDP 127.0.0.1:5060;branch=z9hG4bK-...". A response echoes the
+// Via of the request it answers, so BuildResponse honours it; BuildRequest
+// generates its own Via (see WithViaHost / WithTransport) and ignores this.
+func WithVia(value string) BuildOption {
+	return func(c *buildConfig) { c.via = value }
+}
+
 // WithFrom sets the From header value (e.g. "sip:alice@example.com").
 func WithFrom(addr string) BuildOption {
 	return func(c *buildConfig) { c.from = addr }
@@ -60,6 +76,30 @@ func WithTo(addr string) BuildOption {
 	return func(c *buildConfig) { c.to = addr }
 }
 
+// WithContact sets the Contact header value, e.g.
+// "sip:34020000001320000001@192.168.1.10:5060". REGISTER carries the
+// address a platform must use to reach this node back.
+func WithContact(addr string) BuildOption {
+	return func(c *buildConfig) { c.contact = addr }
+}
+
+// WithExpires sets the Expires header (seconds). It is optional; 0 is a
+// legal value (RFC 3261 §20.19 uses it to request de-registration), so the
+// builder distinguishes "unset" from "zero".
+func WithExpires(seconds uint32) BuildOption {
+	return func(c *buildConfig) {
+		v := seconds
+		c.expires = &v
+	}
+}
+
+// WithTransport overrides the transport token written into the generated
+// Via header. It defaults to "UDP"; a node listening on TCP must produce
+// "SIP/2.0/TCP" or peers will answer it on the wrong protocol.
+func WithTransport(proto string) BuildOption {
+	return func(c *buildConfig) { c.viaTransport = proto }
+}
+
 // WithCallID sets the Call-ID header. If unset, gosip generates one.
 func WithCallID(id string) BuildOption {
 	return func(c *buildConfig) { c.callID = id }
@@ -68,6 +108,13 @@ func WithCallID(id string) BuildOption {
 // WithCSeq sets the CSeq number. Defaults to 1.
 func WithCSeq(n uint32) BuildOption {
 	return func(c *buildConfig) { c.seqNo = n }
+}
+
+// WithCSeqMethod supplies the method token of a CSeq header. BuildRequest
+// knows the method already and ignores it; BuildResponse needs it because a
+// response's CSeq echoes the request method ("1 REGISTER").
+func WithCSeqMethod(m string) BuildOption {
+	return func(c *buildConfig) { c.cseqMethod = m }
 }
 
 // WithMaxForwards sets the Max-Forwards value. Defaults to 70.
@@ -139,13 +186,19 @@ func BuildRequest(method sip.RequestMethod, target string, opts ...BuildOption) 
 	}
 	hdrs = append(hdrs, &sip.CSeq{SeqNo: seqNo, MethodName: method})
 
-	// From — mandatory. Use a fresh address with default tag.
+	// From — mandatory. A request's From carries a tag
+	// (RFC 3261 §8.1.1.7); the address parser returns only the URI, so a
+	// tag supplied by the caller is re-attached rather than dropped.
 	if cfg.from != "" {
 		addr, err := parseAddressValue(cfg.from)
 		if err != nil {
 			return nil, fmt.Errorf("sip: From %q: %w", cfg.from, err)
 		}
-		hdrs = append(hdrs, &sip.FromHeader{Address: addr})
+		hdr := &sip.FromHeader{Address: addr, Params: sip.NewParams()}
+		if tag, ok := headerParam(cfg.from, "tag"); ok {
+			hdr.Params.Add("tag", sip.String{Str: tag})
+		}
+		hdrs = append(hdrs, hdr)
 	} else {
 		defaultFrom := &sip.FromHeader{
 			Address: defaultSipUri(target),
@@ -161,7 +214,11 @@ func BuildRequest(method sip.RequestMethod, target string, opts ...BuildOption) 
 		if err != nil {
 			return nil, fmt.Errorf("sip: To %q: %w", cfg.to, err)
 		}
-		hdrs = append(hdrs, &sip.ToHeader{Address: addr})
+		hdr := &sip.ToHeader{Address: addr, Params: sip.NewParams()}
+		if tag, ok := headerParam(cfg.to, "tag"); ok {
+			hdr.Params.Add("tag", sip.String{Str: tag})
+		}
+		hdrs = append(hdrs, hdr)
 	} else {
 		hdrs = append(hdrs, &sip.ToHeader{
 			Address: defaultSipUri(target),
@@ -183,13 +240,17 @@ func BuildRequest(method sip.RequestMethod, target string, opts ...BuildOption) 
 	if viaHost == "" {
 		viaHost = "127.0.0.1"
 	}
+	viaTransport := cfg.viaTransport
+	if viaTransport == "" {
+		viaTransport = "UDP"
+	}
 	branch := DefaultBranchGenerator.Next()
 	viaParams := sip.NewParams()
 	viaParams.Add("branch", sip.String{Str: branch})
 	viaHop := &sip.ViaHop{
 		ProtocolName:    "SIP",
 		ProtocolVersion: "2.0",
-		Transport:       "UDP",
+		Transport:       viaTransport,
 		Host:            viaHost,
 		Params:          viaParams,
 	}
@@ -216,6 +277,12 @@ func BuildRequest(method sip.RequestMethod, target string, opts ...BuildOption) 
 	if cfg.contentType != "" {
 		ct := sip.ContentType(cfg.contentType)
 		hdrs = append(hdrs, &ct)
+	}
+
+	// Contact / Expires — optional, carried by REGISTER and its 200 OK.
+	hdrs, err = appendOptionalHeaders(hdrs, &cfg)
+	if err != nil {
+		return nil, err
 	}
 
 	// Extra headers (e.g. X-GB-Ver).
@@ -255,6 +322,52 @@ func BuildResponse(status sip.StatusCode, opts ...BuildOption) (sip.Response, er
 	hdrs := make([]sip.Header, 0, 10)
 	if cfg.xGBVer != "" {
 		hdrs = append(hdrs, newXGBVer(cfg.xGBVer))
+	}
+	if cfg.via != "" {
+		via, err := parseViaHeader(cfg.via)
+		if err != nil {
+			return nil, fmt.Errorf("sip: Via %q: %w", cfg.via, err)
+		}
+		hdrs = append(hdrs, via)
+	}
+	// Call-ID / CSeq / From / To — a response echoes the request's
+	// transaction identifiers. All are optional so a bare response keeps
+	// exactly the shape it had before they existed.
+	if cfg.callID != "" {
+		callID := sip.CallID(cfg.callID)
+		hdrs = append(hdrs, &callID)
+	}
+	if cfg.seqNo != 0 && cfg.cseqMethod != "" {
+		hdrs = append(hdrs, &sip.CSeq{
+			SeqNo:      cfg.seqNo,
+			MethodName: sip.RequestMethod(cfg.cseqMethod),
+		})
+	}
+	if cfg.from != "" {
+		addr, err := parseAddressValue(cfg.from)
+		if err != nil {
+			return nil, fmt.Errorf("sip: From %q: %w", cfg.from, err)
+		}
+		hdr := &sip.FromHeader{Address: addr, Params: sip.NewParams()}
+		if tag, ok := headerParam(cfg.from, "tag"); ok {
+			hdr.Params.Add("tag", sip.String{Str: tag})
+		}
+		hdrs = append(hdrs, hdr)
+	}
+	if cfg.to != "" {
+		addr, err := parseAddressValue(cfg.to)
+		if err != nil {
+			return nil, fmt.Errorf("sip: To %q: %w", cfg.to, err)
+		}
+		hdr := &sip.ToHeader{Address: addr, Params: sip.NewParams()}
+		if tag, ok := headerParam(cfg.to, "tag"); ok {
+			hdr.Params.Add("tag", sip.String{Str: tag})
+		}
+		hdrs = append(hdrs, hdr)
+	}
+	hdrs, err := appendOptionalHeaders(hdrs, &cfg)
+	if err != nil {
+		return nil, err
 	}
 	for _, h := range cfg.headers {
 		hdrs = append(hdrs, h)
@@ -299,6 +412,80 @@ func defaultReasonFor(code sip.StatusCode) string {
 		return "Server Internal Error"
 	}
 	return "OK"
+}
+
+// appendOptionalHeaders appends the optional Contact and Expires headers
+// when the caller supplied them. Both are legal on requests (REGISTER) and
+// on responses (its 200 OK), so BuildRequest and BuildResponse share it.
+func appendOptionalHeaders(hdrs []sip.Header, cfg *buildConfig) ([]sip.Header, error) {
+	if cfg.contact != "" {
+		addr, err := parseAddressValue(cfg.contact)
+		if err != nil {
+			return nil, fmt.Errorf("sip: Contact %q: %w", cfg.contact, err)
+		}
+		hdrs = append(hdrs, &sip.ContactHeader{Address: addr})
+	}
+	if cfg.expires != nil {
+		ex := sip.Expires(*cfg.expires)
+		hdrs = append(hdrs, &ex)
+	}
+	return hdrs, nil
+}
+
+// headerParam extracts a header parameter ("tag=abc") from an address
+// value. Address parsing hands back only the URI, so parameters that live
+// on the header itself have to be read separately.
+func headerParam(value, key string) (string, bool) {
+	for _, part := range strings.Split(value, ";")[1:] {
+		k, v, ok := strings.Cut(strings.TrimSpace(part), "=")
+		if ok && strings.EqualFold(strings.TrimSpace(k), key) {
+			return strings.TrimSpace(v), true
+		}
+	}
+	return "", false
+}
+
+// parseViaHeader turns a Via header value ("SIP/2.0/UDP host:port;branch=x")
+// into the gosip ViaHeader the stack recognises. Gosip looks Via up by
+// type, so a generic "Via: ..." header would not satisfy it.
+func parseViaHeader(value string) (sip.ViaHeader, error) {
+	fields := strings.Fields(value)
+	if len(fields) == 0 {
+		return nil, fmt.Errorf("empty value")
+	}
+	parts := strings.Split(fields[0], "/")
+	if len(parts) != 3 {
+		return nil, fmt.Errorf("malformed protocol %q", fields[0])
+	}
+	hop := &sip.ViaHop{
+		ProtocolName:    parts[0],
+		ProtocolVersion: parts[1],
+		Transport:       parts[2],
+		Params:          sip.NewParams(),
+	}
+	rest := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(value), fields[0]))
+	if rest == "" {
+		return sip.ViaHeader{hop}, nil
+	}
+	segs := strings.Split(rest, ";")
+	host := strings.TrimSpace(segs[0])
+	if h, p, err := net.SplitHostPort(host); err == nil {
+		host = h
+		if n, cerr := strconv.ParseUint(p, 10, 16); cerr == nil {
+			port := sip.Port(n)
+			hop.Port = &port
+		}
+	}
+	hop.Host = host
+	for _, seg := range segs[1:] {
+		seg = strings.TrimSpace(seg)
+		if seg == "" {
+			continue
+		}
+		key, val, _ := strings.Cut(seg, "=")
+		hop.Params.Add(strings.TrimSpace(key), sip.String{Str: strings.TrimSpace(val)})
+	}
+	return sip.ViaHeader{hop}, nil
 }
 
 // parseAddressValue wraps gosip's parser.ParseAddressValue and converts

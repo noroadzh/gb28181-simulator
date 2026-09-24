@@ -19,22 +19,30 @@ type fakeTransport struct {
 	closed  bool
 }
 
-func (f *fakeTransport) Send(_ context.Context, msg model.Message) error {
+// fakePeer is the address fakeTransport reports for received messages; it
+// is a constant so the contract test can assert Receive hands back a
+// usable "host:port" without binding a socket.
+const fakePeer = "127.0.0.1:5060"
+
+func (f *fakeTransport) Send(_ context.Context, msg model.Message, dst string) error {
 	if f.closed {
 		return errors.New("closed")
+	}
+	if dst == "" {
+		return errors.New("empty destination")
 	}
 	f.sent = append(f.sent, msg)
 	return nil
 }
 
-func (f *fakeTransport) Receive(ctx context.Context) (model.Message, error) {
+func (f *fakeTransport) Receive(ctx context.Context) (model.Message, string, error) {
 	if f.rcvIdx >= len(f.receive) {
 		<-ctx.Done()
-		return model.Message{}, ctx.Err()
+		return model.Message{}, "", ctx.Err()
 	}
 	m := f.receive[f.rcvIdx]
 	f.rcvIdx++
-	return m, nil
+	return m, fakePeer, nil
 }
 
 func (f *fakeTransport) Close() error { f.closed = true; return nil }
@@ -57,15 +65,21 @@ func TestSIPTransport_Contract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
 	}
-	if err := ft.Send(ctx, req); err != nil {
+	if err := ft.Send(ctx, req, fakePeer); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
-	got, err := ft.Receive(ctx)
+	got, src, err := ft.Receive(ctx)
 	if err != nil {
 		t.Fatalf("Receive: %v", err)
 	}
 	if got.StatusCode() != 200 {
 		t.Errorf("Receive() status = %d, want 200", got.StatusCode())
+	}
+	if src != fakePeer {
+		t.Errorf("Receive() peer = %q, want %q", src, fakePeer)
+	}
+	if err := ft.Send(ctx, req, ""); err == nil {
+		t.Error("Send with empty destination succeeded, want error")
 	}
 	if err := ft.Close(); err != nil {
 		t.Errorf("Close: %v", err)

@@ -10,10 +10,16 @@
 //     → waits up to --timeout for the first response → prints
 //     "<status>\t<start-line>" to stdout.
 //
-//  2. Receive-only mode: --bind udp://0.0.0.0:5060  (no --send-to)
+//  2. Receive mode: --bind udp://0.0.0.0:5060  (no --send-to)
 //     Waits up to --timeout for the first inbound message → prints
 //     "<status>\t<start-line>". If --expect-status is set, non-matching
 //     responses are treated as a timeout-equivalent failure.
+//
+//     With --answer (Change 4, design D5) the receive mode additionally
+//     replies 200 OK to an inbound request and sends it back to the address
+//     the request arrived from. Without the flag it stays receive-only, as
+//     it was in Change 2 — the flag is opt-in so the diagnostic never
+//     surprises a network it is only meant to observe.
 //
 // Exit codes:
 //
@@ -69,6 +75,12 @@ type Options struct {
 	// From / To URIs used in ModeSend. Defaults are sip:probe@127.0.0.1.
 	From string
 	To   string
+
+	// Answer, when true, makes ModeReceive reply 200 OK to an inbound
+	// request and send it back to the address the request arrived from
+	// (design D5). It is opt-in: without it the receive mode stays
+	// strictly receive-only, which is what Change 2 shipped.
+	Answer bool
 
 	// Stderr override for tests; nil falls back to os.Stderr.
 	Stderr io.Writer
@@ -151,7 +163,8 @@ func runSend(ctx context.Context, tr *siptransport.Transport, opts Options) (Res
 		fmt.Fprintf(errs, "sipprobe: send: %v\n", err)
 		return Result{}, ExitUsage
 	}
-	return waitForResponse(ctx, tr, opts)
+	_, _, res, code := waitForResponse(ctx, tr, opts)
+	return res, code
 }
 
 // stripScheme drops the "udp://" or "tcp://" prefix that the user supplied
@@ -163,25 +176,58 @@ func stripScheme(addr string) string {
 	return addr
 }
 
+// runReceive waits for one inbound message. With --answer it additionally
+// replies 200 OK to a request, using the peer address reported by the
+// transport (design D4/D5). A response is never answered.
 func runReceive(ctx context.Context, tr *siptransport.Transport, opts Options) (Result, int) {
-	return waitForResponse(ctx, tr, opts)
+	msg, peer, res, code := waitForResponse(ctx, tr, opts)
+	if code != ExitOK {
+		return res, code
+	}
+	if !opts.Answer {
+		return res, ExitOK
+	}
+	req, ok := msg.(sip.Request)
+	if !ok {
+		// Nothing to answer: the inbound message was itself a response.
+		return res, ExitOK
+	}
+	if err := sendAnswer(tr, req, peer); err != nil {
+		fmt.Fprintf(opts.stderr(), "sipprobe: answer: %v\n", err)
+		return res, ExitUsage
+	}
+	return res, ExitOK
 }
 
-func waitForResponse(ctx context.Context, tr *siptransport.Transport, opts Options) (Result, int) {
+// sendAnswer builds and transmits the 200 OK for req, addressed to the peer
+// the request came from.
+func sendAnswer(tr *siptransport.Transport, req sip.Request, peer string) error {
+	resp := sip.NewResponseFromRequest("", req, 200, "OK", "")
+	return tr.Send(resp, peer)
+}
+
+// waitForResponse waits for one inbound message and returns it together with
+// the address it arrived from, so callers can answer without re-deriving the
+// peer from headers (design D5).
+func waitForResponse(
+	ctx context.Context,
+	tr *siptransport.Transport,
+	opts Options,
+) (sip.Message, string, Result, int) {
 	errs := opts.stderr()
 	waitCtx, cancel := context.WithTimeout(ctx, opts.Timeout)
 	defer cancel()
 
-	msg, err := tr.Receive(waitCtx)
+	msg, peer, err := tr.Receive(waitCtx)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 			fmt.Fprintf(errs,
 				"timeout waiting for status=%d after %s\n",
 				opts.ExpectStatus, opts.Timeout)
-			return Result{}, ExitTimeout
+			return nil, "", Result{}, ExitTimeout
 		}
 		fmt.Fprintf(errs, "sipprobe: receive: %v\n", err)
-		return Result{}, ExitUsage
+		return nil, "", Result{}, ExitUsage
 	}
 
 	res := Result{StartLine: msg.StartLine()}
@@ -192,15 +238,15 @@ func waitForResponse(ctx context.Context, tr *siptransport.Transport, opts Optio
 			fmt.Fprintf(errs,
 				"unexpected status %d, want %d\n",
 				res.StatusCode, opts.ExpectStatus)
-			return res, ExitUnexpected
+			return msg, peer, res, ExitUnexpected
 		}
 	case sip.Request:
 		res.Method = string(m.Method())
 	default:
 		fmt.Fprintf(errs, "sipprobe: unknown message type %T\n", msg)
-		return res, ExitUsage
+		return msg, peer, res, ExitUsage
 	}
-	return res, ExitOK
+	return msg, peer, res, ExitOK
 }
 
 func (o Options) stderr() io.Writer {

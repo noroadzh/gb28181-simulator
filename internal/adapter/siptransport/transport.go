@@ -72,8 +72,8 @@ func New(bind string, opts ...Option) (*Transport, error) {
 	}
 	layer := transport.NewLayer(
 		net.ParseIP("0.0.0.0"),
-		nil,          // default DNS resolver
-		nil,          // no message mapper
+		nil,             // default DNS resolver
+		nil,             // no message mapper
 		newNoopLogger(), // gosip requires non-nil logger
 	)
 	if err := layer.Listen(scheme, addr); err != nil {
@@ -122,19 +122,36 @@ func (t *Transport) LocalAddr() string { return t.addr }
 // Protocol returns the lower-cased scheme ("udp"/"tcp"/"tls").
 func (t *Transport) Protocol() string { return t.protocol }
 
-// Receive returns the next incoming message. ctx cancellation aborts the
-// wait. The remote endpoint is not carried by gosip's Messages() channel;
-// callers needing the peer address should parse it from the topmost Via
-// header (Change 4+).
-func (t *Transport) Receive(ctx context.Context) (sip.Message, error) {
+// Receive returns the next incoming message together with the address it
+// arrived from, in "host:port" form. ctx cancellation aborts the wait.
+//
+// gosip's Messages() channel does not carry a peer address, but its
+// connection handler records one on each message via SetSource before
+// publishing it (transport/connection_pool.go handleMessage: the UDP remote
+// address from ReadFromUDP, or conn.RemoteAddr() for streamed protocols).
+// We read it back here, which is the "keep it in the receive loop" approach
+// design D4 asks for without re-implementing the socket layer.
+//
+// An address that is missing or lacks a port is an error: silently
+// returning "" would let a caller reply to the wrong destination (spec:
+// "A transport that cannot determine the peer address MUST surface an
+// explicit error").
+func (t *Transport) Receive(ctx context.Context) (sip.Message, string, error) {
 	select {
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return nil, "", ctx.Err()
 	case msg, ok := <-t.out:
 		if !ok {
-			return nil, io.ErrClosedPipe
+			return nil, "", io.ErrClosedPipe
 		}
-		return msg, nil
+		src := strings.TrimSpace(msg.Source())
+		if src == "" {
+			return nil, "", fmt.Errorf("siptransport: peer address unavailable for %T", msg)
+		}
+		if !strings.Contains(src, ":") {
+			return nil, "", fmt.Errorf("siptransport: peer address %q lacks :port", src)
+		}
+		return msg, src, nil
 	}
 }
 
@@ -153,10 +170,17 @@ func (t *Transport) Send(msg sip.Message, dst string) error {
 	}
 	// gosip's transport layer uses Destination() to pick the outbound
 	// connection; without it the Send falls back to the Via port and
-	// returns "connection on port X not found". Only Request has it, so we
-	// guard with a type assertion.
-	if req, ok := msg.(sip.Request); ok {
-		req.SetDestination(dst)
+	// returns "connection on port X not found". Set it on every message
+	// (the method lives on the shared sip.Message interface) so the
+	// caller's explicit dst wins for responses too — design D4 requires the
+	// destination to be explicit, never inferred from the URI or Via.
+	msg.SetDestination(dst)
+	// gosip picks the outbound connection by the port in Source(). A
+	// request falls back to the topmost Via when Source is empty, but a
+	// response has no such fallback and fails with "resolve source port
+	// failed", so set it explicitly for every message we originate.
+	if msg.Source() == "" {
+		msg.SetSource(t.addr)
 	}
 	if err := t.layer.Send(msg); err != nil {
 		return err
@@ -183,8 +207,63 @@ func (t *Transport) Close() error {
 		close(t.out)
 		t.mu.Unlock()
 		t.layer.Cancel()
+		// gosip's layer.Cancel() only closes a "canceled" channel; the
+		// listening socket is released by its own goroutine afterwards, so
+		// Close can return while the port is still bound. Wait for the port
+		// to become bindable again, otherwise a node that is stopped and
+		// immediately restarted on the same address (Offline -> Registering)
+		// fails with "address already in use". A timeout is not fatal: the
+		// caller sees the same bind error it would have seen before, just
+		// later.
+		_ = waitForPortRelease(t.protocol, t.addr, portReleaseTimeout)
 	})
 	return nil
+}
+
+// portReleaseTimeout bounds how long Close waits for the listening socket to
+// be released. It is short because the usual case completes in a few
+// milliseconds.
+const portReleaseTimeout = 500 * time.Millisecond
+
+// waitForPortRelease polls until addr can be bound again, proving the
+// previous listener is gone. It returns immediately for addresses the OS
+// assigned (port 0), which are never reused.
+func waitForPortRelease(protocol, addr string, timeout time.Duration) error {
+	if addr == "" {
+		return nil
+	}
+	if _, port, err := net.SplitHostPort(addr); err != nil || port == "0" {
+		return nil
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		if err := probeBind(protocol, addr); err == nil {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("siptransport: port %s still bound %s after Cancel", addr, timeout)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+// probeBind tries to bind addr and immediately releases it. Success means
+// the address is free.
+func probeBind(protocol, addr string) error {
+	switch protocol {
+	case "tcp", "tls":
+		l, err := net.Listen("tcp", addr)
+		if err != nil {
+			return err
+		}
+		return l.Close()
+	default:
+		l, err := net.ListenPacket("udp", addr)
+		if err != nil {
+			return err
+		}
+		return l.Close()
+	}
 }
 
 // parseBind accepts "scheme://host:port" and returns scheme ("udp"/"tcp"/"tls")

@@ -101,7 +101,7 @@ func TestTransport_MultiInstance(t *testing.T) {
 	done := make(chan sip.Message, 1)
 	errCh := make(chan error, 1)
 	go func() {
-		msg, err := s2.Receive(context.Background())
+		msg, _, err := s2.Receive(context.Background())
 		if err != nil {
 			errCh <- err
 			return
@@ -148,7 +148,7 @@ func TestTransport_MultiInstanceSimultaneous(t *testing.T) {
 				return
 			default:
 			}
-			msg, err := s2.Receive(context.Background())
+			msg, _, err := s2.Receive(context.Background())
 			if err != nil {
 				errCh <- err
 				return
@@ -192,7 +192,7 @@ func TestTransport_ReceiveAfterClose(t *testing.T) {
 	t.Parallel()
 	s1, _, cleanup := newTestPair(t)
 	cleanup() // close both first
-	_, err := s1.Receive(context.Background())
+	_, _, err := s1.Receive(context.Background())
 	if err != io.ErrClosedPipe {
 		t.Fatalf("expected io.ErrClosedPipe after Close, got %v", err)
 	}
@@ -245,7 +245,7 @@ func TestTransport_AuditHook_InjectEmitter(t *testing.T) {
 	req := buildRequest(t)
 	done := make(chan struct{})
 	go func() {
-		_, _ = s2.Receive(context.Background())
+		_, _, _ = s2.Receive(context.Background())
 		close(done)
 	}()
 

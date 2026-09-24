@@ -2,8 +2,11 @@
 # scripts/smoke-sip.sh — Change 2 §8.2 / §10.1 双进程冒烟
 #
 # 启两个 cmd/sipprobe：
-#   A：listen udp://127.0.0.1:5060，期待收 1 条 INVITE 即打印 + 退出 0
+#   A：listen udp://127.0.0.1:5060 --answer，收到 INVITE 后回 200 OK 并退出 0
 #   B：listen udp://127.0.0.1:5061，send INVITE → 5060，期待 200 OK → 退出 0
+#
+# Change 4：A 必须带 --answer，否则它只收不发，B 会超时退出 2。该能力来自
+# design D5（opt-in 回包），承接 enterprise-skeleton 遗留的 §11.4。
 #
 # 退出码：
 #   0  - 两个进程都退出 0，stdout 行数 ≥ 2
@@ -41,9 +44,9 @@ if command -v tcpdump >/dev/null 2>&1; then
   fi
 fi
 
-echo "[smoke] launching probe A (listener on :$PORT_A)"
+echo "[smoke] launching probe A (listener on :$PORT_A, answers 200 OK)"
 "$BIN" sipprobe --bind "udp://127.0.0.1:$PORT_A" \
-                --expect-status 200 \
+                --answer \
                 --timeout "$TIMEOUT" \
                 > "$LOG_A.stdout" 2> "$LOG_A.stderr" &
 PID_A=$!

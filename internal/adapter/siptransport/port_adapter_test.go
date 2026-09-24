@@ -3,7 +3,7 @@ package siptransport_test
 import (
 	"context"
 	"io"
-	"net/url"
+	"net"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -36,46 +36,79 @@ func TestPortAdapter_NilReceiverSafe(t *testing.T) {
 	}
 	hdr := model.NewHeader("CSeq", "1 INVITE")
 	m, _ := model.NewRequest("INVITE", "sip:bob@example.com:5060", []model.Header{hdr}, "")
-	if err := p.Send(context.Background(), m); err == nil {
+	if err := p.Send(context.Background(), m, "127.0.0.1:5060"); err == nil {
 		t.Error("nil Send must error")
 	}
-	if _, err := p.Receive(context.Background()); err == nil {
+	if _, _, err := p.Receive(context.Background()); err == nil {
 		t.Error("nil Receive must error")
 	}
 }
 
-// TestPortAdapter_DestinationFromURI exercises the host:port extraction
-// through a real round-trip on a bound transport.
-func TestPortAdapter_DestinationFromURI(t *testing.T) {
-	tr, err := siptransport.New("udp://127.0.0.1:0")
+// TestPortAdapter_SendUsesExplicitDestination asserts the caller-supplied
+// destination is what the message is sent to (never inferred from the
+// message URI), and that Receive reports the address the message arrived
+// from (design D4).
+func TestPortAdapter_SendUsesExplicitDestination(t *testing.T) {
+	// Probe a free port first: Transport.LocalAddr() reports the bind
+	// string, so ":0" would be reported verbatim and nothing would be
+	// routable.
+	sender, err := siptransport.New("udp://" + freeUDPAddr(t))
 	if err != nil {
-		t.Fatalf("New: %v", err)
+		t.Fatalf("New sender: %v", err)
 	}
-	defer tr.Close()
+	defer sender.Close()
+	receiver, err := siptransport.New("udp://" + freeUDPAddr(t))
+	if err != nil {
+		t.Fatalf("New receiver: %v", err)
+	}
+	defer receiver.Close()
 
-	adapter := siptransport.NewPortAdapter(tr)
+	adapterS := siptransport.NewPortAdapter(sender)
+	adapterR := siptransport.NewPortAdapter(receiver)
 
 	hdr := model.NewHeader("CSeq", "1 INVITE")
 	m, err := model.NewRequest("INVITE", "sip:bob@example.com:5060", []model.Header{hdr}, "")
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
 	}
-	if m.URI() == nil {
-		t.Fatal("URI is nil")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// The destination is explicit, and deliberately NOT the URI host
+	// (example.com), which proves the URI is not used for routing.
+	if err := adapterS.Send(ctx, m, receiver.LocalAddr()); err != nil {
+		t.Fatalf("Send to %q: %v", receiver.LocalAddr(), err)
 	}
-	// model.Message.URI() for "sip:bob@example.com:5060" parses as
-	// scheme=sip opaque=bob@example.com:5060 (Host is empty); the
-	// adapter's destinationFromURI handles both shapes. We only verify
-	// the URI is non-nil here; the destination extraction is exercised
-	// by Send below.
-	if m.URI().String() == "" {
-		t.Fatal("URI String is empty")
+
+	got, peer, err := adapterR.Receive(ctx)
+	if err != nil {
+		t.Fatalf("Receive: %v", err)
 	}
-	// The actual Send exercises the destination logic against a UDP
-	// socket bound to 127.0.0.1:0; we only care that no panic occurs
-	// and the call returns an error from gosip's transport layer
-	// (because example.com:5060 is not reachable in CI).
-	_ = adapter.Send(context.Background(), m)
+	if got.Method() != "INVITE" {
+		t.Errorf("Method() = %q, want INVITE", got.Method())
+	}
+	if peer == "" {
+		t.Fatal("Receive returned an empty peer address")
+	}
+	host, _, err := net.SplitHostPort(peer)
+	if err != nil {
+		t.Fatalf("peer %q is not host:port: %v", peer, err)
+	}
+	if host != "127.0.0.1" {
+		t.Errorf("peer host = %q, want 127.0.0.1", host)
+	}
+	// The peer must be the sender's real endpoint so a caller can hand it
+	// straight back to Send and answer (spec: "peer address can be used to
+	// reply directly").
+	if peer != sender.LocalAddr() {
+		t.Errorf("Receive peer = %q, want sender endpoint %q", peer, sender.LocalAddr())
+	}
+
+	// An empty destination is rejected rather than silently inferred.
+	if err := adapterS.Send(ctx, m, ""); err == nil {
+		t.Error("Send with empty destination succeeded, want error")
+	}
 }
 
 // TestPortAdapter_ReceiveContextCancel verifies Receive respects
@@ -89,13 +122,13 @@ func TestPortAdapter_ReceiveContextCancel(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	if _, err := adapter.Receive(ctx); err == nil {
+	if _, _, err := adapter.Receive(ctx); err == nil {
 		t.Error("Receive must error on ctx timeout")
 	}
 	if err := tr.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
-	if _, err := adapter.Receive(context.Background()); err == nil {
+	if _, _, err := adapter.Receive(context.Background()); err == nil {
 		t.Error("Receive after Close must error")
 	}
 }
@@ -114,6 +147,22 @@ func TestPortAdapter_CloseIdempotent(t *testing.T) {
 	if err := adapter.Close(); err != nil {
 		t.Fatalf("second Close: %v", err)
 	}
+}
+
+// freeUDPAddr reserves a loopback UDP port and releases it immediately so
+// the caller can bind a Transport to it. Transport.LocalAddr() echoes the
+// bind string, so binding ":0" would report ":0" back and be unroutable.
+func freeUDPAddr(t *testing.T) string {
+	t.Helper()
+	l, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("probe free port: %v", err)
+	}
+	addr := l.LocalAddr().String()
+	if err := l.Close(); err != nil {
+		t.Fatalf("close probe socket: %v", err)
+	}
+	return addr
 }
 
 // stubCloser is a tiny io.Closer adapter used to assert double-Close does
@@ -146,5 +195,4 @@ func TestPortAdapter_CloseDoesNotLeakDoubleCall(t *testing.T) {
 	if got := atomic.LoadInt32(&sc.calls); got != 1 {
 		t.Errorf("stubCloser calls=%d want 1", got)
 	}
-	_ = url.URL{}
 }
