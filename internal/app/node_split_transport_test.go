@@ -18,10 +18,15 @@ func splitSource(t *testing.T, in []incoming) *scriptedTransport {
 
 func request(t *testing.T, method string) model.Message {
 	t.Helper()
+	return requestWithCallID(t, method, "split-call")
+}
+
+func requestWithCallID(t *testing.T, method, callID string) model.Message {
+	t.Helper()
 	msg, err := model.NewRequest(method, "sip:34020000002160000001@3402000000", []model.Header{
 		model.NewHeader("From", "<sip:34020000011310000001@3402000000>;tag=split1"),
 		model.NewHeader("To", "<sip:34020000002160000001@3402000000>"),
-		model.NewHeader("Call-ID", "split-call"),
+		model.NewHeader("Call-ID", callID),
 		model.NewHeader("CSeq", "1 "+method),
 	}, "")
 	if err != nil {
@@ -183,5 +188,162 @@ func TestSplitHalfCloseLeavesTheSocket(t *testing.T) {
 	}
 	if err := split.Upstream().Send(context.Background(), request(t, "REGISTER"), testServer); err != nil {
 		t.Errorf("the socket is unusable after a half was closed: %v", err)
+	}
+}
+
+// Responses whose Call-ID matches a registered transaction handler are
+// delivered to that handler rather than the default direction-based half.
+func TestSplitTransportTransactionHandlerOverridesDefaultRouting(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	callID := "txn-123"
+	// Start with an empty source so the handler is registered before any
+	// message is processed.
+	src := &scriptedTransport{}
+	split := newSplitTransport(ctx, src)
+	defer func() { _ = split.Close() }()
+
+	// Register a handler before any message arrives.
+	got := make(chan model.Message, 1)
+	split.RegisterHandler(callID, TransactionHandler{
+		Half: halfUpstream,
+		OnMessage: func(msg model.Message, peer string) {
+			got <- msg
+		},
+	})
+
+	// Inject the response after the handler is registered.
+	src.mu.Lock()
+	src.in = append(src.in, incoming{msg: response(t, 200, callIDHeader(callID)), peer: testServer})
+	src.mu.Unlock()
+
+	select {
+	case msg := <-got:
+		if msg.StatusCode() != 200 {
+			t.Errorf("status = %d, want 200", msg.StatusCode())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not receive the matched response")
+	}
+}
+
+// Unregistered responses fall back to direction-based routing.
+func TestSplitTransportTransactionHandlerFallbackToDefaultRouting(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	src := splitSource(t, []incoming{
+		{msg: response(t, 200, callIDHeader("no-handler")), peer: testServer},
+	})
+	split := newSplitTransport(ctx, src)
+	defer func() { _ = split.Close() }()
+
+	got, _, err := split.Upstream().Receive(ctx)
+	if err != nil {
+		t.Fatalf("upstream Receive: %v", err)
+	}
+	if got.StatusCode() != 200 {
+		t.Errorf("status = %d, want 200", got.StatusCode())
+	}
+}
+
+// INVITE requests automatically register a default handler so that later
+// responses for the same Call-ID reach the serving half.
+func TestSplitTransportInviteAutoRegistersHandler(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	callID := "invite-auto"
+	src := splitSource(t, []incoming{
+		{msg: requestWithCallID(t, "INVITE", callID), peer: testServer},
+		{msg: response(t, 200, callIDHeader(callID)), peer: testServer},
+	})
+	split := newSplitTransport(ctx, src)
+	defer func() { _ = split.Close() }()
+
+	// The serving half must receive the INVITE request.
+	serving := split.Serving()
+	msg, _, err := serving.Receive(ctx)
+	if err != nil {
+		t.Fatalf("serving Receive (INVITE): %v", err)
+	}
+	if msg.Method() != "INVITE" {
+		t.Errorf("method = %q, want INVITE", msg.Method())
+	}
+
+	// The auto-registered handler routes the response to the serving half.
+	msg, _, err = serving.Receive(ctx)
+	if err != nil {
+		t.Fatalf("serving Receive (response): %v", err)
+	}
+	if msg.StatusCode() != 200 {
+		t.Errorf("status = %d, want 200", msg.StatusCode())
+	}
+}
+
+// Unregistering a handler removes the override; subsequent responses fall
+// back to direction-based routing.
+func TestSplitTransportUnregisterHandlerFallsBack(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	callID := "unreg-txn"
+	src := splitSource(t, []incoming{
+		{msg: response(t, 200, callIDHeader(callID)), peer: testServer},
+	})
+	split := newSplitTransport(ctx, src)
+	defer func() { _ = split.Close() }()
+
+	split.RegisterHandler(callID, TransactionHandler{
+		Half: halfUpstream,
+		OnMessage: func(msg model.Message, peer string) {
+			// Intentionally empty: we unregister before the response arrives.
+		},
+	})
+	split.UnregisterHandler(callID)
+
+	got, _, err := split.Upstream().Receive(ctx)
+	if err != nil {
+		t.Fatalf("upstream Receive: %v", err)
+	}
+	if got.StatusCode() != 200 {
+		t.Errorf("status = %d, want 200", got.StatusCode())
+	}
+}
+
+// SUBSCRIBE requests also auto-register a transaction handler.
+func TestSplitTransportSubscribeAutoRegistersHandler(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	callID := "sub-auto"
+	src := splitSource(t, []incoming{
+		{msg: requestWithCallID(t, "SUBSCRIBE", callID), peer: testServer},
+		{msg: response(t, 200, callIDHeader(callID)), peer: testServer},
+	})
+	split := newSplitTransport(ctx, src)
+	defer func() { _ = split.Close() }()
+
+	serving := split.Serving()
+	sub, _, err := serving.Receive(ctx)
+	if err != nil {
+		t.Fatalf("serving Receive: %v", err)
+	}
+	if sub.Method() != "SUBSCRIBE" {
+		t.Errorf("method = %q, want SUBSCRIBE", sub.Method())
+	}
+
+	resp, _, err := serving.Receive(ctx)
+	if err != nil {
+		t.Fatalf("serving did not receive the response via auto-registered handler: %v", err)
+	}
+	if resp.StatusCode() != 200 {
+		t.Errorf("status = %d, want 200", resp.StatusCode())
 	}
 }

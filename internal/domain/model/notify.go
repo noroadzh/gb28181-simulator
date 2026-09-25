@@ -12,8 +12,16 @@ import (
 const (
 	// CmdTypeKeepalive is the keepalive notify a downstream sends.
 	CmdTypeKeepalive = "Keepalive"
-	// CmdTypeCatalog is the catalog query an upstream sends.
+	// CmdTypeCatalog is the catalog query or subscription. The MANSCDP
+	// CmdType value is the same for both; the distinction is the XML
+	// envelope (Query vs Subscribe), which is handled by the codec.
 	CmdTypeCatalog = "Catalog"
+	// CmdTypeSubscribe is the MANSCDP subscription notify.
+	CmdTypeSubscribe = "Subscribe"
+	// CmdTypeMediaStatus is the media status notify.
+	CmdTypeMediaStatus = "MediaStatus"
+	// CmdTypePlaybackControl is the playback control command.
+	CmdTypePlaybackControl = "PlaybackControl"
 )
 
 // Notify is a MANSCDP notify a platform received: what the peer said,
@@ -68,8 +76,16 @@ func (n Notify) Status() string { return n.status }
 func (n Notify) IsKeepalive() bool { return n.cmdType == CmdTypeKeepalive }
 
 // IsCatalogQuery reports whether the notify asks the platform for its
-// catalog.
+// catalog or subscribes to catalog updates. The MANSCDP CmdType is the
+// same; the caller must distinguish query from subscription by the XML
+// envelope, which the codec handles before calling this.
 func (n Notify) IsCatalogQuery() bool { return n.cmdType == CmdTypeCatalog }
+
+// IsMediaStatus reports whether the notify carries media parameters.
+func (n Notify) IsMediaStatus() bool { return n.cmdType == CmdTypeMediaStatus }
+
+// IsPlaybackControl reports whether the notify controls playback.
+func (n Notify) IsPlaybackControl() bool { return n.cmdType == CmdTypePlaybackControl }
 
 // HasSN reports whether the notify carried a sequence number, which a
 // catalog answer has to echo.

@@ -35,6 +35,9 @@ var ErrKeepaliveLost = fmt.Errorf("app: keepalive unanswered")
 // holds no registration: there is nothing to send `Expires: 0` for.
 var ErrNotRegistered = fmt.Errorf("app: node holds no registration")
 
+// ErrOptionsTimeout is returned when an OPTIONS probe goes unanswered.
+var ErrOptionsTimeout = fmt.Errorf("app: options probe unanswered")
+
 // Keeper holds registrations open: for every online device node it runs one
 // goroutine that sends MESSAGE keepalives and renews the registration before
 // it expires.
@@ -226,12 +229,20 @@ func (k *Keeper) run(ctx context.Context, s *session) {
 				k.log.Warn("keepalive failed", "node_id", s.id.String(),
 					"consecutive", s.failures, "max", s.reg.MaxHeartbeatFailures(),
 					"error", err.Error())
-				if s.failures >= s.reg.MaxHeartbeatFailures() {
-					k.fail(ctx, s, err)
-					return
-				}
 			} else {
 				s.failures = 0
+			}
+			if s.reg.OptionsEnabled() {
+				if err := k.sendOptions(ctx, s); err != nil {
+					s.failures++
+					k.log.Warn("options probe failed", "node_id", s.id.String(),
+						"consecutive", s.failures, "max", s.reg.MaxHeartbeatFailures(),
+						"error", err.Error())
+				}
+			}
+			if s.failures >= s.reg.MaxHeartbeatFailures() {
+				k.fail(ctx, s, fmt.Errorf("link probe failures exceeded %d", s.reg.MaxHeartbeatFailures()))
+				return
 			}
 			k.renewIfDue(ctx, s)
 		}
@@ -305,6 +316,61 @@ func (k *Keeper) heartbeat(ctx context.Context, s *session) error {
 				StatusCode: status,
 				Err:        fmt.Errorf("platform refused the keepalive"),
 			}
+		}
+	}
+}
+
+// sendOptions sends an OPTIONS request to the upstream platform and waits
+// for a 2xx or 408 response. It is used by platform-small nodes to keep
+// the cascade link alive between heartbeats. Only a 2xx counts as success;
+// a timeout or a non-2xx returns an error that the run loop can report.
+func (k *Keeper) sendOptions(ctx context.Context, s *session) error {
+	node, ok := k.registry.Get(ctx, s.id)
+	if !ok {
+		return fmt.Errorf("app: node %s is gone", s.id)
+	}
+	domain := node.Profile().Domain()
+	uri := registrationRequestURI(domain, s.reg)
+	callID := randomCallID()
+	msg, err := model.NewRequest("OPTIONS", uri, []model.Header{
+		model.NewHeader("From", "<sip:"+s.id.String()+"@"+domain+">;tag="+randomTag()),
+		model.NewHeader("To", "<sip:"+s.id.String()+"@"+domain+">"),
+		model.NewHeader("Call-ID", callID),
+		model.NewHeader("CSeq", "1 OPTIONS"),
+		model.NewHeader("Max-Forwards", "70"),
+	}, "")
+	if err != nil {
+		return err
+	}
+
+	waitCtx, cancel := context.WithTimeout(ctx, s.reg.HeartbeatTimeout())
+	defer cancel()
+
+	if err := s.tr.Send(waitCtx, msg, s.reg.Server()); err != nil {
+		return &RegistrationError{Stage: StageSend, Err: err}
+	}
+	k.log.Debug("options sent", "node_id", s.id.String(), "call_id", callID)
+
+	for {
+		got, peer, err := s.tr.Receive(waitCtx)
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrOptionsTimeout, err)
+		}
+		if h, ok := got.Header("Call-ID"); !ok || h.Value() != callID {
+			continue
+		}
+		if peer != s.reg.Server() {
+			continue
+		}
+		status := got.StatusCode()
+		switch {
+		case status >= 100 && status < 200:
+			continue
+		case status >= 200 && status < 300:
+			k.log.Debug("options answered", "node_id", s.id.String(), "status", status)
+			return nil
+		default:
+			return fmt.Errorf("upstream refused OPTIONS: %d", status)
 		}
 	}
 }

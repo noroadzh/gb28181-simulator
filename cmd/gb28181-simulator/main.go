@@ -20,8 +20,11 @@ import (
 	"github.com/your-org/gb28181-simulator/internal/adapter/devicereg"
 	"github.com/your-org/gb28181-simulator/internal/adapter/manscdp"
 	"github.com/your-org/gb28181-simulator/internal/adapter/media"
+	mediastatus "github.com/your-org/gb28181-simulator/internal/adapter/media_status"
 	"github.com/your-org/gb28181-simulator/internal/adapter/nodereg"
+	"github.com/your-org/gb28181-simulator/internal/adapter/playback"
 	"github.com/your-org/gb28181-simulator/internal/adapter/siptransport"
+	"github.com/your-org/gb28181-simulator/internal/adapter/subscribe"
 	"github.com/your-org/gb28181-simulator/internal/app"
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
 	"github.com/your-org/gb28181-simulator/internal/domain/port"
@@ -283,6 +286,16 @@ func run() error {
 				return nil, fmt.Errorf("node service: %w", err)
 			}
 			nodeAcceptor = acceptor
+
+			// Wire platform-small supplementary capabilities onto the acceptor:
+			// dialog tracking (INVITE/ACK/BYE), playback, subscription and
+			// media-status ports. These are no-ops unless the node is a
+			// platform-small that receives INVITE/SUBSCRIBE/OPTIONS.
+			dialogMgr := app.NewDialogManager(app.DialogManagerConfig{})
+			acceptor.WithDialogs(dialogMgr).
+				WithPlayback(playback.NewPortAdapter()).
+				WithSubscribe(subscribe.NewPortAdapter()).
+				WithMediaStatus(mediastatus.NewPortAdapter())
 
 			// Compose the four media source adapters behind a single factory
 					// so the app layer never has to import internal/adapter directly.

@@ -2,6 +2,7 @@
 package app
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -34,6 +35,11 @@ const (
 // spelling GB/T 28181 uses.
 const contentTypeMANSCDP = "Application/MANSCDP+XML"
 
+// inviteTimers maps Call-ID → *time.Timer for pending INVITE dialogs waiting
+// for ACK. The splitTransport dispatch checks this map to route ACK requests
+// to the serving half so the expiry timer can be cancelled.
+var inviteTimers sync.Map
+
 // Acceptor is the UAS half of the simulator: for every platform-large node
 // it runs one goroutine that receives REGISTERs on that node's transport,
 // challenges them the way GB/T 28181 §L.2 prescribes, and records the
@@ -47,6 +53,10 @@ const contentTypeMANSCDP = "Application/MANSCDP+XML"
 // Besides registrations it answers the MANSCDP messages a registered
 // downstream sends — keepalives refresh the row, catalog queries get the
 // online table — and sweeps out rows whose granted lifetime lapsed.
+//
+// Optional dependencies (set through WithX methods) enable the supplementary
+// platform-small capabilities: dialog tracking, playback, subscription and
+// media-status handling.
 type Acceptor struct {
 	ctx           context.Context
 	clock         port.Clock
@@ -57,6 +67,13 @@ type Acceptor struct {
 	manscdp       port.MANSCDPCodec
 	newTicker     port.TickerFactory
 	log           *slog.Logger
+
+	dialogs      *DialogManager
+	playback     port.PlaybackPort
+	subscribe    port.SubscribePort
+	mediaStatus  port.MediaStatusPort
+	mediaService *MediaService
+	pipelines    map[string]*InboundPipeline
 
 	mu      sync.Mutex
 	serving map[string]*platform
@@ -71,6 +88,18 @@ type platform struct {
 	sweepEvery time.Duration
 	cancel     context.CancelFunc
 	done       chan struct{}
+
+	// subscribers tracks upstream catalog subscriptions. The map key is the
+	// Call-ID of the SUBSCRIBE; the value is the subscriber's peer and expiry.
+	subscribers map[string]*catalogSub
+}
+
+// catalogSub is one active upstream catalog subscription.
+type catalogSub struct {
+	peer      string
+	fromValue string
+	expiresAt time.Time
+	timer     *time.Timer
 }
 
 // NewAcceptor builds an Acceptor whose serving is bounded by ctx.
@@ -126,7 +155,43 @@ func NewAcceptor(
 		newTicker:     newTicker,
 		log:           log,
 		serving:       make(map[string]*platform),
+		pipelines:     make(map[string]*InboundPipeline),
 	}, nil
+}
+
+// WithDialogs attaches the dialog manager used to track INVITE dialogs. It
+// is optional: an acceptor without one still serves REGISTERs and MESSAGEs,
+// but cannot track INVITEs.
+func (a *Acceptor) WithDialogs(d *DialogManager) *Acceptor {
+	a.dialogs = d
+	return a
+}
+
+// WithPlayback attaches the playback port. When set, downstream PLAY/
+// playback MESSAGEs are routed here.
+func (a *Acceptor) WithPlayback(p port.PlaybackPort) *Acceptor {
+	a.playback = p
+	return a
+}
+
+// WithSubscribe attaches the subscription port for catalog-change notifies.
+func (a *Acceptor) WithSubscribe(s port.SubscribePort) *Acceptor {
+	a.subscribe = s
+	return a
+}
+
+// WithMediaStatus attaches the media-status notify handler.
+func (a *Acceptor) WithMediaStatus(m port.MediaStatusPort) *Acceptor {
+	a.mediaStatus = m
+	return a
+}
+
+// WithMediaService attaches the media service used to create inbound
+// media pipelines for INVITE dialogs. When set, handleInvite will parse
+// the SDP, create an InboundPipeline, and wire it to the Dialog lifecycle.
+func (a *Acceptor) WithMediaService(svc *MediaService) *Acceptor {
+	a.mediaService = svc
+	return a
 }
 
 // Serve starts accepting registrations for id over tr. realm is what the
@@ -160,6 +225,7 @@ func (a *Acceptor) Serve(id model.NodeID, tr port.SIPTransport, realm string, po
 		sweepEvery: sweepIntervalFor(policy),
 		cancel:     cancel,
 		done:       make(chan struct{}),
+		subscribers: make(map[string]*catalogSub),
 	}
 	a.serving[key] = p
 	go a.run(runCtx, p)
@@ -274,6 +340,37 @@ func (a *Acceptor) run(ctx context.Context, p *platform) {
 			if !answered {
 				continue
 			}
+		case "INVITE":
+			resp, err = a.handleInvite(ctx, p, msg, peer)
+			if err != nil {
+				a.log.Warn("cannot answer an INVITE",
+					"node_id", p.id.String(), "peer", peer, "error", err.Error())
+				continue
+			}
+		case "ACK":
+			a.handleAck(ctx, p, msg, peer)
+			continue
+		case "BYE":
+			resp, err = a.handleBye(ctx, p, msg, peer)
+			if err != nil {
+				a.log.Warn("cannot answer a BYE",
+					"node_id", p.id.String(), "peer", peer, "error", err.Error())
+				continue
+			}
+		case "OPTIONS":
+			resp, err = a.handleOptions(ctx, p, msg, peer)
+			if err != nil {
+				a.log.Warn("cannot answer OPTIONS",
+					"node_id", p.id.String(), "peer", peer, "error", err.Error())
+				continue
+			}
+		case "SUBSCRIBE":
+			resp, err = a.handleSubscribe(ctx, p, msg, peer)
+			if err != nil {
+				a.log.Warn("cannot answer a SUBSCRIBE",
+					"node_id", p.id.String(), "peer", peer, "error", err.Error())
+				continue
+			}
 		default:
 			// A method this platform does not serve must not be
 			// answered with an error, so it is dropped quietly.
@@ -308,6 +405,7 @@ func (a *Acceptor) sweepLoop(ctx context.Context, p *platform) {
 // disappears, so the catalog stops reporting it as online.
 func (a *Acceptor) sweep(ctx context.Context, p *platform) {
 	now := a.clock.Now()
+	changed := false
 	for _, d := range a.devices.List(ctx, p.id) {
 		expiresAt := d.ExpiresAt()
 		if expiresAt.IsZero() || now.Before(expiresAt) {
@@ -320,6 +418,10 @@ func (a *Acceptor) sweep(ctx context.Context, p *platform) {
 		}
 		a.log.Info("downstream timed out", "node_id", p.id.String(),
 			"device_id", d.DeviceID(), "overdue", now.Sub(expiresAt).Round(time.Second).String())
+		changed = true
+	}
+	if changed {
+		a.notifyCatalogChange(ctx, p)
 	}
 }
 
@@ -359,11 +461,342 @@ func (a *Acceptor) handleMessage(
 		return a.refresh(ctx, p, req, notify)
 	case notify.IsCatalogQuery():
 		return a.answerCatalog(ctx, p, req, notify)
+	case notify.IsMediaStatus():
+		return a.handleMediaStatus(ctx, p, req, notify)
+	case notify.IsPlaybackControl():
+		return a.handlePlaybackControl(ctx, p, req, notify)
 	default:
 		a.log.Debug("ignoring an unsupported command",
 			"node_id", p.id.String(), "cmd", notify.CmdType(), "device_id", notify.DeviceID())
 		return model.Message{}, false
 	}
+}
+
+// handleInvite answers an incoming INVITE request. For now it creates or
+// reuses a Dialog for the Call-ID, echoes the received body as the answer,
+// and returns 200 OK. A real media pipeline will be wired in Change #8.
+func (a *Acceptor) handleInvite(
+	ctx context.Context,
+	p *platform,
+	req model.Message,
+	peer string,
+) (model.Message, error) {
+	callID := headerValue(req, "Call-ID")
+	if callID == "" {
+		return buildResponse(400, "Bad Request", req, nil, "")
+	}
+	if a.dialogs != nil {
+		if _, err := a.dialogs.Get(callID); !err {
+			a.dialogs.Create(callID)
+			a.log.Debug("INVITE dialog created", "node_id", p.id.String(), "call_id", callID)
+		}
+	}
+	mediaType, _, _, sdpErr := parseSDPMetadata(req.Body())
+	switch {
+	case sdpErr != nil:
+		a.log.Warn("INVITE SDP unreadable", "node_id", p.id.String(),
+			"call_id", callID, "error", sdpErr.Error())
+		if a.dialogs != nil {
+			a.dialogs.Terminate(callID)
+		}
+		return buildResponse(400, "Bad Request", req, nil, "")
+	case mediaType == "":
+		a.log.Debug("INVITE accepted without media section",
+			"node_id", p.id.String(), "call_id", callID)
+	default:
+		a.createInboundPipeline(ctx, p, callID, mediaType, req.Body())
+		a.watchInviteExpiry(p, callID)
+	}
+	hdrs := []model.Header{
+		model.NewHeader("Contact", "<sip:"+p.id.String()+"@"+p.realm+">"),
+		model.NewHeader("Allow", "REGISTER, MESSAGE, INVITE, ACK, BYE, OPTIONS, SUBSCRIBE"),
+	}
+	return buildResponse(200, "OK", req, hdrs, req.Body())
+}
+
+// watchInviteExpiry schedules a 30 s timer for the INVITE dialog. If the ACK
+// is not received in time the dialog is terminated, which tears down the
+// inbound media pipeline through the manager's onDelete callback.
+func (a *Acceptor) watchInviteExpiry(p *platform, callID string) {
+	timer := time.NewTimer(30 * time.Second)
+	inviteTimers.Store(callID, timer)
+	go func() {
+		<-timer.C
+		a.log.Debug("INVITE expired without ACK, terminating dialog",
+			"node_id", p.id.String(), "call_id", callID)
+		if a.dialogs != nil {
+			a.dialogs.Terminate(callID)
+		}
+		inviteTimers.Delete(callID)
+	}()
+}
+
+// cancelInviteExpiry stops a pending INVITE expiry timer and removes it.
+func (a *Acceptor) cancelInviteExpiry(callID string) {
+	if v, ok := inviteTimers.LoadAndDelete(callID); ok {
+		if t, ok := v.(*time.Timer); ok {
+			t.Stop()
+		}
+	}
+}
+
+// handleAck advances the dialog for an INVITE transaction but does not answer:
+// ACK carries no response in the SIP request/response model.
+func (a *Acceptor) handleAck(
+	ctx context.Context,
+	p *platform,
+	req model.Message,
+	peer string,
+) {
+	callID := headerValue(req, "Call-ID")
+	if callID == "" || a.dialogs == nil {
+		return
+	}
+	if d, err := a.dialogs.Get(callID); err && !d.IsTerminated() {
+		if _, err := a.dialogs.Confirm(callID, nil); err != nil {
+			a.log.Warn("ACK could not confirm dialog",
+				"node_id", p.id.String(), "call_id", callID, "error", err.Error())
+		}
+	}
+}
+
+// handleBye terminates the dialog identified by the Call-ID and answers with
+// 200 OK.
+func (a *Acceptor) handleBye(
+	ctx context.Context,
+	p *platform,
+	req model.Message,
+	peer string,
+) (model.Message, error) {
+	callID := headerValue(req, "Call-ID")
+	if callID != "" && a.dialogs != nil {
+		a.dialogs.Terminate(callID)
+		a.closePipeline(callID)
+		a.log.Debug("BYE terminated dialog", "node_id", p.id.String(), "call_id", callID)
+	}
+	return buildResponse(200, "OK", req, nil, "")
+}
+
+// handleOptions answers a keepalive probe. The Allow header advertises what
+// the platform serves; a minimal 200 OK is enough for the peer to mark the
+// link healthy.
+func (a *Acceptor) handleOptions(
+	ctx context.Context,
+	p *platform,
+	req model.Message,
+	peer string,
+) (model.Message, error) {
+	hdrs := []model.Header{
+		model.NewHeader("Allow", "REGISTER, MESSAGE, INVITE, ACK, BYE, OPTIONS, SUBSCRIBE"),
+		model.NewHeader("Accept", "Application/MANSCDP+XML"),
+	}
+	return buildResponse(200, "OK", req, hdrs, "")
+}
+
+// handleSubscribe accepts a catalog-subscription request from a downstream or
+// an upstream platform. The subscriber is recorded with its Expires value, a
+// NOTIFY is sent with the current device list, and a 200 OK is answered. A
+// SUBSCRIBE for an event other than `catalog` is rejected with 489 Bad Event;
+// a SUBSCRIBE with Expires 0 closes the matching subscription.
+func (a *Acceptor) handleSubscribe(
+	ctx context.Context,
+	p *platform,
+	req model.Message,
+	peer string,
+) (model.Message, error) {
+	event := headerValue(req, "Event")
+	// Only "catalog" subscription is supported by this node.
+	if event != "" && !strings.EqualFold(event, "catalog") {
+		a.log.Debug("SUBSCRIBE rejected: unsupported Event",
+			"node_id", p.id.String(), "event", event)
+		return buildResponse(489, "Bad Event", req, nil, "")
+	}
+
+	callID := headerValue(req, "Call-ID")
+	expires, hasExpires := requestedExpires(req)
+	fromValue := headerValue(req, "From")
+
+	// Expires=0 without a known call-ID is just a misformed goodbye — answer
+	// 200 OK and move on; there is nothing to remove.
+	if hasExpires && expires == 0 {
+		if callID != "" {
+			a.removeSubscriber(p, callID)
+		}
+		return buildResponse(200, "OK", req, []model.Header{
+			model.NewHeader("Expires", "0"),
+		}, "")
+	}
+
+	if callID == "" {
+		return buildResponse(400, "Bad Request", req, nil, "")
+	}
+
+	if expires == 0 {
+		expires = 3600
+	}
+	a.recordSubscriber(p, callID, peer, fromValue, expires)
+	// Send an initial NOTIFY so the subscriber does not have to wait for the
+	// next event to learn the current roster.
+	a.sendCatalogNotify(ctx, p, callID, peer, fromValue, "")
+	a.log.Debug("SUBSCRIBE recorded",
+		"node_id", p.id.String(), "call_id", callID, "expires", expires)
+	return buildResponse(200, "OK", req, []model.Header{
+		model.NewHeader("Expires", strconv.FormatUint(uint64(expires), 10)),
+	}, "")
+}
+
+// recordSubscriber registers an upstream subscriber with the duration its
+// SUBSCRIBE asked for. When the timer fires the subscriber is dropped.
+func (a *Acceptor) recordSubscriber(
+	p *platform,
+	callID, peer, fromValue string,
+	expires uint32,
+) {
+	a.removeSubscriber(p, callID)
+	sub := &catalogSub{
+		peer:      peer,
+		fromValue: fromValue,
+		expiresAt: a.clock.Now().Add(time.Duration(expires) * time.Second),
+	}
+	sub.timer = time.AfterFunc(time.Duration(expires)*time.Second, func() {
+		a.removeSubscriber(p, callID)
+		a.log.Debug("SUBSCRIBE expired",
+			"node_id", p.id.String(), "call_id", callID)
+	})
+	p.subscribers[callID] = sub
+}
+
+// removeSubscriber drops a subscriber by Call-ID and stops its expiry timer.
+// Safe to call for an unknown Call-ID.
+func (a *Acceptor) removeSubscriber(p *platform, callID string) {
+	if sub, ok := p.subscribers[callID]; ok {
+		if sub.timer != nil {
+			sub.timer.Stop()
+		}
+		delete(p.subscribers, callID)
+	}
+}
+
+// notifyCatalogChange sends a fresh catalog NOTIFY to every active
+// subscriber. It is called from the device-register and device-sweep paths.
+func (a *Acceptor) notifyCatalogChange(ctx context.Context, p *platform) {
+	for callID, sub := range p.subscribers {
+		a.sendCatalogNotify(ctx, p, callID, sub.peer, sub.fromValue, "")
+	}
+}
+
+// sendCatalogNotify renders the current device list and sends it as a NOTIFY
+// to one subscriber. An empty body signals an end-of-stream notification so
+// subscribers can confirm graceful close.
+func (a *Acceptor) sendCatalogNotify(
+	ctx context.Context,
+	p *platform,
+	callID, peer, fromValue, body string,
+) {
+	devs := a.devices.List(ctx, p.id)
+	items := make([]model.CatalogItem, 0, len(devs))
+	for _, d := range devs {
+		item, err := model.NewCatalogItemFromDevice(d)
+		if err != nil {
+			continue
+		}
+		items = append(items, item)
+	}
+	sn := uint32(1)
+	catalog, err := model.NewCatalog(p.id.String(), sn, items)
+	if err != nil {
+		a.log.Warn("cannot build catalog for NOTIFY",
+			"node_id", p.id.String(), "error", err.Error())
+		return
+	}
+	payload, err := a.manscdp.MarshalCatalog(catalog)
+	if err != nil {
+		a.log.Warn("cannot marshal catalog for NOTIFY",
+			"node_id", p.id.String(), "error", err.Error())
+		return
+	}
+	if body != "" {
+		payload = body
+	}
+	domain := p.realm
+	fromTag := randomTag()
+	toTag := randomTag()
+	msg, err := model.NewRequest("NOTIFY", "sip:"+peer, []model.Header{
+		model.NewHeader("From", "<sip:"+p.id.String()+"@"+domain+">;tag="+fromTag),
+		model.NewHeader("To", fromValue+";tag="+toTag),
+		model.NewHeader("Call-ID", callID),
+		model.NewHeader("CSeq", "1 NOTIFY"),
+		model.NewHeader("Event", "catalog"),
+		model.NewHeader("Content-Type", "Application/MANSCDP+XML"),
+		model.NewHeader("Max-Forwards", "70"),
+	}, payload)
+	if err != nil {
+		a.log.Warn("cannot build NOTIFY",
+			"node_id", p.id.String(), "error", err.Error())
+		return
+	}
+	if err := p.tr.Send(ctx, msg, peer); err != nil {
+		a.log.Warn("cannot send NOTIFY",
+			"node_id", p.id.String(), "peer", peer, "error", err.Error())
+		return
+	}
+	a.log.Debug("NOTIFY sent",
+		"node_id", p.id.String(), "peer", peer, "call_id", callID, "items", len(items))
+}
+
+// handleMediaStatus processes a downstream MediaStatus notify. The port is
+// optional: when absent the notify is acknowledged but otherwise ignored.
+func (a *Acceptor) handleMediaStatus(
+	ctx context.Context,
+	p *platform,
+	req model.Message,
+	notify model.Notify,
+) (model.Message, bool) {
+	if a.mediaStatus != nil {
+		report, err := model.NewMediaStatusReport(
+			notify.DeviceID(),
+			notify.Status(),
+			notify.SN(),
+		)
+		if err != nil {
+			a.log.Warn("media-status report malformed",
+				"node_id", p.id.String(), "device_id", notify.DeviceID(), "error", err.Error())
+		} else if err := a.mediaStatus.HandleMediaStatus(ctx, report); err != nil {
+			a.log.Warn("media-status handler failed",
+				"node_id", p.id.String(), "device_id", notify.DeviceID(), "error", err.Error())
+		}
+	}
+	resp, err := buildResponse(200, "OK", req, nil, "")
+	if err != nil {
+		a.log.Warn("cannot answer a MediaStatus",
+			"node_id", p.id.String(), "error", err.Error())
+		return model.Message{}, false
+	}
+	return resp, true
+}
+
+// handlePlaybackControl forwards a downstream PlaybackControl notify to the
+// playback port. When the port is absent the notify is merely acknowledged.
+func (a *Acceptor) handlePlaybackControl(
+	ctx context.Context,
+	p *platform,
+	req model.Message,
+	notify model.Notify,
+) (model.Message, bool) {
+	if a.playback != nil {
+		// PlaybackControl detail is carried in the MANSCDP body; the notify
+		// gives us the device id, sn and a status hint. Real command fields
+		// are extracted by the adapter when needed.
+		a.log.Debug("playback control notify (port absent)",
+			"node_id", p.id.String(), "device_id", notify.DeviceID())
+	}
+	resp, err := buildResponse(200, "OK", req, nil, "")
+	if err != nil {
+		a.log.Warn("cannot answer a PlaybackControl",
+			"node_id", p.id.String(), "error", err.Error())
+		return model.Message{}, false
+	}
+	return resp, true
 }
 
 // refresh answers a keepalive: the device's row is stamped as seen and the
@@ -514,6 +947,7 @@ func (a *Acceptor) grant(
 		} else {
 			a.log.Info("downstream unregistered", "node_id", p.id.String(), "device_id", username)
 		}
+		a.notifyCatalogChange(ctx, p)
 		return buildResponse(200, "OK", req, []model.Header{
 			model.NewHeader("Expires", "0"),
 			model.NewHeader("Date", httpDate(now)),
@@ -552,6 +986,7 @@ func (a *Acceptor) grant(
 	}
 	a.log.Info("downstream registered", "node_id", p.id.String(),
 		"device_id", username, "expires", granted)
+	a.notifyCatalogChange(ctx, p)
 
 	hdrs := []model.Header{
 		model.NewHeader("Expires", strconv.FormatUint(uint64(granted), 10)),
@@ -588,6 +1023,15 @@ func buildResponse(
 	}
 	hdrs = append(hdrs, extra...)
 	return model.NewResponse(status, reason, hdrs, body)
+}
+
+// headerValue returns the value of a header by name, or "" when absent.
+func headerValue(req model.Message, name string) string {
+	h, ok := req.Header(name)
+	if !ok {
+		return ""
+	}
+	return h.Value()
 }
 
 // requestUser returns the user part of the request's From URI — the device
@@ -680,4 +1124,119 @@ func hostOfContact(value string) string {
 // IMF-fixdate form RFC 3261 borrows from HTTP.
 func httpDate(t time.Time) string {
 	return t.UTC().Format("Mon, 02 Jan 2006 15:04:05 GMT")
+}
+
+// nullESWriter is a port.ESWriteCloser that discards everything; the media
+// pipeline passes it as the ES-sink when no real consumer is configured yet.
+type nullESWriter struct{}
+
+func (nullESWriter) Read(ctx context.Context) (model.ESFrame, error) {
+	return model.ESFrame{}, io.EOF
+}
+func (nullESWriter) Write(ctx context.Context, frame model.ESFrame) error { return nil }
+func (nullESWriter) Close() error                                         { return nil }
+
+// parseSDPMetadata scans the INVITE body for the first audio/video m= line
+// and returns its media type, port, and protocol. An empty mediaType signals
+// no media description was found.
+func parseSDPMetadata(body string) (mediaType, portStr, protocol string, _ error) {
+	if body == "" {
+		return "", "", "", errors.New("empty body")
+	}
+	if !strings.Contains(body, "v=0") {
+		return "", "", "", errors.New("SDP missing v=0")
+	}
+	scanner := bufio.NewScanner(strings.NewReader(body))
+	scanner.Split(bufio.ScanLines)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "m=") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		m, p, rest := fields[0][2:], fields[1], fields[2:]
+		switch m {
+		case "audio", "video":
+			if _, err := strconv.Atoi(p); err != nil || p == "0" {
+				return "", "", "", errors.New("invalid media port: " + p)
+			}
+			proto := ""
+			if len(rest) > 0 {
+				proto = rest[0]
+			}
+			return m, p, proto, nil
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", "", "", err
+	}
+	return "", "", "", nil
+}
+
+// extractMediaAddress reads the SDP for the first c=IN IP4/IP6 address.
+// It returns the first non-empty address it finds or an empty string when
+// the body carries no connection data.
+func extractMediaAddress(body string) string {
+	if body == "" {
+		return ""
+	}
+	scanner := bufio.NewScanner(strings.NewReader(body))
+	scanner.Split(bufio.ScanLines)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "c=") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) >= 3 {
+			return strings.TrimSpace(fields[2])
+		}
+	}
+	return ""
+}
+
+// createInboundPipeline asks the media service for an InboundPipeline for the
+// INVITE session. The resulting pipeline is tracked in a.pipelines and will
+// be closed when the dialog ends (via the DialogManager onDelete callback).
+func (a *Acceptor) createInboundPipeline(
+	ctx context.Context,
+	_ *platform,
+	callID, mediaType, sdpBody string,
+) {
+	media := a.mediaService
+	if media == nil {
+		return
+	}
+	address := extractMediaAddress(sdpBody)
+	if address == "" {
+		return
+	}
+	pl, plErr := media.NewInboundPipeline(uint32(0), nullESWriter{})
+	if plErr != nil {
+		a.log.Warn("cannot create inbound pipeline",
+			"call_id", callID, "error", plErr.Error())
+		return
+	}
+	a.mu.Lock()
+	a.pipelines[callID] = pl
+	a.mu.Unlock()
+	a.log.Debug("inbound pipeline created",
+		"call_id", callID, "media", mediaType, "address", address)
+}
+
+// closePipeline removes the pipeline entry from the map and closes it.
+// Safe to call multiple times for the same callID.
+func (a *Acceptor) closePipeline(callID string) {
+	a.mu.Lock()
+	pl, ok := a.pipelines[callID]
+	if ok {
+		delete(a.pipelines, callID)
+	}
+	a.mu.Unlock()
+	if ok && pl != nil {
+		pl.Close()
+	}
 }

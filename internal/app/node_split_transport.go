@@ -27,6 +27,21 @@ const (
 // reading, and a socket that keeps taking them would only hide that.
 const splitQueue = 32
 
+// TransactionMatcher registers per-Call-ID handlers that override the
+// default direction-based routing for responses.
+type TransactionMatcher interface {
+	RegisterHandler(callID string, handler TransactionHandler)
+	UnregisterHandler(callID string)
+}
+
+// TransactionHandler carries the routing target for a matched Call-ID.
+type TransactionHandler struct {
+	// Half is the split half that should receive matched messages.
+	Half half
+	// OnMessage is invoked with the matched message and its peer.
+	OnMessage func(msg model.Message, peer string)
+}
+
 // splitTransport reads one socket and hands each message to the half that
 // can use it.
 //
@@ -38,14 +53,29 @@ const splitQueue = 32
 // one place, and sorts what it reads: requests go to the serving half,
 // responses to the registering one. Both halves still send over the same
 // socket, so the peer sees one node on one address, as it must.
+//
+// For INVITE and SUBSCRIBE transactions the splitter can also route
+// responses by Call-ID: a half that sent such a request registers a
+// handler, and the matching response is delivered to that handler instead
+// of the default direction-based half. Responses whose Call-ID has no
+// handler fall back to the default routing.
 type splitTransport struct {
-	tr port.SIPTransport
-
+	tr     port.SIPTransport
 	cancel context.CancelFunc
 	done   chan struct{}
-
+	// uas is the queue that carries requests to the serving half; uac the
+	// queue that carries responses to the upstream half. Both are bounded
+	// by splitQueue.
 	uas chan arrival
 	uac chan arrival
+
+	mu       sync.Mutex
+	handlers map[string]*transactionHandler
+}
+
+type transactionHandler struct {
+	half half
+	fn   func(model.Message, string)
 }
 
 // arrival is one message and where it came from.
@@ -63,11 +93,12 @@ func newSplitTransport(ctx context.Context, tr port.SIPTransport) *splitTranspor
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	s := &splitTransport{
-		tr:     tr,
-		cancel: cancel,
-		done:   make(chan struct{}),
-		uas:    make(chan arrival, splitQueue),
-		uac:    make(chan arrival, splitQueue),
+		tr:      tr,
+		cancel:  cancel,
+		done:    make(chan struct{}),
+		uas:     make(chan arrival, splitQueue),
+		uac:     make(chan arrival, splitQueue),
+		handlers: make(map[string]*transactionHandler),
 	}
 	go s.run(runCtx)
 	return s
@@ -83,18 +114,79 @@ func (s *splitTransport) run(ctx context.Context) {
 			return // the socket closed, or the node was stopped
 		}
 		a := arrival{msg: msg, peer: peer}
-		queue := s.uac
-		if msg.IsRequest() {
-			queue = s.uas
+		s.dispatch(a)
+	}
+}
+
+// dispatch routes one message to the appropriate destination.
+func (s *splitTransport) dispatch(a arrival) {
+	msg, peer := a.msg, a.peer
+
+	if !msg.IsRequest() {
+		// For responses, first check if a transaction handler is registered.
+		callID := extractCallID(msg)
+		if callID != "" {
+			s.mu.Lock()
+			h, ok := s.handlers[callID]
+			s.mu.Unlock()
+			if ok {
+				h.fn(msg, peer)
+				return
+			}
 		}
+		// Fall back to default: responses go to the upstream half.
 		select {
-		case queue <- a:
+		case s.uac <- a:
 		default:
-			// The half that should have taken this is not reading:
-			// a request nobody serves, or an answer to something
-			// nobody sent. Dropping it is better than blocking the
-			// other half behind it.
+			// The upstream half is not reading; drop silently.
 		}
+		return
+	}
+
+	// For requests, register a handler for INVITE/SUBSCRIBE so their
+	// responses (200 OK, ACK, etc.) reach the correct half.
+	callID := extractCallID(msg)
+	method := msg.Method()
+	if callID != "" && (method == "INVITE" || method == "SUBSCRIBE") {
+		s.mu.Lock()
+		_, already := s.handlers[callID]
+		s.mu.Unlock()
+		if !already {
+			// Register a default handler that forwards to the serving half.
+			// The serving half can override this via RegisterHandler before
+			// the response arrives.
+			h := &transactionHandler{
+				half: halfServing,
+				fn: func(m model.Message, p string) {
+					select {
+					case s.uas <- arrival{msg: m, peer: p}:
+					default:
+					}
+				},
+			}
+			s.mu.Lock()
+			s.handlers[callID] = h
+			s.mu.Unlock()
+		}
+	}
+
+	// ACK for a pending INVITE is consumed by the transaction handler so
+	// that the app-layer expiry timer is cancelled and the dialog confirmed.
+	if msg.Method() == "ACK" && callID != "" {
+		s.mu.Lock()
+		th, found := s.handlers[callID]
+		s.mu.Unlock()
+		if found {
+			th.fn(msg, peer)
+			return
+		}
+	}
+
+	// All other requests go to the serving half.
+	select {
+	case s.uas <- a:
+	default:
+		// The serving half is not reading; drop silently.
 	}
 }
 
@@ -118,6 +210,12 @@ func (s *splitTransport) Close() error {
 	close(s.uas)
 	close(s.uac)
 	return nil
+}
+
+// extractCallID returns the Call-ID value of msg, or "" if absent.
+func extractCallID(msg model.Message) string {
+	h, _ := msg.Header("Call-ID")
+	return h.Value()
 }
 
 // splitHalf is one half's view of the shared socket.
@@ -150,10 +248,45 @@ func (h splitHalf) Receive(ctx context.Context) (model.Message, string, error) {
 	}
 }
 
+// RegisterHandler installs a transaction handler for the given Call-ID.
+// The handler overrides the default direction-based routing for responses
+// whose Call-ID matches.
+func (s *splitTransport) RegisterHandler(callID string, h TransactionHandler) {
+	if h.OnMessage == nil {
+		return
+	}
+	s.mu.Lock()
+	s.handlers[callID] = &transactionHandler{half: h.Half, fn: h.OnMessage}
+	s.mu.Unlock()
+}
+
+// UnregisterHandler removes the handler for callID, causing responses for
+// that Call-ID to fall back to direction-based routing.
+func (s *splitTransport) UnregisterHandler(callID string) {
+	s.mu.Lock()
+	delete(s.handlers, callID)
+	s.mu.Unlock()
+}
+
 // Close does not close the shared socket: the half did not bind it, and the
 // other half may still be using it. Ending the splitter is Close on the
 // splitTransport itself.
 func (h splitHalf) Close() error { return nil }
+
+// RegisterTransaction is a convenience that registers a handler on the
+// underlying split transport for this half.
+func (h splitHalf) RegisterTransaction(callID string, fn func(model.Message, string)) {
+	if h.split != nil {
+		h.split.RegisterHandler(callID, TransactionHandler{Half: h.half, OnMessage: fn})
+	}
+}
+
+// UnregisterTransaction removes the handler for callID.
+func (h splitHalf) UnregisterTransaction(callID string) {
+	if h.split != nil {
+		h.split.UnregisterHandler(callID)
+	}
+}
 
 // splitters keeps the splitter of every node that has one, so a node that is
 // stopped — or faulted — takes its reader with it and nothing is left

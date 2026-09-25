@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Notify>
+  <CmdType>MediaStatus</CmdType>
+  <SN>1</SN>
+  <DeviceID>34020000001320000001</DeviceID>
+  <ChannelID>34020000001320000001</ChannelID>
+  <Video>1920,1080,4096,25,H.264</Video>
+  <Record>1</Record>
+</Notify>

@@ -46,6 +46,7 @@ type Registration struct {
 	heartbeatInterval    time.Duration
 	heartbeatTimeout     time.Duration
 	heartbeatMaxFailures uint32
+	optionsEnabled       bool
 }
 
 // RegistrationParams is the flat input for NewRegistration. Zero values take
@@ -64,6 +65,7 @@ type RegistrationParams struct {
 	HeartbeatInterval    time.Duration
 	HeartbeatTimeout     time.Duration
 	HeartbeatMaxFailures uint32
+	OptionsEnabled       bool
 }
 
 // NewRegistration validates params and returns the immutable Registration.
@@ -140,6 +142,7 @@ func NewRegistration(p RegistrationParams) (Registration, error) {
 		heartbeatInterval:    interval,
 		heartbeatTimeout:     heartbeatTimeout,
 		heartbeatMaxFailures: maxFailures,
+		optionsEnabled:       p.OptionsEnabled,
 	}, nil
 }
 
@@ -182,6 +185,10 @@ func (r Registration) HeartbeatTimeout() time.Duration { return r.heartbeatTimeo
 // MaxHeartbeatFailures returns how many consecutive unanswered keepalives a
 // node tolerates before it is declared unreachable.
 func (r Registration) MaxHeartbeatFailures() uint32 { return r.heartbeatMaxFailures }
+
+// OptionsEnabled reports whether the node should probe the upstream with
+// periodic OPTIONS requests in addition to the MESSAGE keepalive.
+func (r Registration) OptionsEnabled() bool { return r.optionsEnabled }
 
 // CredentialsFor builds the credentials used to answer a challenge issued
 // for realm. The realm only becomes known when the platform challenges us,

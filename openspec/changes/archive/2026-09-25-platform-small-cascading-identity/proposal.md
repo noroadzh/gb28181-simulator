@@ -1,65 +1,71 @@
 # Proposal
 
-对应路线图阶段编号：**#7 `platform-small-node`（共 15 阶段）的第一部分**。本 change
-交付该阶段的"身份与级联链路"，该阶段其余部分（SUBSCRIBE 目录订阅、INVITE 点播、
-OPTIONS 保活、MediaStatus 上报）留给后续 change。
+对应路线图阶段编号：**#7 `platform-small-node`（共 15 阶段）的第二部分**。本 change
+交付该阶段的"主动中继能力"：目录订阅、点播回放、保活探测与媒体状态上报，把 platform-small
+从"被动的身份与级联链路"升级为"完整媒体与控制中继"。
 
 ## Non-goals
 
-- 主动能力：SUBSCRIBE 目录订阅、INVITE 点播、OPTIONS 保活、MediaStatus 上报——
-  #7 的后续 change。本 change 只把身份与级联链路打通。
-- 目录在平台之间的同步（把学到的下级通道报给上级）。本 change 的目录应答只回答
-  "注册到我的那些设备"，跨级目录汇聚需要订阅与通道表。
-- 新的 HTTP 端点、新的配置键。
 - 级联转发头（`X-RoutePath` / `X-PreferredPath`）——路线图 #9。
-- 按 SIP 事务（Call-ID / branch）分捡消息。本 change 只按方向分捡（请求给受理半、
-  响应给注册半），因为小平台目前在上游侧只收响应。
+- 动态目录与报警/录像查询（移动位置、报警事件、历史录像）——路线图 #10。
+- GB/T 28181-2022 增量能力与版本协商 —— 路线图 #11。
+- SM2/SM3 安全互认证 —— 路线图 #12。
+- 异常流注入、抓包面板、pcap 导出 —— 路线图 #13。
+- Web 管理界面 —— 路线图 #14。
+- YAML 场景脚本引擎与报告 —— 路线图 #15。
 
 ## Why
 
-`platform-small`（类型码 216）今天只是一个枚举值：节点能创建、能起停，但 `Start` 对它
-既不注册也不受理，配置里的 `platform:` 段也被文档标注为"只对 platform-large 有意义"。
-于是国标里最常见的一种拓扑拼不出来——多级级联 `A → B → C` 中的 B：它在上级眼里是
-一个注册上来的下级（UAC），在下级眼里是一个受理注册、应答目录查询的上级（UAS）。缺了
-这个身份，级联链中间那一环只能靠"两台 platform-large 首尾相接地假装"，而假装出来的
-节点不会注册、不会被清扫、也不会出现在上级的在线表里。
+#7 第一部分已经把 platform-small 建成了级联链中间环：它向下受理注册、应答目录、清扫超时，
+向上注册、保活、续期。但国标里的"平台"不只是被动应答——它还要能向自己的下级发送目录订阅、
+在收到上级 INVITE 时能把媒体流转发给本地设备或文件、向上级汇报通道的媒体状态、以及用
+OPTIONS 探测上级活性。
 
-这一 change 给 `platform-small` 装上双向身份：向下受理、向上注册，两段配置可单独或同时
-存在。它是后续 #7 主动能力（SUBSCRIBE 目录订阅、INVITE 点播、MediaStatus）的前提——
-一个学不到下级的平台没有可上报的通道。
+没有这些主动能力，platform-small 只是一个"带在线表的转发壳"：它能被查到，但不能主动维护
+目录一致性；它能被点播，但只能把媒体原样推出去，不能把上级 INVITE 和下级源组装成一条完整
+管道；它知道自己的设备在线，但不知道它们的媒体通道是活跃还是静默。
+
+这一 change 补齐 platform-small 的主动中继能力，使其成为国标级联中真正可用的中间平台。
 
 ## What Changes
 
-- **`platform-small` 启动时同时扮演两半。** 先以 UAS 身份在自己的 transport 上受理下级
-  注册（复用 `Acceptor`），再以 UAC 身份注册到配置的上级平台（复用 `Registrar`），并在
-  注册成功后交给 `Keeper` 保活与续期。
-- **两段配置独立可选。** 只声明 `registration:` 是"纯下级平台"；只声明（或省略）
-  `platform:` 是"只受理的小平台"；两者都声明就是级联中继。省略 `platform:` 时取域默认
-  值，与 platform-large 一致。
-- **生命周期推进幂等。** `serve` 与 `register` 各自都会把节点推到 `online`；第二次推进
-  不得因状态机无 `online → online` 边而失败。任一半失败都 faults 整个节点并回滚另一半。
-- **停止是两半一起停。** 停受理（先停 goroutine 再释放端口，清在线表）、停保活、向上
-  注销。
-- **配置校验放开。** `platform:` 段对 `platform-small` 同样有效；`registration:` 对
-  platform-small 同样有效（此前只有 device 会走注册分支）。
-- **可观测性不变。** 在线设备端点 `GET /v1/nodes/{id}/devices` 对 platform-small 可用，
-  返回的是注册到它的下级；日志沿用既有字段，不含凭据。
+- **SUBSCRIBE 目录订阅**：platform-small 向自己的下级设备发送 `Subscribe`（`CmdType = Catalog`），
+  接收并缓存下级目录变更通知，在上级查询目录时能回答包含实时变更的结果，而不仅是启动时拍的一张
+  快照。
+- **INVITE 点播与媒体管道组装**：处理上级发来的 `INVITE` 请求，解析 SDP，建立 Dialog/Session
+  跟踪，组装入站媒体管道（`RTPDeizer → PSDepacketizer → ESWriteCloser`），并把点播请求按
+  设备 ID 转发给对应下级。
+- **OPTIONS 保活探测**：向上级平台周期性发送 `OPTIONS` 保活探测，区分 200（正常）、408（超时）、
+  5xx（故障）响应，作为 MESSAGE keepalive 的补充，在注册仍有效但上级无响应时提前发现问题。
+- **MediaStatus 上报**：解析下级设备上报的 `Notify`（`CmdType = MediaStatus`），记录通道状态，
+  并在收到上级查询时能作答；向上级发送 MediaStatus 查询与变更通知。
 
 ## Capabilities
 
 ### New Capabilities
 
-- `platform-small-node`: platform-small 身份的双向级联——作为 UAS 受理下级注册、作为 UAC
-  注册到上级并保活，两段可独立配置，生命周期与停止语义。
+- `platform-small-node`（补充）：主动中继能力——目录订阅、INVITE 点播与媒体管道组装、
+  OPTIONS 保活探测、MediaStatus 上报与查询。
 
 ### Modified Capabilities
 
-（无。`node-abstraction` 已声明三种身份的协议行为由后续 change 填充，其需求不变；
-`device-node` 与 `platform-large-node` 的既有需求也不受影响。）
+- `platform-small-node`：扩展原 spec，新增主动能力需求；原身份与级联链路需求保持不变。
 
 ## Impact
 
-- `internal/app/node_service.go`：`Start` / `Stop` 的按 kind 分支，状态推进的幂等处理。
-- `internal/platform/config/config.go`：`platform:` 段的注释与校验说明（无新增键）。
-- `internal/app/node_service_*_test.go`、`internal/adapter/siptest/`（新增三级级联 e2e）。
-- `README.md`、`docs/architecture.md`：补 platform-small 身份与级联拓扑。
+- `internal/app/dialog.go`（新增）：Dialog/Session 管理，维护 Call-ID → DialogState 映射，
+  管理 INVITE 事务状态机。
+- `internal/app/media_service.go`：新增 `InboundPipeline` 方法，组装入站媒体管道。
+- `internal/app/acceptor.go`：扩展 `ServingHandler`，新增 INVITE/SUBSCRIBE/OPTIONS/ACK/BYE 方法
+  处理。
+- `internal/app/node_split_transport.go`：升级 `splitTransport` 为事务分拣，支持 Call-ID 级别
+  请求/响应匹配。
+- `internal/app/keeper.go`：扩展 `Keeper`，增加向上级发送 OPTIONS 保活探测。
+- `internal/adapter/manscdp/codec.go`、`notify.go`、`catalog.go`：新增 Subscribe/MediaStatus/
+  PlaybackControl 编解码适配器。
+- `internal/domain/model/notify.go`：新增 `CmdTypeSubscribe`、`CmdTypeMediaStatus` 常量。
+- `internal/domain/port/media.go`、`port.go`：新增 `PlaybackPort`、`SubscribePort`、
+  `MediaStatusPort` 接口。
+- `internal/app/media_service.go`：新增入站媒体管道组装。
+- `internal/app/node_service.go`：组装 Dialog 管理与入站管道。
+- `openspec/specs/platform-small-node/spec.md`：合并 ADDED 需求。

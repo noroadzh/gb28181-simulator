@@ -2,130 +2,107 @@
 
 ## Context
 
-见 `proposal.md` 的 Why。实现前的相关现状：
+#7 第一部分已经让 platform-small 能作为级联中间环：向下受理、向上注册、目录应答、清扫超时。
+但分拣器是"按方向"的临时方案，且 serving loop 只 dispatch REGISTER 和 MESSAGE，INVITE、
+SUBSCRIBE、OPTIONS、ACK、BYE 全部被静默丢弃。
 
-- `NodeID` 已能从类型码 `216` 解析出 `NodeKindPlatformSmall`（`node-abstraction`），但
-  `NodeService.Start` 只对 `NodeKindDevice` 走 `register`、只对 `NodeKindPlatformLarge` 走
-  `serve`，platform-small 落到最后的 `return nil`——起停成功但什么也不做。
-- `NodeProfile` 已经能同时持有 `registration`（UAC）与 `serving`（UAS）两段，两者互不排斥；
-  配置层也已允许同一条目同时写 `platform:` 与 `registration:`，只是注释说 `platform:` 只对
-  platform-large 有意义。
-- 两半的用例都已存在且按节点隔离：`Acceptor.Serve/Stop`（#6，含心跳、目录应答、超时清扫）
-  与 `Registrar.Register` + `Keeper.Start`（#5）。它们都不关心节点是哪一种 kind。
-- 状态机 `node_status.go` 没有 `online → online` 边；`serve` 与 `register` 各自都会推
-  `registered → online`。
+MANSCDP 只解码 Keepalive 和 Catalog，MediaStatus/Subscribe/PlaybackControl 缺失。
+媒体层只有出站管道，没有入站组装。
 
-也就是说：这一 change 不需要新的用例类，需要的是**分派**与**幂等**。
+## Goals
 
-## Goals / Non-Goals
+- 让 platform-small 能处理 INVITE/SUBSCRIBE/OPTIONS/ACK/BYE 等 SIP 方法。
+- 让 platform-small 能向自己的下级发送目录订阅并接收变更通知。
+- 让 platform-small 能把上级 INVITE 的媒体流组装成本地可消费的 ES 帧。
+- 让 platform-small 能向上级发送 OPTIONS 保活探测并区分响应类型。
+- 让 platform-small 能解析并上报/查询 MediaStatus。
 
-**Goals:**
+## Non-Goals
 
-- 让 platform-small 在一次 `Start` 里建立两半（受理 + 注册保活），并作为一个节点推进/回卷。
-- 让配置层明确"两段对 platform-small 都有效"。
-- 用一条三级级联的 e2e（`device → platform-small → platform-large`）证明中间那一环真的既是
-  UAS 又是 UAC，且上级能向它查到它下面的设备。
-
-**Non-Goals:**
-
-- 主动能力（SUBSCRIBE 目录订阅、INVITE 点播、OPTIONS 保活、MediaStatus）——#7 的后续
-  change，本 change 只把身份与级联链路打通。
-- 目录在平台之间的**同步**（把学到的下级通道报给上级）。本 change 的目录应答只回答"注册到
-  我的那些设备"，跨级目录汇聚需要订阅与通道表，留给下一部分。
-- 新的 HTTP 端点、新的配置键。
-- 级联转发头（`X-RoutePath` / `X-PreferredPath`）——Change 9。
+- 级联转发头（X-RoutePath / X-PreferredPath）——路线图 #9。
+- 动态目录与报警/录像查询 —— 路线图 #10。
+- GB/T 28181-2022 增量能力 —— 路线图 #11。
+- SM2/SM3 安全互认证 —— 路线图 #12。
+- 异常流注入、抓包面板 —— 路线图 #13。
+- Web 管理界面 —— 路线图 #14。
+- YAML 场景脚本引擎 —— 路线图 #15。
 
 ## Decisions
 
-### 1. 复用既有用例，不为 platform-small 新建服务类
+### 1. 升级 splitTransport 为事务分拣
 
-`Start` 对 platform-small 依次调用既有的 `serve` 与 `register`。
+当前按方向分拣是临时方案。INVITE/SUBSCRIBE 需要按 Call-ID 级别匹配请求与响应，因此将
+`splitTransport` 扩展为 `transactionSplitTransport`，支持 serving 半和 registering 半各自
+注册事务处理器。
 
-- 备选：新建 `Cascader` 用例，把两半编排在它内部。
-- 取舍：`Acceptor` 与 `Registrar`/`Keeper` 已经按节点隔离、各自处理失败与停止，再包一层只会
-  多一个要维护的状态容器。真正新的东西是"分派顺序"和"推进幂等"，两者都属于 `NodeService`。
-- 结论：不改 `app` 的分层，只改 `NodeService` 的分支。
+- 理由：按方向分捡只够用因为小平台在上游侧只收响应；一旦加上上游来的请求（INVITE /
+  SUBSCRIBE），方向分捡会把请求也送注册半，导致 serving 半收不到。
+- 备选 A：给 Transport 加按 Call-ID 的事务登记。那是真正的 SIP 事务层，本 change
+  只做最小升级。
+- 备选 B：给两半各配一个监听口。违反 spec 的"两半都走自己的 transport"。
+- 结论：升级为事务分拣，serving 半优先认领，剩余报文再按方向分拣。
 
-### 2. 先受理，再注册
+### 2. Dialog/Session 跟踪放在 app 层
 
-顺序为 `serve` → `register`。
+新建 `internal/app/dialog.go`，维护 `Call-ID → DialogState` 映射，管理 INVITE 事务状态机
+（calling → confirmed → terminated）。不放在 domain 层因为 Dialog 是协议会话概念，
+domain 保持纯值对象。
 
-- 理由：受理几乎不会失败（监听已由 lifecycle 绑好），而注册失败是常态（上级不可达、密码
-  错）。把容易失败的一半放在后面，失败路径就只是"停掉已建立的受理"，与 `NodeService` 已有
-  的 `stopServing` 完全一致。
-- 备选：先注册后受理。失败时需要回滚一次向上的注册（注销 + 停止保活 + 清在线表），路径更
-  长，且上级会短暂看到一个马上又消失的下级。
-- 结论：serve-first。
+- 理由：Dialog 生命周期与 SIP 事务紧密耦合，domain 层不应知道 SIP 细节。
+- 备选：放在 adapter 层。adapter 层通常只做编解码和 transport，不适合管理状态机。
+- 结论：app 层，靠近 serving loop 但独立于它。
 
-### 3. 状态推进做幂等，不改状态机表
+### 3. MANSCDP 扩展保持向后兼容
 
-新增一个内部 `advanceOnline(ctx, id)`：若节点当前是 `idle`/`registering` 才 `MarkRegistered`，
-若还不是 `online` 才 `MarkOnline`；已经是则跳过。`serve` 与 `register` 都改用它。
+在 `model.Notify` 中新增 `CmdTypeSubscribe`、`CmdTypeMediaStatus` 常量，`DecodeNotify`
+对未知命令类型返回可解析的 Notify（不报错），让 use case 层决定是否处理。
 
-- 备选 A：给状态机加 `online → online` 自反边。会放宽所有 kind 的转换规则，代价大于收益。
-- 备选 B：让 platform-small 的第二半干脆不推进状态。那第二半失败时就没人负责把节点推到
-  `online`/`fault`，语义更乱。
-- 结论：幂等推进，状态转换表保持原样（`node_status.go` 不动）。
+- 理由：现有调用方只关心 Keepalive 和 Catalog，新增类型不应破坏它们。
+- 备选：返回错误。会破坏任何未来收到未知命令的设备。
+- 结论：解析宽松，渲染严格。
 
-### 4. 任一半失败即回滚另一半并 fault
+### 4. 入站媒体管道组装在 app 层
 
-`register` 失败时调用 `stopServing(id)`（停受理 goroutine + 清空该节点在线表）再 `fault`。
-这与 #6 已确立的"先停受理再释放端口"一致；`lifecycle.Stop` 由 `fault` 路径统一处理。
+新建 `internal/app/media_service.go` 的 `InboundPipeline` 方法，将 `RTPDeizer`、
+`PSDepacketizer`、`ESWriteCloser` 按端口组装，由 Dialog 管理生命周期（INVITE 200 OK 后
+启动，BYE/超时后关闭）。
 
-### 5. 受理对平台身份是固有的，不引入开关
+- 理由：媒体管道是 app 层的编排责任，domain port 只定义契约，adapter 提供实现。
+- 备选：放在 domain 层。domain 不该知道 RTP/PS 的具体组装顺序。
+- 结论：app 层组装，port 层定义契约。
 
-platform-small 与 platform-large 一样：`platform:` 段省略时取域默认并受理。不给
-`platform.enabled` 之类的新键。
+### 5. 新增 domain port 接口
 
-- 理由：现实中的小平台（接入网关、边缘平台）总是受理下级的；"不受理的平台"没有对应物，为
-  它加一个配置键是给不存在的需求留口子。纯下级场景由 `registration:` 单独表达即可——它仍然
-  受理，只是没人注册上来。
+`PlaybackPort`（控制播放/停止/查询）、`SubscribePort`（目录订阅管理）、`MediaStatusPort`
+（媒体状态上报），由 adapter 实现，app 层通过 port 调用。
 
-### 6. 一个监听口上的两半要分捡
+- 理由：app 层不直接 import adapter，通过 port 解耦。
+- 备选：硬编码 adapter 调用。违反六边形架构。
+- 结论：新增 port，compile-time 断言确保 adapter 实现。
 
-两半都跑在节点自己的那个监听口上（spec 如此要求），但一个 socket 把每个报文
-只交给"先读到的那一半"。受理半是一直在读的，它会把注册半等待的 `401` / `200 OK`
-取走，发现不是请求就丢弃，注册永远完不成——这一点是 e2e 4.1 第一次跑的时候暴露
-出来的（注册必然超时）。
+### 6. Keeper 扩展 OPTIONS 保活探测
 
-新增 `splitTransport`（`internal/app/node_split_transport.go`）：由**一个** reader
-独占 socket，按方向分捡——请求给受理半，响应给注册半；两半仍然从同一个 socket
-发出，所以对端看到的始终是一个节点一个地址。
+在现有 MESSAGE keepalive 基础上，增加向上级周期性发送 OPTIONS 探测。200 正常、408 超时、
+5xx 故障分别处理，作为 MESSAGE 的补充。
 
-- 备选 A：给 `Transport` 加按 Call-ID 的事务登记。那是真正的 SIP 事务层，本
-  change 用不到（小平台目前不会在上游侧收到请求），只是把成本提前。
-- 备选 B：给两半各配一个监听口。直接违反 spec 的"两半都走自己的 transport"，
-  且让一个节点在上级眼里变成两个地址。
-- 结论：按方向分捡。一个节点一个 splitter，随节点停止/异常而结束，不读的那一
-  半不会堵住另一半（无人认领的报文丢弃而不是排队）。
-
-### 7. 配置层只改文档与注释
-
-`validateNodePlatform` 与注册段的校验都是按条目进行的、与 kind 无关，无需改动；需要改的是
-`NodePlatformConfig` 的注释（"only meaningful for a platform-large" → 对 platform-small 同样
-生效）与 `configs/config.example.yaml`、`README` 的说明。无新增键，因此向后兼容。
+- 理由：MESSAGE 保活只读响应，无法检测"注册有效但上级无响应"的情况。
+- 备选：只保留 MESSAGE。国标要求 OPTIONS 保活。
+- 结论：双轨保活，OPTIONS 作为补充。
 
 ## Risks / Trade-offs
 
-- **两半共享一个状态机，"半在线"不可表达。** 一个 platform-small 若受理成功但注册失败，会
-  整体 fault 而不是停在"只受理"的中间态。→ 这是刻意的：节点状态只能有一个，`fault` 比一个
-  说不清的中间态更好解释；日志会写明是哪一半失败。
-- **注册失败会清空已受理的在线表。** 下级此刻可能已经注册上来。→ 与 #6 "停止即清空"一致，
-  且平台即将不再服务，保留表只会让上级查到已经不可达的设备。
-- **跨级目录尚未汇聚。** 上级向小平台查目录只会拿到直接注册到小平台的设备，拿不到更下一级
-  的（本 e2e 中恰好就是直接下级）。→ 已在 Non-Goals 中声明，由目录订阅的 change 补齐。
-- **分捡是按方向，不是按事务。** 现在小平台在上游侧只会收到响应，按方向分捡够用；
-  一旦 #7 后续给它加上上游来的请求（INVITE / SUBSCRIBE），分捡必须升级为按
-  Call-ID / branch 匹配。→ 已在 `docs/architecture.md` 中写明这一边界。
-- **e2e 依赖三个真实 socket。** 端口由 `freeAddr` 逐个申请，UDP 偶发丢包可能让注册重传。
-  → 沿用既有 e2e 的 `waitUntil` 轮询与 generous 超时（20–30s），不引入硬等待。
+- **Dialog 映射使用 sync.Map 或分片锁**，避免单点锁争用。
+- **RTPDeizer 按 SSRC+payload_type 分组**（修复现有 warning），避免多流混入。
+- **所有 SIP 响应异步发送**，失败仅打 warn 不中断 serving loop。
+- **事务超时使用 context + ticker**，goroutine 泄漏防护。
 
 ## Migration Plan
 
-无需迁移：行为此前为空（platform-small 启动后什么都不做），放开后只会新增能力。配置向后
-兼容——已有的 platform-small 条目若未声明任何一段，行为从"什么都不做"变为"以默认值受理"，
-这是该身份应有的语义，且不影响 device / platform-large。
+- 配置向后兼容：新增 OPTIONS 保活探测有默认值，不破坏现有配置。
+- MANSCDP 编解码向后兼容：新增命令类型不破坏现有解析。
+- 新增 port 接口不影响现有调用方。
 
 ## Open Questions
 
-无。
+- INVITE 点播时 SDP 中的媒体格式是否只支持 PS over RTP？（当前实现支持，后续可扩展）
+- OPTIONS 保活探测的周期是否与 MESSAGE keepalive 独立？（是，分别配置）

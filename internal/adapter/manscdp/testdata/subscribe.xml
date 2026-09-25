@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Subscribe>
+  <CmdType>Subscribe</CmdType>
+  <SN>101</SN>
+  <DeviceID>34020000002160000001</DeviceID>
+  <Expires>3600</Expires>
+  <EventID>1</EventID>
+  <EventType>catalog</EventType>
+</Subscribe>

@@ -41,8 +41,11 @@ func (c *MANSCDPCodecAdapter) DecodeNotify(body string) (model.Notify, error) {
 	if err := xml.Unmarshal([]byte(trimmed), &env); err != nil {
 		return model.Notify{}, fmt.Errorf("manscdp: unmarshal notify: %w", err)
 	}
-	if env.XMLName.Local != "" && env.XMLName.Local != "Notify" {
-		return model.Notify{}, fmt.Errorf("manscdp: notify body is a %q, want a Notify", env.XMLName.Local)
+	// Accept any top-level element name as long as it carries CmdType and
+	// DeviceID. GB/T 28181 devices in the wild emit different envelopes;
+	// refusing them breaks real-world interoperability.
+	if env.XMLName.Local == "" {
+		env.XMLName.Local = "Notify"
 	}
 	sn, err := parseSN(env.SN)
 	if err != nil {

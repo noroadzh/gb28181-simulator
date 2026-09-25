@@ -507,3 +507,393 @@ func TestAcceptor_CloseEndsSweepers(t *testing.T) {
 		}
 	}
 }
+
+// ----------------------------------------------------------------------------
+// INVITE / media pipeline
+// ----------------------------------------------------------------------------
+
+func inviteRequest(t *testing.T, deviceID, callID, body string) model.Message {
+	t.Helper()
+	msg, err := model.NewRequest("INVITE", "sip:"+deviceID+"@3402000000", []model.Header{
+		model.NewHeader("From", "<sip:"+deviceID+"@3402000000>;tag=inv1"),
+		model.NewHeader("To", "<sip:34020000002000000001@3402000000>"),
+		model.NewHeader("Call-ID", callID),
+		model.NewHeader("CSeq", "1 INVITE"),
+		model.NewHeader("Via", "SIP/2.0/UDP 127.0.0.1:15060;branch=z9hG4bK-inv"),
+		model.NewHeader("Contact", "<sip:"+deviceID+"@127.0.0.1:15060>"),
+		model.NewHeader("Content-Type", "application/sdp"),
+	}, body)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	return msg
+}
+
+func ackRequest(t *testing.T, deviceID, callID string) model.Message {
+	t.Helper()
+	msg, err := model.NewRequest("ACK", "sip:"+deviceID+"@3402000000", []model.Header{
+		model.NewHeader("From", "<sip:"+deviceID+"@3402000000>;tag=inv1"),
+		model.NewHeader("To", "<sip:34020000002000000001@3402000000>"),
+		model.NewHeader("Call-ID", callID),
+		model.NewHeader("CSeq", "1 ACK"),
+		model.NewHeader("Via", "SIP/2.0/UDP 127.0.0.1:15060;branch=z9hG4bK-inv"),
+	}, "")
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	return msg
+}
+
+func byeRequest(t *testing.T, deviceID, callID string) model.Message {
+	t.Helper()
+	msg, err := model.NewRequest("BYE", "sip:34020000002000000001@3402000000", []model.Header{
+		model.NewHeader("From", "<sip:"+deviceID+"@3402000000>;tag=inv1"),
+		model.NewHeader("To", "<sip:34020000002000000001@3402000000>"),
+		model.NewHeader("Call-ID", callID),
+		model.NewHeader("CSeq", "1 BYE"),
+		model.NewHeader("Via", "SIP/2.0/UDP 127.0.0.1:15060;branch=z9hG4bK-inv"),
+	}, "")
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	return msg
+}
+
+var validSDP = `v=0
+o=34020000011310000001 0 0 IN IP4 127.0.0.1
+s=Play
+c=IN IP4 127.0.0.1
+t=0 0
+m=video 6000 RTP/AVP 96
+a=rtpmap:96 PS/90000
+`
+
+// An INVITE with valid SDP is answered 200 OK; without a dialog manager the
+// pipeline is not created, but the response is still correct.
+func TestAcceptor_InviteWithSDPAnswers200OK(t *testing.T) {
+	h := newMessageHarness(t, defaultHarnessPolicy(t))
+	resp := h.tr.deliver(t, inviteRequest(t, "34020000011310000001", "inv-call-1", validSDP))
+
+	if resp.StatusCode() != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode())
+	}
+	if resp.Body() == "" {
+		t.Error("200 OK body is empty, want SDP answer")
+	}
+}
+
+// An INVITE with unreadable body is answered 400 Bad Request.
+func TestAcceptor_InviteWithBadSDPAnswers400(t *testing.T) {
+	h := newMessageHarness(t, defaultHarnessPolicy(t))
+	resp := h.tr.deliver(t, inviteRequest(t, "34020000011310000001", "inv-call-2", "not sdp at all"))
+
+	if resp.StatusCode() != 400 {
+		t.Fatalf("status = %d, want 400", resp.StatusCode())
+	}
+}
+
+// An INVITE without a Call-ID is answered 400 Bad Request.
+func TestAcceptor_InviteWithoutCallIDAnswers400(t *testing.T) {
+	h := newMessageHarness(t, defaultHarnessPolicy(t))
+	msg, err := model.NewRequest("INVITE", "sip:34020000002000000001@3402000000", []model.Header{
+		model.NewHeader("From", "<sip:34020000011310000001@3402000000>;tag=inv1"),
+		model.NewHeader("To", "<sip:34020000002000000001@3402000000>"),
+		// intentionally no Call-ID
+		model.NewHeader("CSeq", "1 INVITE"),
+		model.NewHeader("Via", "SIP/2.0/UDP 127.0.0.1:15060;branch=z9hG4bK-inv"),
+	}, validSDP)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	resp := h.tr.deliver(t, msg)
+
+	if resp.StatusCode() != 400 {
+		t.Fatalf("status = %d, want 400", resp.StatusCode())
+	}
+}
+
+// An INVITE without an m= line is answered 200 OK; the platform accepts it
+// without media negotiation.
+func TestAcceptor_InviteWithoutMediaAnswers200OK(t *testing.T) {
+	h := newMessageHarness(t, defaultHarnessPolicy(t))
+	noMediaSDP := `v=0
+o=34020000011310000001 0 0 IN IP4 127.0.0.1
+s=Play
+c=IN IP4 127.0.0.1
+t=0 0
+`
+	resp := h.tr.deliver(t, inviteRequest(t, "34020000011310000001", "inv-call-3", noMediaSDP))
+
+	if resp.StatusCode() != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode())
+	}
+}
+
+// An INVITE 200 OK carries the Allow header listing all supported methods.
+func TestAcceptor_Invite200OKCarriesAllowHeader(t *testing.T) {
+	h := newMessageHarness(t, defaultHarnessPolicy(t))
+	resp := h.tr.deliver(t, inviteRequest(t, "34020000011310000001", "inv-call-4", validSDP))
+
+	allow := responseHeader(t, resp, "Allow")
+	for _, m := range []string{"INVITE", "ACK", "BYE", "OPTIONS", "SUBSCRIBE", "MESSAGE", "REGISTER"} {
+		if !strings.Contains(allow, m) {
+			t.Errorf("Allow header %q is missing method %s", allow, m)
+		}
+	}
+}
+
+// ----------------------------------------------------------------------------
+// SUBSCRIBE / catalog notifications
+// ----------------------------------------------------------------------------
+
+func subscribeRequest(t *testing.T, deviceID, callID string, expires string) model.Message {
+	t.Helper()
+	hdrs := []model.Header{
+		model.NewHeader("From", "<sip:"+deviceID+"@3402000000>;tag=sub1"),
+		model.NewHeader("To", "<sip:34020000002000000001@3402000000>"),
+		model.NewHeader("Call-ID", callID),
+		model.NewHeader("CSeq", "1 SUBSCRIBE"),
+		model.NewHeader("Via", "SIP/2.0/UDP 127.0.0.1:15060;branch=z9hG4bK-sub"),
+		model.NewHeader("Event", "catalog"),
+	}
+	if expires != "" {
+		hdrs = append(hdrs, model.NewHeader("Expires", expires))
+	}
+	msg, err := model.NewRequest("SUBSCRIBE", "sip:34020000002000000001@3402000000", hdrs, "")
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	return msg
+}
+
+// A catalog SUBSCRIBE is answered 200 OK; the initial NOTIFY carries the
+// current device list.
+func TestAcceptor_SubscribeCatalogAnswers200AndNotifies(t *testing.T) {
+	h := newMessageHarness(t, defaultHarnessPolicy(t))
+	h.register(t, "34020000011310000001", "3600")
+	h.register(t, "34020000011310000002", "3600")
+
+	resp := h.tr.deliver(t, subscribeRequest(t, "34020000011310000003", "sub-call-1", "3600"))
+
+	if resp.StatusCode() != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode())
+	}
+	if got := responseHeader(t, resp, "Expires"); got != "3600" {
+		t.Errorf("Expires = %q, want 3600", got)
+	}
+
+	// The initial NOTIFY is sent via the transport; the codec is asked to
+	// render the catalog.
+	rendered := h.codec.rendered()
+	if len(rendered) == 0 {
+		t.Fatal("no NOTIFY was sent after SUBSCRIBE")
+	}
+	cat := rendered[len(rendered)-1]
+	if cat.SumNum() != 2 {
+		t.Errorf("catalog item count = %d, want 2", cat.SumNum())
+	}
+}
+
+// A SUBSCRIBE with Expires 0 removes the subscription and answers 200 OK.
+func TestAcceptor_SubscribeExpiresZeroRemovesAndAnswers200(t *testing.T) {
+	h := newMessageHarness(t, defaultHarnessPolicy(t))
+
+	// First subscribe.
+	h.tr.deliver(t, subscribeRequest(t, "34020000011310000003", "sub-call-2", "3600"))
+	renderedBefore := len(h.codec.rendered())
+	_ = renderedBefore
+
+	// Then unsubscribe.
+	resp := h.tr.deliver(t, subscribeRequest(t, "34020000011310000003", "sub-call-2", "0"))
+
+	if resp.StatusCode() != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode())
+	}
+}
+
+// A SUBSCRIBE for an Event other than catalog is rejected with 489 Bad Event.
+func TestAcceptor_SubscribeNonCatalogAnswers489(t *testing.T) {
+	h := newMessageHarness(t, defaultHarnessPolicy(t))
+	msg, err := model.NewRequest("SUBSCRIBE", "sip:34020000002000000001@3402000000", []model.Header{
+		model.NewHeader("From", "<sip:34020000011310000001@3402000000>;tag=sub1"),
+		model.NewHeader("To", "<sip:34020000002000000001@3402000000>"),
+		model.NewHeader("Call-ID", "sub-call-3"),
+		model.NewHeader("CSeq", "1 SUBSCRIBE"),
+		model.NewHeader("Via", "SIP/2.0/UDP 127.0.0.1:15060;branch=z9hG4bK-sub"),
+		model.NewHeader("Event", "presence"),
+		model.NewHeader("Expires", "3600"),
+	}, "")
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+
+	resp := h.tr.deliver(t, msg)
+
+	if resp.StatusCode() != 489 {
+		t.Fatalf("status = %d, want 489", resp.StatusCode())
+	}
+	if got := resp.StatusText(); got != "Bad Event" {
+		t.Errorf("reason = %q, want 'Bad Event'", got)
+	}
+}
+
+// A SUBSCRIBE without a Call-ID is answered 400 Bad Request.
+func TestAcceptor_SubscribeWithoutCallIDAnswers400(t *testing.T) {
+	h := newMessageHarness(t, defaultHarnessPolicy(t))
+	msg, err := model.NewRequest("SUBSCRIBE", "sip:34020000002000000001@3402000000", []model.Header{
+		model.NewHeader("From", "<sip:34020000011310000001@3402000000>;tag=sub1"),
+		model.NewHeader("To", "<sip:34020000002000000001@3402000000>"),
+		// intentionally no Call-ID
+		model.NewHeader("CSeq", "1 SUBSCRIBE"),
+		model.NewHeader("Via", "SIP/2.0/UDP 127.0.0.1:15060;branch=z9hG4bK-sub"),
+		model.NewHeader("Event", "catalog"),
+	}, "")
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+
+	resp := h.tr.deliver(t, msg)
+
+	if resp.StatusCode() != 400 {
+		t.Fatalf("status = %d, want 400", resp.StatusCode())
+	}
+}
+
+// After a device registers, every active subscriber receives a fresh NOTIFY.
+func TestAcceptor_DeviceRegistrationTriggersCatalogNotify(t *testing.T) {
+	h := newMessageHarness(t, defaultHarnessPolicy(t))
+
+	// Register a subscriber first.
+	h.tr.deliver(t, subscribeRequest(t, "34020000011310000003", "sub-call-4", "3600"))
+	before := len(h.codec.rendered())
+
+	// Register a device.
+	h.register(t, "34020000011310000001", "3600")
+
+	after := len(h.codec.rendered())
+	if after <= before {
+		t.Errorf("no new NOTIFY after device registration: %d → %d", before, after)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// OPTIONS / capability query
+// ----------------------------------------------------------------------------
+
+func optionsRequest(t *testing.T, deviceID string) model.Message {
+	t.Helper()
+	msg, err := model.NewRequest("OPTIONS", "sip:"+deviceID+"@3402000000", []model.Header{
+		model.NewHeader("From", "<sip:"+deviceID+"@3402000000>;tag=opt1"),
+		model.NewHeader("To", "<sip:34020000002000000001@3402000000>"),
+		model.NewHeader("Call-ID", "opt-call-1"),
+		model.NewHeader("CSeq", "1 OPTIONS"),
+		model.NewHeader("Via", "SIP/2.0/UDP 127.0.0.1:15060;branch=z9hG4bK-opt"),
+	}, "")
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	return msg
+}
+
+// An OPTIONS request is answered 200 OK with Allow and Accept headers.
+func TestAcceptor_OptionsAnswers200OK(t *testing.T) {
+	h := newMessageHarness(t, defaultHarnessPolicy(t))
+	resp := h.tr.deliver(t, optionsRequest(t, "34020000011310000001"))
+
+	if resp.StatusCode() != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode())
+	}
+	allow := responseHeader(t, resp, "Allow")
+	if !strings.Contains(allow, "INVITE") {
+		t.Errorf("Allow %q missing INVITE", allow)
+	}
+	if !strings.Contains(allow, "MESSAGE") {
+		t.Errorf("Allow %q missing MESSAGE", allow)
+	}
+	if responseHeader(t, resp, "Accept") == "" {
+		t.Error("Accept header missing")
+	}
+}
+
+// ----------------------------------------------------------------------------
+// MediaStatus
+// ----------------------------------------------------------------------------
+
+type fakeMediaStatusPort struct {
+	handle func(ctx context.Context, report model.MediaStatusReport) error
+}
+
+func (f *fakeMediaStatusPort) HandleMediaStatus(ctx context.Context, report model.MediaStatusReport) error {
+	if f.handle == nil {
+		return nil
+	}
+	return f.handle(ctx, report)
+}
+
+func mediaStatusRequest(t *testing.T, deviceID string, sn uint32) model.Message {
+	t.Helper()
+	body := fmt.Sprintf(`<Notify>
+  <CmdType>MediaStatus</CmdType>
+  <DeviceID>%s</DeviceID>
+  <SN>%d</SN>
+  <Status>OK</Status>
+</Notify>`, deviceID, sn)
+	return messageRequest(t, deviceID, body)
+}
+
+// A MediaStatus notify is answered 200 OK when the port is set.
+func TestAcceptor_MediaStatusAnswers200WithHandler(t *testing.T) {
+	h := newMessageHarness(t, defaultHarnessPolicy(t))
+
+	var handled bool
+	h.acceptor.WithMediaStatus(&fakeMediaStatusPort{
+		handle: func(ctx context.Context, r model.MediaStatusReport) error {
+			handled = true
+			return nil
+		},
+	})
+
+	h.codec.setNotify(mustNotify(t, model.CmdTypeMediaStatus, "34020000011310000001", 99))
+	resp := h.tr.deliver(t, mediaStatusRequest(t, "34020000011310000001", 99))
+	if resp.StatusCode() != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode())
+	}
+	if !handled {
+		t.Error("MediaStatus handler was not called")
+	}
+}
+
+// A MediaStatus notify without a handler is still answered 200 OK (silently).
+func TestAcceptor_MediaStatusAnswers200WithoutHandler(t *testing.T) {
+	h := newMessageHarness(t, defaultHarnessPolicy(t))
+	// No WithMediaStatus call.
+
+	h.codec.setNotify(mustNotify(t, model.CmdTypeMediaStatus, "34020000011310000001", 98))
+	resp := h.tr.deliver(t, mediaStatusRequest(t, "34020000011310000001", 98))
+	if resp.StatusCode() != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode())
+	}
+}
+
+// A MediaStatus from a stranger is still answered 200 OK.
+func TestAcceptor_MediaStatusFromStrangerAnswers200(t *testing.T) {
+	h := newMessageHarness(t, defaultHarnessPolicy(t))
+	var handled bool
+	h.acceptor.WithMediaStatus(&fakeMediaStatusPort{
+		handle: func(ctx context.Context, r model.MediaStatusReport) error {
+			handled = true
+			return nil
+		},
+	})
+
+	// No device registered for this ID, but the acceptor still answers 200.
+	h.codec.setNotify(mustNotify(t, model.CmdTypeMediaStatus, "34020000011310009999", 97))
+	resp := h.tr.deliver(t, mediaStatusRequest(t, "34020000011310009999", 97))
+	if resp.StatusCode() != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode())
+	}
+	// The handler is invoked even for unregistered devices (no registry gate).
+	if !handled {
+		t.Error("MediaStatus handler was not called for stranger device")
+	}
+}

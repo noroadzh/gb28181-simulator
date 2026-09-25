@@ -292,3 +292,158 @@ func TestMediaService_Close(t *testing.T) {
 		t.Errorf("Close: %v", err)
 	}
 }
+
+// --- Inbound pipeline tests ---
+
+// stubESWriteCloser collects frames written to it for assertions.
+type stubESWriteCloser struct {
+	frames []model.ESFrame
+	closed bool
+}
+
+func (w *stubESWriteCloser) Read(ctx context.Context) (model.ESFrame, error) {
+	return model.ESFrame{}, io.EOF
+}
+func (w *stubESWriteCloser) Write(ctx context.Context, frame model.ESFrame) error {
+	if w.closed {
+		return io.EOF
+	}
+	w.frames = append(w.frames, frame)
+	return nil
+}
+func (w *stubESWriteCloser) Close() error {
+	w.closed = true
+	return nil
+}
+
+// stubDeizer reassembles one RTP packet into one PS frame immediately.
+type stubDeizer struct {
+	ssrc uint32
+}
+
+func (d *stubDeizer) Write(pkt model.RTPPacket) (model.PSFrame, error) {
+	if pkt.SSRC != d.ssrc {
+		return model.PSFrame{}, errors.New("ssrc mismatch")
+	}
+	return model.PSFrame{Payload: append([]byte(nil), pkt.Payload...), PTS: uint64(pkt.Timestamp)}, nil
+}
+func (d *stubDeizer) Close() error { return nil }
+
+// stubPSDepkt turns raw bytes into one ES frame per Write call.
+type stubPSDepkt struct{}
+
+func (s *stubPSDepkt) Write(raw []byte) ([]model.ESFrame, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	return []model.ESFrame{{Payload: append([]byte(nil), raw...)}}, nil
+}
+func (s *stubPSDepkt) Close() error { return nil }
+
+// TestInboundPipeline_WriteRTP verifies that an RTP datagram flows through
+// the deizer → depacketizer → writer chain and produces one ES frame.
+func TestInboundPipeline_WriteRTP(t *testing.T) {
+	const ssrc uint32 = 0xABCDEF01
+	svc := NewMediaService(nil, nil, nil, slog.Default())
+	svc.SetInboundFactories(
+		func(s uint32) port.RTPDeizer { return &stubDeizer{ssrc: s} },
+		func() port.PSDepacketizer { return &stubPSDepkt{} },
+	)
+
+	w := &stubESWriteCloser{}
+	p, err := svc.NewInboundPipeline(ssrc, w)
+	if err != nil {
+		t.Fatalf("NewInboundPipeline: %v", err)
+	}
+
+	pkt := model.RTPPacket{
+		SSRC:      ssrc,
+		Sequence:  1,
+		Timestamp: 90000,
+		Payload:   []byte{0x00, 0x00, 0x01, 0xBA, 0x01, 0x02, 0x03},
+		Marker:    true,
+	}
+	if err := p.WriteRTP(context.Background(), pkt); err != nil {
+		t.Fatalf("WriteRTP: %v", err)
+	}
+	if len(w.frames) != 1 {
+		t.Fatalf("frames written = %d, want 1", len(w.frames))
+	}
+	if len(w.frames[0].Payload) != len(pkt.Payload) {
+		t.Errorf("payload len = %d, want %d", len(w.frames[0].Payload), len(pkt.Payload))
+	}
+}
+
+// TestInboundPipeline_NoFactories ensures an error is returned when the
+// inbound factories are not wired.
+func TestInboundPipeline_NoFactories(t *testing.T) {
+	svc := NewMediaService(nil, nil, nil, slog.Default())
+	if _, err := svc.NewInboundPipeline(0x1234, &stubESWriteCloser{}); err == nil {
+		t.Fatal("expected error for unwired inbound factories")
+	}
+}
+
+// TestInboundPipeline_NilWriter ensures an error is returned when the
+// ESWriteCloser is nil.
+func TestInboundPipeline_NilWriter(t *testing.T) {
+	svc := NewMediaService(nil, nil, nil, slog.Default())
+	svc.SetInboundFactories(
+		func(s uint32) port.RTPDeizer { return &stubDeizer{ssrc: s} },
+		func() port.PSDepacketizer { return &stubPSDepkt{} },
+	)
+	if _, err := svc.NewInboundPipeline(0x1234, nil); err == nil {
+		t.Fatal("expected error for nil ESWriteCloser")
+	}
+}
+
+// TestInboundPipeline_SSRCFilter verifies that the deizer rejects packets
+// with a mismatched SSRC.
+func TestInboundPipeline_SSRCFilter(t *testing.T) {
+	const ssrc uint32 = 0xABCDEF01
+	svc := NewMediaService(nil, nil, nil, slog.Default())
+	svc.SetInboundFactories(
+		func(s uint32) port.RTPDeizer { return &stubDeizer{ssrc: s} },
+		func() port.PSDepacketizer { return &stubPSDepkt{} },
+	)
+
+	w := &stubESWriteCloser{}
+	p, err := svc.NewInboundPipeline(ssrc, w)
+	if err != nil {
+		t.Fatalf("NewInboundPipeline: %v", err)
+	}
+
+	// Wrong SSRC should cause a deizer error.
+	pkt := model.RTPPacket{SSRC: 0xDEADBEEF, Payload: []byte{1}}
+	if err := p.WriteRTP(context.Background(), pkt); err == nil {
+		t.Fatal("expected error for wrong SSRC")
+	}
+	if len(w.frames) != 0 {
+		t.Errorf("frames written = %d, want 0 for rejected packet", len(w.frames))
+	}
+}
+
+// TestInboundPipeline_Close verifies that Close is idempotent and cleans
+// up all components.
+func TestInboundPipeline_Close(t *testing.T) {
+	const ssrc uint32 = 0xABCDEF01
+	svc := NewMediaService(nil, nil, nil, slog.Default())
+	svc.SetInboundFactories(
+		func(s uint32) port.RTPDeizer { return &stubDeizer{ssrc: s} },
+		func() port.PSDepacketizer { return &stubPSDepkt{} },
+	)
+
+	w := &stubESWriteCloser{}
+	p, err := svc.NewInboundPipeline(ssrc, w)
+	if err != nil {
+		t.Fatalf("NewInboundPipeline: %v", err)
+	}
+	if err := p.Close(); err != nil {
+		t.Errorf("first Close: %v", err)
+	}
+	if err := p.Close(); err != nil {
+		t.Errorf("second Close: %v", err)
+	}
+	if !w.closed {
+		t.Error("writer not closed after Close")
+	}
+}

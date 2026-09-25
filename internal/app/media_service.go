@@ -25,6 +25,13 @@ type PSPacketizerFactory func() port.PSPacketizer
 // passed in so the packetizer can size its payloads per-source.
 type RTPizerFactory func(mtu int) port.RTPizer
 
+// RTPDeizerFactory builds an RTP depacketizer for an inbound session. The
+// SSRC seeds the reassembler so it can filter stray packets.
+type RTPDeizerFactory func(ssrc uint32) port.RTPDeizer
+
+// PSDepacketizerFactory builds a PS depacketizer for an inbound session.
+type PSDepacketizerFactory func() port.PSDepacketizer
+
 // MediaService orchestrates the PS/RTP media pipeline for a node. It depends
 // only on domain ports and the injected factories (sources, PS packetizers,
 // RTP packetizers), so the app layer never has to import internal/adapter.
@@ -32,6 +39,8 @@ type MediaService struct {
 	factory   MediaSourceFactory
 	psFactory PSPacketizerFactory
 	rtpFty    RTPizerFactory
+	rtpDeFty  RTPDeizerFactory
+	psDeFty   PSDepacketizerFactory
 	logger    *slog.Logger
 }
 
@@ -47,6 +56,14 @@ func NewMediaService(factory MediaSourceFactory, psFactory PSPacketizerFactory, 
 		rtpFty:    rtpFactory,
 		logger:    logger,
 	}
+}
+
+// SetInboundFactories wires the depacketizer factories for inbound pipelines.
+// Call this after NewMediaService if the node needs to accept INVITE-based
+// media (platform-small). If not called, NewInboundPipeline returns an error.
+func (m *MediaService) SetInboundFactories(rtpDeFty RTPDeizerFactory, psDeFty PSDepacketizerFactory) {
+	m.rtpDeFty = rtpDeFty
+	m.psDeFty = psDeFty
 }
 
 // OpenSource opens the media source described by cfg and returns an
@@ -70,6 +87,79 @@ func (m *MediaService) OpenSource(ctx context.Context, cfg model.MediaConfig) (p
 	}
 
 	return port.NewStreamESReader(rc, cfg), src, nil
+}
+
+// InboundPipeline binds an RTPDeizer + PSDepacketizer + ESWriteCloser
+// into a single write path that feeds RTP packets inbound. It is intended
+// to be run in its own goroutine; the caller should close the writer when
+// the session ends or the context is done.
+type InboundPipeline struct {
+	w      port.ESWriteCloser
+	deizer port.RTPDeizer
+	depkt  port.PSDepacketizer
+	logger *slog.Logger
+}
+
+// NewInboundPipeline builds an InboundPipeline for the given session.
+// The SSRC is passed to the RTPDeizer so it can filter stray packets.
+func (m *MediaService) NewInboundPipeline(ssrc uint32, w port.ESWriteCloser) (*InboundPipeline, error) {
+	if m.rtpDeFty == nil || m.psDeFty == nil {
+		return nil, fmt.Errorf("app: inbound factories not wired; call SetInboundFactories first")
+	}
+	if w == nil {
+		return nil, fmt.Errorf("app: nil ESWriteCloser")
+	}
+	return &InboundPipeline{
+		w:      w,
+		deizer: m.rtpDeFty(ssrc),
+		depkt:  m.psDeFty(),
+		logger: m.logger,
+	}, nil
+}
+
+// WriteRTP ingests one inbound RTP datagram, reassembles PS frames via the
+// deizer, depacketizes them into ES frames, and writes them to the bound
+// writer. It returns when the writer errors or the context is done.
+func (p *InboundPipeline) WriteRTP(ctx context.Context, pkt model.RTPPacket) error {
+	ps, err := p.deizer.Write(pkt)
+	if err != nil {
+		return fmt.Errorf("app: deizer: %w", err)
+	}
+	if ps.Payload == nil {
+		return nil
+	}
+	frames, err := p.depkt.Write(ps.Payload)
+	if err != nil {
+		return fmt.Errorf("app: depacketizer: %w", err)
+	}
+	for _, f := range frames {
+		if err := p.w.Write(ctx, f); err != nil {
+			return fmt.Errorf("app: write ES: %w", err)
+		}
+	}
+	return nil
+}
+
+// Close tears down the inbound pipeline. It closes the depacketizer and the
+// underlying writer; the deizer is closed last.
+func (p *InboundPipeline) Close() error {
+	var first error
+	if p.depkt != nil {
+		if err := p.depkt.Close(); err != nil && first == nil {
+			first = err
+		}
+	}
+	if p.w != nil {
+		if err := p.w.Close(); err != nil && first == nil {
+			first = err
+		}
+	}
+	if p.deizer != nil {
+		if err := p.deizer.Close(); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
 }
 
 // outboundPipeline holds the assembled packetizers for one session.

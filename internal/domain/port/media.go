@@ -56,6 +56,9 @@ type ESWriteCloser interface {
 	// until the frame is accepted or the context is done; a closed
 	// destination returns io.EOF.
 	Write(ctx context.Context, frame model.ESFrame) error
+	// Close releases the underlying destination. It is safe to call Close
+	// multiple times; subsequent calls return nil.
+	Close() error
 }
 
 // PSPacketizer turns ES frames into PS packets. Every call to Packetize
