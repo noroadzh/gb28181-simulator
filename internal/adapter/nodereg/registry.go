@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"sync"
 
+	"github.com/your-org/gb28181-simulator/internal/adapter/cascade"
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
 	"github.com/your-org/gb28181-simulator/internal/domain/port"
 	"github.com/your-org/gb28181-simulator/internal/platform/observability/logging"
@@ -37,6 +38,9 @@ type entry struct {
 // concurrent use. Node identity is unique, and so is the signalling
 // address: registering a second node on an address another node already
 // holds is an error that names the incumbent (design D3).
+//
+// An optional cascade handler is refreshed whenever the node set changes so
+// forwarding decisions always reflect the live parent/children graph.
 type Registry struct {
 	mu sync.RWMutex
 	// nodes is keyed by the 20-digit node id.
@@ -48,6 +52,9 @@ type Registry struct {
 	// nodes' records are always separable (spec: each node owns
 	// independent log fields keyed by its node id).
 	logger *slog.Logger
+	// cascade receives topology refresh calls whenever nodes join or
+	// leave. Nil means cascade is disabled.
+	cascade *cascade.Handler
 }
 
 // New returns an empty registry that logs through the process logger.
@@ -65,6 +72,65 @@ func NewWithLogger(l *slog.Logger) *Registry {
 	}
 }
 
+// WithCascadeHandler attaches the cascade handler whose topology view this
+// registry keeps in sync. Passing nil detaches. Every join and leave of a
+// node rebuilds the handler's view, so forwarding decisions always reflect
+// the live node set.
+func (r *Registry) WithCascadeHandler(h *cascade.Handler) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.cascade = h
+	r.refreshCascadeTopologyLocked()
+}
+
+// refreshCascadeTopologyLocked rebuilds the cascade handler's topology from
+// the profiles currently registered. Caller must hold r.mu. A nil handler
+// means cascade is disabled and the call is a no-op.
+func (r *Registry) refreshCascadeTopologyLocked() {
+	if r.cascade == nil {
+		return
+	}
+	profiles := make([]model.NodeProfile, 0, len(r.nodes))
+	for _, e := range r.nodes {
+		profiles = append(profiles, e.node.Profile())
+	}
+	r.cascade.WithTopology(cascade.NewTopologyMap(profiles))
+}
+
+// validateCascadeAcyclicLocked rejects a profile whose cascade relationships
+// would close a loop through the nodes already registered: a self parent, a
+// self child, or a parent chain that leads back to the new node. A parent
+// that is not registered locally cannot close a loop and is allowed —
+// cascades routinely point at platforms outside this process.
+func (r *Registry) validateCascadeAcyclicLocked(profile model.NodeProfile) error {
+	id := profile.ID().String()
+	if parent := profile.CascadeParent(); parent != "" {
+		if parent == id {
+			return fmt.Errorf("nodereg: cascade parent of node %s is itself", id)
+		}
+		visited := map[string]struct{}{id: {}}
+		for current := parent; current != ""; {
+			if _, seen := visited[current]; seen {
+				return fmt.Errorf(
+					"nodereg: cascade cycle detected registering node %s: parent chain revisits %s",
+					id, current)
+			}
+			visited[current] = struct{}{}
+			ent, ok := r.nodes[current]
+			if !ok {
+				break // parent lives outside this process; the chain ends here
+			}
+			current = ent.node.Profile().CascadeParent()
+		}
+	}
+	for _, child := range profile.CascadeChildren() {
+		if child == id {
+			return fmt.Errorf("nodereg: cascade child of node %s is itself", id)
+		}
+	}
+	return nil
+}
+
 // log returns the registry's logger, never nil.
 func (r *Registry) log() *slog.Logger {
 	if r.logger != nil {
@@ -74,8 +140,9 @@ func (r *Registry) log() *slog.Logger {
 }
 
 // Register adds a node built from profile and returns it in StatusIdle. It
-// fails when the id is already registered, or when the signalling address is
-// already claimed by another node.
+// fails when the id is already registered, when the signalling address is
+// already claimed by another node, or when the profile's cascade
+// relationships would close a loop through the registered nodes.
 func (r *Registry) Register(_ context.Context, profile model.NodeProfile) (model.Node, error) {
 	id := profile.ID().String()
 	if id == "" {
@@ -98,8 +165,13 @@ func (r *Registry) Register(_ context.Context, profile model.NodeProfile) (model
 			"nodereg: address %s is already claimed by node %s; node %s cannot bind it",
 			profile.Addr(), incumbent, id)
 	}
+	if err := r.validateCascadeAcyclicLocked(profile); err != nil {
+		r.log().Warn("node register rejected: cascade cycle", "node_id", id, "error", err.Error())
+		return model.Node{}, err
+	}
 	r.nodes[id] = &entry{node: node}
 	r.addrIndex[profile.Addr()] = id
+	r.refreshCascadeTopologyLocked()
 	r.log().Info("node registered", "node_id", id,
 		"kind", profile.ID().Kind(), "addr", profile.Addr())
 	return node, nil
@@ -139,6 +211,7 @@ func (r *Registry) Unregister(_ context.Context, id model.NodeID) error {
 	}
 	delete(r.nodes, key)
 	delete(r.addrIndex, e.node.Profile().Addr())
+	r.refreshCascadeTopologyLocked()
 	r.log().Info("node unregistered", "node_id", key,
 		"addr", e.node.Profile().Addr())
 	return nil

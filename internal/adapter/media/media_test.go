@@ -14,6 +14,7 @@ package media
 
 import (
 	"bytes"
+	"os"
 	"testing"
 
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
@@ -258,5 +259,173 @@ func TestRTPDeizerMarkerEndsFrame(t *testing.T) {
 	}
 	if !bytes.Equal(out.Payload, ps.Payload) {
 		t.Error("payload mismatch after marker")
+	}
+}
+
+func TestPSGoldenRoundTrip(t *testing.T) {
+	golden, err := os.ReadFile("testdata/ps-roundtrip.bin")
+	if err != nil {
+		t.Fatalf("read golden: %v", err)
+	}
+
+	depktz := NewPSDepacketizer()
+	frames, err := depktz.Write(golden)
+	if err != nil {
+		t.Fatalf("depacketize golden: %v", err)
+	}
+	if err := depktz.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if len(frames) != 2 {
+		t.Fatalf("got %d frames, want 2 (video + audio)", len(frames))
+	}
+
+	// First frame: video ES (SPS+PPS+IDR)
+	wantVideo := []byte{0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0x80, 0x0A, 0x00, 0x00, 0x00, 0x01, 0x68, 0xCE, 0x38, 0x80, 0x00, 0x00, 0x00, 0x01, 0x65, 0x88, 0x80, 0x12, 0x01, 0x02, 0x03, 0x04, 0x05}
+	if !bytes.Equal(frames[0].Payload, wantVideo) {
+		t.Errorf("video ES mismatch: got %x, want %x", frames[0].Payload, wantVideo)
+	}
+	if frames[0].Kind != model.ESFrameVideo {
+		t.Errorf("frame 0 kind = %q, want video", frames[0].Kind)
+	}
+
+	// Second frame: audio ES
+	wantAudio := []byte{0x01, 0x02, 0x03, 0x04}
+	if !bytes.Equal(frames[1].Payload, wantAudio) {
+		t.Errorf("audio ES mismatch: got %x, want %x", frames[1].Payload, wantAudio)
+	}
+	if frames[1].Kind != model.ESFrameAudio {
+		t.Errorf("frame 1 kind = %q, want audio", frames[1].Kind)
+	}
+}
+
+func TestPSDepacketizerRejectsShortPacket(t *testing.T) {
+	depktz := NewPSDepacketizer()
+	// Craft a PS frame with a PES length < 9 (short packet).
+	shortPS := []byte{
+		0x00, 0x00, 0x01, 0xBA, 0x44, 0x00, 0x01, 0x00, 0x01, 0x57, 0xE4, 0x00,
+		0x00, 0x00, 0x01, 0xE0, 0x00, 0x05, // pes_len = 5 < 9, should be rejected
+	}
+	frames, err := depktz.Write(shortPS)
+	if err != nil {
+		t.Fatalf("write short packet: %v", err)
+	}
+	if len(frames) != 0 {
+		t.Errorf("short packet should produce 0 frames, got %d", len(frames))
+	}
+}
+
+func TestRTPGoldenRoundTrip(t *testing.T) {
+	golden, err := os.ReadFile("testdata/rtp-roundtrip.bin")
+	if err != nil {
+		t.Fatalf("read golden: %v", err)
+	}
+
+	// Slice the golden PS bytes through RTPizer then rebuild via RTPDeizer.
+	rtp := NewRTPizer(0xABCDEF01, 1400)
+	deizer := NewRTPDeizer(0xABCDEF01)
+
+	ps := model.PSFrame{Payload: golden, PTS: 270000}
+	pkts, err := rtp.Packetize(ps)
+	if err != nil {
+		t.Fatalf("packetize: %v", err)
+	}
+
+	var out model.PSFrame
+	for _, p := range pkts {
+		got, err := deizer.Write(p)
+		if err != nil {
+			t.Fatalf("deizer write: %v", err)
+		}
+		if got.Payload != nil {
+			out = got
+		}
+	}
+	if err := deizer.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	if !bytes.Equal(out.Payload, golden) {
+		t.Errorf("reassembled PS does not match golden")
+	}
+	if out.PTS != 270000 {
+		t.Errorf("PTS = %d, want 270000", out.PTS)
+	}
+}
+
+func TestRTPDeizerDedupAndLoss(t *testing.T) {
+	deizer := NewRTPDeizer(0xCAFEBABE)
+
+	rtp := NewRTPizer(0xCAFEBABE, 40)
+	ps := model.PSFrame{Payload: bytes.Repeat([]byte{0x5A}, 100), PTS: 100000}
+	pkts, err := rtp.Packetize(ps)
+	if err != nil {
+		t.Fatalf("packetize: %v", err)
+	}
+	if len(pkts) < 3 {
+		t.Fatalf("need >= 3 packets for this test, got %d", len(pkts))
+	}
+
+	// Drop a middle packet to simulate loss, duplicate another.
+	simulated := append([]model.RTPPacket{}, pkts[0], pkts[1], pkts[1], pkts[len(pkts)-1])
+
+	var out model.PSFrame
+	for _, p := range simulated {
+		got, err := deizer.Write(p)
+		if err != nil {
+			t.Fatalf("deizer write: %v", err)
+		}
+		if got.Payload != nil {
+			out = got
+		}
+	}
+	if err := deizer.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	// Dedup removes the duplicate; the loss means total length is short.
+	if len(out.Payload) >= len(ps.Payload) {
+		t.Errorf("expected loss to shorten payload, got %d bytes vs %d", len(out.Payload), len(ps.Payload))
+	}
+}
+
+func TestRTPizerMTUConfigurable(t *testing.T) {
+	for _, mtu := range []int{13, 100, 1400, 60000} {
+		rtp := NewRTPizer(1, mtu)
+		// Use a payload larger than MTU to force fragmentation.
+		ps := model.PSFrame{Payload: bytes.Repeat([]byte{0xFF}, mtu*3), PTS: 1}
+		pkts, err := rtp.Packetize(ps)
+		if err != nil {
+			t.Fatalf("mtu %d: packetize: %v", mtu, err)
+		}
+		// All but the last packet must be exactly (mtu - 12) bytes.
+		wantLast := (mtu - 12)
+		for i := 0; i < len(pkts)-1; i++ {
+			if len(pkts[i].Payload) != wantLast {
+				t.Errorf("mtu %d: packet %d payload %d != %d", mtu, i, len(pkts[i].Payload), wantLast)
+			}
+		}
+		// Total reassembled length must equal the original payload.
+		var reassembled int
+		for _, p := range pkts {
+			reassembled += len(p.Payload)
+		}
+		if reassembled != len(ps.Payload) {
+			t.Errorf("mtu %d: reassembled %d != original %d", mtu, reassembled, len(ps.Payload))
+		}
+	}
+}
+
+func TestRTPizerDefaultMTU(t *testing.T) {
+	// Zero MTU must normalize to the documented default of 1400.
+	rtp := NewRTPizer(1, 0)
+	ps := model.PSFrame{Payload: bytes.Repeat([]byte{0x11}, 2000), PTS: 1}
+	pkts, err := rtp.Packetize(ps)
+	if err != nil {
+		t.Fatalf("packetize: %v", err)
+	}
+	// With mtu=1400, payload per packet = 1388; 2000 bytes needs 2 packets.
+	if len(pkts) != 2 {
+		t.Errorf("got %d packets, want 2 with default MTU", len(pkts))
 	}
 }

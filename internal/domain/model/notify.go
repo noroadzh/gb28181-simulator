@@ -22,6 +22,18 @@ const (
 	CmdTypeMediaStatus = "MediaStatus"
 	// CmdTypePlaybackControl is the playback control command.
 	CmdTypePlaybackControl = "PlaybackControl"
+	// CmdTypeDeviceInfo is the device info query/response command.
+	CmdTypeDeviceInfo = "DeviceInfo"
+	// CmdTypeRecordInfo is the record info query/response command.
+	CmdTypeRecordInfo = "RecordInfo"
+	// CmdTypeAlarm is the alarm notify/ack command.
+	CmdTypeAlarm = "Alarm"
+	// CmdTypeConfigDownload is the config download command/ack.
+	CmdTypeConfigDownload = "ConfigDownload"
+	// CmdTypeDeviceControl is the device control (PTZ) command.
+	CmdTypeDeviceControl = "DeviceControl"
+	// CmdTypePresetQuery is the preset position query command.
+	CmdTypePresetQuery = "PresetQuery"
 )
 
 // Notify is a MANSCDP notify a platform received: what the peer said,
@@ -86,6 +98,18 @@ func (n Notify) IsMediaStatus() bool { return n.cmdType == CmdTypeMediaStatus }
 
 // IsPlaybackControl reports whether the notify controls playback.
 func (n Notify) IsPlaybackControl() bool { return n.cmdType == CmdTypePlaybackControl }
+
+// IsDeviceInfo reports whether the notify carries a DeviceInfo command.
+func (n Notify) IsDeviceInfo() bool { return n.cmdType == CmdTypeDeviceInfo }
+
+// IsRecordInfo reports whether the notify carries a RecordInfo command.
+func (n Notify) IsRecordInfo() bool { return n.cmdType == CmdTypeRecordInfo }
+
+// IsAlarm reports whether the notify carries an Alarm command.
+func (n Notify) IsAlarm() bool { return n.cmdType == CmdTypeAlarm }
+
+// IsDeviceControl reports whether the notify carries a DeviceControl (PTZ) command.
+func (n Notify) IsDeviceControl() bool { return n.cmdType == CmdTypeDeviceControl }
 
 // HasSN reports whether the notify carried a sequence number, which a
 // catalog answer has to echo.

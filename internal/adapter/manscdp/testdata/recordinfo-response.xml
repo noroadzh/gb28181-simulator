@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <CmdType>RecordInfo</CmdType>
+  <SN>2002</SN>
+  <DeviceID>34020000002160000001</DeviceID>
+  <SumNum>2</SumNum>
+  <DeviceList>
+    <Item>
+      <Name>recording_001</Name>
+      <DeviceID>34020000002160000001</DeviceID>
+      <ChannelID>34020000002160000001</ChannelID>
+      <StartTime>2025-01-01T00:00:00Z</StartTime>
+      <EndTime>2025-01-01T01:00:00Z</EndTime>
+      <Secrecy>0</Secrecy>
+      <FilePath>/record/001.mp4</FilePath>
+      <VideoCodec>H.264</VideoCodec>
+      <AudioCodec>AAC</AudioCodec>
+      <VideoBitrate>2048</VideoBitrate>
+      <AudioBitrate>128</AudioBitrate>
+    </Item>
+    <Item>
+      <Name>recording_002</Name>
+      <DeviceID>34020000002160000001</DeviceID>
+      <ChannelID>34020000002160000001</ChannelID>
+      <StartTime>2025-01-01T01:00:00Z</StartTime>
+      <EndTime>2025-01-01T02:00:00Z</EndTime>
+      <Secrecy>0</Secrecy>
+      <FilePath>/record/002.mp4</FilePath>
+    </Item>
+  </DeviceList>
+</Response>

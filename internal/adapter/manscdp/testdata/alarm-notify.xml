@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Notify>
+  <CmdType>Alarm</CmdType>
+  <SN>3001</SN>
+  <DeviceID>34020000002160000001</DeviceID>
+  <ChannelID>34020000002160000001</ChannelID>
+  <AlarmPriority>2</AlarmPriority>
+  <AlarmMethod>1</AlarmMethod>
+  <EventType>Alarm</EventType>
+  <EventTime>2025-01-01T12:00:00Z</EventTime>
+  <Description>Motion detected</Description>
+</Notify>

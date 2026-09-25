@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <CmdType>DeviceInfo</CmdType>
+  <SN>1001</SN>
+  <DeviceID>34020000002160000001</DeviceID>
+  <SumNum>2</SumNum>
+  <DeviceList>
+    <Item>
+      <DeviceID>34020000002160000001</DeviceID>
+      <Name>Camera 01</Name>
+      <Manufacturer>Hikvision</Manufacturer>
+      <Model>DS-2DE4</Model>
+      <Firmware>V5.5.0</Firmware>
+      <RunMode>1</RunMode>
+      <CivilCode>34020000</CivilCode>
+      <Address>Building 1</Address>
+      <Parental>0</Parental>
+      <SafetyWay>0</SafetyWay>
+      <RegisterWay>1</RegisterWay>
+      <Secrecy>0</Secrecy>
+      <Status>ON</Status>
+    </Item>
+    <Item>
+      <DeviceID>34020000002160000002</DeviceID>
+      <Name>Camera 02</Name>
+      <Manufacturer>Hikvision</Manufacturer>
+      <Model>DS-2DE4</Model>
+      <RunMode>1</RunMode>
+      <CivilCode>34020000</CivilCode>
+      <Address>Building 2</Address>
+      <Parental>0</Parental>
+      <SafetyWay>0</SafetyWay>
+      <RegisterWay>1</RegisterWay>
+      <Secrecy>0</Secrecy>
+      <Status>ON</Status>
+    </Item>
+  </DeviceList>
+</Response>

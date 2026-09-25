@@ -79,13 +79,13 @@ func (c *MANSCDPCodecAdapter) MarshalMediaStatus(ms model.MediaStatus) (string, 
 	b.WriteString("<Notify>\r\n")
 	b.WriteString("  <CmdType>MediaStatus</CmdType>\r\n")
 	b.WriteString("  <SN>1</SN>\r\n")
-	b.WriteString("  <DeviceID>" + xmlEscape(ms.DeviceID) + "</DeviceID>\r\n")
-	b.WriteString("  <ChannelID>" + xmlEscape(ms.ChannelID) + "</ChannelID>\r\n")
+	fmt.Fprintf(&b, "  <DeviceID>%s</DeviceID>\r\n", xmlEscape(ms.DeviceID))
+	fmt.Fprintf(&b, "  <ChannelID>%s</ChannelID>\r\n", xmlEscape(ms.ChannelID))
 	if ms.Video != nil {
 		b.WriteString(fmt.Sprintf("  <Video>%d,%d,%d,%d,%s</Video>\r\n",
 			ms.Video.Width, ms.Video.Height, ms.Video.Bitrate, ms.Video.FrameRate, ms.Video.Codec))
 	}
-	b.WriteString("  <Record>" + ms.RecordStatus.String() + "</Record>\r\n")
+	fmt.Fprintf(&b, "  <Record>%s</Record>\r\n", ms.RecordStatus.String())
 	b.WriteString("</Notify>\r\n")
 	return b.String(), nil
 }

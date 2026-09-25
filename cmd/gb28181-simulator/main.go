@@ -16,6 +16,7 @@ import (
 	"time"
 
 	sipauth "github.com/your-org/gb28181-simulator/internal/adapter/auth"
+	"github.com/your-org/gb28181-simulator/internal/adapter/cascade"
 	"github.com/your-org/gb28181-simulator/internal/adapter/credstore"
 	"github.com/your-org/gb28181-simulator/internal/adapter/devicereg"
 	"github.com/your-org/gb28181-simulator/internal/adapter/manscdp"
@@ -223,6 +224,12 @@ func run() error {
 			// The registry doubles as the advancer: it owns the nodes and
 			// enforces the transition table when the status changes.
 			registry := nodereg.New()
+			// Cascade forwarding: one handler whose topology view the
+			// registry keeps in sync on every node join and leave. Both the
+			// registry (cycle check at registration) and the acceptor
+			// (outbound header injection) see the same handler.
+			cascadeHandler := cascade.New(nil)
+			registry.WithCascadeHandler(cascadeHandler)
 			lifecycle := nodereg.NewLifecycle(registry, bindTransport)
 			svc, err := app.NewNodeService(registry, lifecycle, registry, bindTransport, clock.Real())
 			if err != nil {
@@ -282,6 +289,7 @@ func run() error {
 			if err != nil {
 				return nil, fmt.Errorf("acceptor: %w", err)
 			}
+			acceptor.WithCascadeHandler(cascadeHandler)
 			if _, err := svc.WithAcceptor(acceptor); err != nil {
 				return nil, fmt.Errorf("node service: %w", err)
 			}

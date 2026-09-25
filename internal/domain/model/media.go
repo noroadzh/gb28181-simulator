@@ -11,6 +11,16 @@ import (
 	"fmt"
 )
 
+// ESFrameKind distinguishes video from audio elementary streams.
+type ESFrameKind string
+
+const (
+	// ESFrameVideo marks a video elementary stream (PES stream_id = 0xE0).
+	ESFrameVideo ESFrameKind = "video"
+	// ESFrameAudio marks an audio elementary stream (PES stream_id = 0xC0).
+	ESFrameAudio ESFrameKind = "audio"
+)
+
 // ESFrame is one elementary-stream unit produced by a MediaSource: a coded
 // audio/video sample together with its presentation timestamp. Payload is
 // application bytes (typically a H.264/H.265 NALU or encoder frame); this
@@ -24,6 +34,9 @@ type ESFrame struct {
 	// GB/T 28181 and MPEG-style reference. 0 is a legal instantaneous value
 	// but a frame with no meaningful time is flagged by ptsSet.
 	PTS uint64
+	// Kind distinguishes video from audio elementary streams. Defaults to
+	// video when zero-valued so existing callers are unaffected.
+	Kind ESFrameKind
 	// ptsSet distinguishes a decode-time-only frame from one carrying an
 	// explicit presentation timestamp.
 	ptsSet bool
@@ -42,6 +55,11 @@ func NewESFrame(payload []byte, pts uint64) ESFrame {
 // exposing the unexported ptsSet flag directly.
 func ESFrameWithPTS(payload []byte, pts uint64) ESFrame {
 	return ESFrame{Payload: payload, PTS: pts, ptsSet: true}
+}
+
+// ESFrameWithPTSAndKind is like ESFrameWithPTS but also sets the Kind.
+func ESFrameWithPTSAndKind(payload []byte, pts uint64, kind ESFrameKind) ESFrame {
+	return ESFrame{Payload: payload, PTS: pts, Kind: kind, ptsSet: true}
 }
 
 // HasPTS reports whether the frame carries an explicit timestamp.

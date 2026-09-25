@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Control>
+  <CmdType>DeviceControl</CmdType>
+  <SN>4001</SN>
+  <DeviceID>34020000002160000001</DeviceID>
+  <ChannelID>34020000002160000001</ChannelID>
+  <Cmd>Left</Cmd>
+  <Speed>128</Speed>
+  <Priority>5</Priority>
+</Control>

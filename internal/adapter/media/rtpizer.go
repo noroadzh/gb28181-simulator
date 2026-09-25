@@ -36,7 +36,7 @@ type RTPizer struct {
 
 // NewRTPizer returns a configured RTPizer.
 func NewRTPizer(ssrc uint32, mtu int) *RTPizer {
-	if mtu <= 0 {
+	if mtu <= 13 {
 		mtu = 1400
 	}
 	if ssrc == 0 {

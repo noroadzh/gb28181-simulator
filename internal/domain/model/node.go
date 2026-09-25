@@ -142,6 +142,15 @@ type NodeProfile struct {
 	// means "not configured", which a platform-large node fills with
 	// defaults at start-up.
 	serving *PlatformServing
+
+	// cascadeParent is the deviceID of the upstream node this node
+	// forwards traffic to when it is not the final destination. Empty
+	// means "no upstream" (the top of a topology).
+	cascadeParent string
+	// cascadeChildren is the ordered list of deviceIDs this node routes
+	// traffic to when it receives a message whose destination is not
+	// itself. Empty means "direct only" — no forwarding is configured.
+	cascadeChildren []string
 }
 
 // NewNodeProfile validates id with ParseNodeID and requires a non-empty
@@ -264,6 +273,74 @@ func (p NodeProfile) PlatformServing() (PlatformServing, bool) {
 		return PlatformServing{}, false
 	}
 	return *p.serving, true
+}
+
+// WithCascadeParent returns a copy that forwards upstream traffic to
+// parentID. The value is validated with ParseNodeID so a typo surfaces at
+// configuration time, not on the wire.
+func (p NodeProfile) WithCascadeParent(parentID string) (NodeProfile, error) {
+	parentID = strings.TrimSpace(parentID)
+	if parentID == "" {
+		return p, fmt.Errorf("model: empty cascade parent for node %s", p.id)
+	}
+	if _, err := ParseNodeID(parentID); err != nil {
+		return p, err
+	}
+	cp := p
+	cp.cascadeParent = parentID
+	return cp, nil
+}
+
+// CascadeParent returns the upstream deviceID, or "" when this node has no
+// upstream configured.
+func (p NodeProfile) CascadeParent() string { return p.cascadeParent }
+
+// WithCascadeChildren returns a copy whose downstream routing order is
+// children. Duplicates are rejected at configuration time: a duplicated
+// child would make PreferredPath resolution ambiguous.
+func (p NodeProfile) WithCascadeChildren(children []string) (NodeProfile, error) {
+	seen := make(map[string]struct{}, len(children))
+	cleaned := make([]string, 0, len(children))
+	for _, c := range children {
+		c = strings.TrimSpace(c)
+		if c == "" {
+			continue
+		}
+		if _, err := ParseNodeID(c); err != nil {
+			return p, err
+		}
+		if _, dup := seen[c]; dup {
+			return p, fmt.Errorf("model: duplicate cascade child %s for node %s", c, p.id)
+		}
+		seen[c] = struct{}{}
+		cleaned = append(cleaned, c)
+	}
+	if len(cleaned) == 0 {
+		return p, nil // clearing the list is a valid no-op
+	}
+	cp := p
+	cp.cascadeChildren = cleaned
+	return cp, nil
+}
+
+// CascadeChildren returns the downstream routing order; nil when none.
+func (p NodeProfile) CascadeChildren() []string {
+	if len(p.cascadeChildren) == 0 {
+		return nil
+	}
+	return append([]string(nil), p.cascadeChildren...)
+}
+
+// HasCascadeParent reports whether the node forwards traffic upstream.
+func (p NodeProfile) HasCascadeParent() bool { return p.cascadeParent != "" }
+
+// HasCascadeChildren reports whether the node routes traffic downstream.
+func (p NodeProfile) HasCascadeChildren() bool { return len(p.cascadeChildren) > 0 }
+
+// HasCascadeRouting reports whether the node participates in any cascade
+// topology at all.
+func (p NodeProfile) HasCascadeRouting() bool {
+	return p.HasCascadeParent() || p.HasCascadeChildren()
 }
 
 // String renders a log-safe one-line summary; never contains secrets.

@@ -75,8 +75,9 @@ type Acceptor struct {
 	mediaService *MediaService
 	pipelines    map[string]*InboundPipeline
 
-	mu      sync.Mutex
-	serving map[string]*platform
+	mu       sync.Mutex
+	serving  map[string]*platform
+	cascade  port.CascadeHandler
 }
 
 // platform is one node's serving goroutine and the settings it serves with.
@@ -192,6 +193,63 @@ func (a *Acceptor) WithMediaStatus(m port.MediaStatusPort) *Acceptor {
 func (a *Acceptor) WithMediaService(svc *MediaService) *Acceptor {
 	a.mediaService = svc
 	return a
+}
+
+// WithCascadeHandler attaches the cascade handler whose topology view this
+// acceptor refreshes on every node register/unregister. When set, every
+// outbound response and NOTIFY carries the X-RoutePath headers the handler
+// asks for.
+func (a *Acceptor) WithCascadeHandler(h port.CascadeHandler) *Acceptor {
+	a.cascade = h
+	return a
+}
+
+// routeOutbound consults the cascade handler before a message leaves the node.
+// The destination is always the original peer: responses go back to the
+// requester and NOTIFYs go to the subscriber, so the handler's next-hop advice
+// only decides which cascade headers to attach. On a handler error (e.g. a
+// loop detected) the message is dropped rather than forwarded further, as
+// required by the loop-prevention spec for simulation mode.
+func (a *Acceptor) routeOutbound(p *platform, msg model.Message, peer string) (model.Message, string, bool) {
+	if a.cascade == nil {
+		return msg, peer, true
+	}
+	_, extra, _, err := a.cascade.Forward(p.id, msg, peer)
+	if err != nil {
+		a.log.Warn("cascade forward rejected the message; dropping",
+			"node_id", p.id.String(), "peer", peer, "error", err.Error())
+		return model.Message{}, peer, false
+	}
+	if len(extra) == 0 {
+		return msg, peer, true
+	}
+	out, bErr := withExtraHeaders(msg, extra)
+	if bErr != nil {
+		a.log.Warn("cascade headers rejected; sending direct",
+			"node_id", p.id.String(), "peer", peer, "error", bErr.Error())
+		return msg, peer, true
+	}
+	return out, peer, true
+}
+
+// withExtraHeaders returns a copy of msg that carries the extra headers
+// appended after the existing ones. The message kind (request vs response)
+// is preserved.
+func withExtraHeaders(msg model.Message, extra []model.Header) (model.Message, error) {
+	if len(extra) == 0 {
+		return msg, nil
+	}
+	all := make([]model.Header, 0, len(msg.Headers())+len(extra))
+	all = append(all, msg.Headers()...)
+	all = append(all, extra...)
+	if msg.StatusCode() != 0 {
+		return model.NewResponse(msg.StatusCode(), msg.StatusText(), all, msg.Body())
+	}
+	uri := ""
+	if u := msg.URI(); u != nil {
+		uri = u.String()
+	}
+	return model.NewRequest(msg.Method(), uri, all, msg.Body())
 }
 
 // Serve starts accepting registrations for id over tr. realm is what the
@@ -378,10 +436,15 @@ func (a *Acceptor) run(ctx context.Context, p *platform) {
 				"node_id", p.id.String(), "method", msg.Method(), "peer", peer)
 			continue
 		}
-		if err := p.tr.Send(ctx, resp, peer); err != nil {
+		resp, dst, ok := a.routeOutbound(p, resp, peer)
+		var sendErr error
+		if ok {
+			sendErr = p.tr.Send(ctx, resp, dst)
+		}
+		if sendErr != nil {
 			a.log.Warn("cannot send the answer",
-				"node_id", p.id.String(), "peer", peer,
-				"method", msg.Method(), "error", err.Error())
+				"node_id", p.id.String(), "peer", dst,
+				"method", msg.Method(), "error", sendErr.Error())
 		}
 	}
 }
@@ -735,13 +798,16 @@ func (a *Acceptor) sendCatalogNotify(
 			"node_id", p.id.String(), "error", err.Error())
 		return
 	}
-	if err := p.tr.Send(ctx, msg, peer); err != nil {
-		a.log.Warn("cannot send NOTIFY",
-			"node_id", p.id.String(), "peer", peer, "error", err.Error())
-		return
+	msg, dst, ok := a.routeOutbound(p, msg, peer)
+	if ok {
+		if err := p.tr.Send(ctx, msg, dst); err != nil {
+			a.log.Warn("cannot send NOTIFY",
+				"node_id", p.id.String(), "peer", dst, "error", err.Error())
+			return
+		}
 	}
 	a.log.Debug("NOTIFY sent",
-		"node_id", p.id.String(), "peer", peer, "call_id", callID, "items", len(items))
+		"node_id", p.id.String(), "peer", dst, "call_id", callID, "items", len(items))
 }
 
 // handleMediaStatus processes a downstream MediaStatus notify. The port is
