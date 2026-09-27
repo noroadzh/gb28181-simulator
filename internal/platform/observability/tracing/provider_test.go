@@ -21,7 +21,6 @@ import (
 // tracer that records nothing. This is the default path for unit tests and
 // short-lived tools.
 func TestProvider_NoOpWhenDisabled(t *testing.T) {
-	t.Parallel()
 
 	before := otel.GetTracerProvider()
 
@@ -64,7 +63,6 @@ func TestProvider_NoOpWhenDisabled(t *testing.T) {
 // "stdout was reached" assertion is the Close succeeding without error
 // after at least one span was produced.
 func TestProvider_DefaultSampleRatioUsesStdout(t *testing.T) {
-	t.Parallel()
 
 	var buf bytes.Buffer
 	p, err := tracing.New(context.Background(), tracing.Config{
@@ -99,7 +97,6 @@ func TestProvider_DefaultSampleRatioUsesStdout(t *testing.T) {
 // (the helper function, not New's normalisation) so future refactors don't
 // drop the fallback.
 func TestProvider_SampleRatioZeroFallsBackToDefault(t *testing.T) {
-	t.Parallel()
 
 	exporter := tracetest.NewInMemoryExporter()
 	tp := sdktrace.NewTracerProvider(
@@ -124,7 +121,6 @@ func TestProvider_SampleRatioZeroFallsBackToDefault(t *testing.T) {
 // path: SampleRatio=1.0 must record every span. Important because it is
 // the recommended config for trace debugging in development.
 func TestProvider_SampleRatioOneSamplesEverything(t *testing.T) {
-	t.Parallel()
 
 	exporter := tracetest.NewInMemoryExporter()
 	tp := sdktrace.NewTracerProvider(
@@ -149,7 +145,6 @@ func TestProvider_SampleRatioOneSamplesEverything(t *testing.T) {
 // after Close, starting a new span should NOT panic. This guards against
 // the classic "stdout exporter goroutine outlives main" leak.
 func TestProvider_CloseFlushesAndStopsNewSpans(t *testing.T) {
-	t.Parallel()
 
 	var buf bytes.Buffer
 	p, err := tracing.New(context.Background(), tracing.Config{
@@ -188,7 +183,6 @@ func TestProvider_CloseFlushesAndStopsNewSpans(t *testing.T) {
 // SDK exposes instrumentation scope on every recorded span, so backends can
 // group spans by their originating subsystem.
 func TestProvider_TracerNamesAreDistinct(t *testing.T) {
-	t.Parallel()
 
 	exporter := tracetest.NewInMemoryExporter()
 	tp := sdktrace.NewTracerProvider(
