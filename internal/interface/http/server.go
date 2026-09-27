@@ -7,6 +7,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -34,6 +35,7 @@ type Server struct {
 	nodes NodeView
 	echo  *echo.Echo
 	http  *http.Server
+	log   *slog.Logger
 	lnErr error
 }
 
@@ -67,6 +69,7 @@ func NewServer(cfg platformconfig.Config, hub *logging.Hub, ver Version, nodes N
 		ver:   ver,
 		nodes: nodes,
 		echo:  e,
+		log:   slog.Default(),
 	}
 	s.registerRoutes(e)
 	return s
@@ -87,6 +90,32 @@ func (s *Server) registerRoutes(e *echo.Echo) {
 	e.POST("/v1/nodes/:id/unregister", s.handleNodeUnregister)
 	e.GET("/v1/nodes/:id/devices", s.handleNodeDevices)
 	e.GET("/v1/nodes/:id/devices/:deviceID", s.handleNodeDevice)
+
+	// Dynamic simulation endpoints (Change 10): trigger an alarm NOTIFY or
+	// set the node's geographic position.
+	e.POST("/v1/nodes/:id/actions/trigger-alarm", s.handleTriggerAlarm)
+	e.PUT("/v1/nodes/:id/actions/position", s.handleSetPosition)
+	e.POST("/v1/nodes/:id/channels/:ch/status", s.handleSetChannelStatus)
+
+	// Fault injection endpoints (Change 13): arm, inspect, and clear a
+	// per-node fault profile that the acceptor consults on every request.
+	// The spec-mandated path is `/faults` (plural); `/fault` remains as a
+	// compatibility alias for earlier clients.
+	e.POST("/v1/nodes/:id/faults", s.handleInstallFault)
+	e.GET("/v1/nodes/:id/faults", s.handleGetFault)
+	e.DELETE("/v1/nodes/:id/faults", s.handleClearFault)
+	e.POST("/v1/nodes/:id/fault", s.handleInstallFault)
+	e.GET("/v1/nodes/:id/fault", s.handleGetFault)
+	e.DELETE("/v1/nodes/:id/fault", s.handleClearFault)
+
+	// Scenario placeholder (Change 14): the runner itself arrives with
+	// Change 15; until then the endpoint answers 501 with a pointer.
+	e.POST("/v1/scenarios/run", s.handleScenarioRun)
+
+	// Capture endpoints (Change 13): per-node wire capture as JSON and as
+	// a downloadable pcap document. Queries never evict the buffer.
+	e.GET("/v1/nodes/:id/capture", s.handleQueryCapture)
+	e.GET("/v1/nodes/:id/capture.pcap", s.handleCapturePCAP)
 
 	// Legacy /healthz and /metrics for smoke tests (per §7.3)
 	e.GET("/healthz", s.handleHealth)

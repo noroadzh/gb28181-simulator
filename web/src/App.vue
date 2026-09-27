@@ -1,91 +1,77 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, onMounted } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
+import { useNodeStore } from './stores/nodes'
+import { api } from './api'
+import { ElMessage } from 'element-plus'
 
-const version = ref('…')
-const commit = ref('…')
-const goVersion = ref('…')
-const platform = ref('…')
-const status = ref('unknown')
-const logs = ref([])
-let ws = null
+const router = useRouter()
+const route = useRoute()
+const nodeStore = useNodeStore()
+const meta = ref({ version: '…', commit: '…', go: '…', platform: '…', status: 'unknown' })
+const drawer = ref(false)
+
+const menu = [
+  { path: '/nodes', title: '节点概览' },
+  { path: '/capture', title: '抓包面板' },
+  { path: '/fault', title: '故障注入' },
+  { path: '/scenarios', title: '场景管理' },
+  { path: '/dashboard', title: '仪表盘' }
+]
 
 async function loadMeta () {
   try {
-    const r = await fetch('/api/version')
-    const j = await r.json()
-    version.value = j.version
-    commit.value = j.commit
-    goVersion.value = j.go_version
-    platform.value = j.platform
-  } catch (e) {
-    version.value = 'unreachable'
+    const j = await api.version()
+    meta.value.version = j.version
+    meta.value.commit = j.commit
+    meta.value.go = j.go_version
+    meta.value.platform = j.platform
+  } catch (_) {
+    meta.value.version = 'unreachable'
   }
-}
-
-async function pingHealth () {
-  try {
-    const r = await fetch('/api/health')
-    const j = await r.json()
-    status.value = j.status
-  } catch (e) {
-    status.value = 'down'
-  }
-}
-
-function connectLogs () {
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  ws = new WebSocket(`${proto}://${location.host}/api/logs/stream`)
-  ws.onmessage = (ev) => {
-    try {
-      const obj = JSON.parse(ev.data)
-      logs.value.unshift(obj)
-      if (logs.value.length > 200) logs.value.pop()
-    } catch (e) {
-      // ignore malformed
-    }
-  }
-  ws.onclose = () => { status.value = 'ws-closed' }
 }
 
 onMounted(() => {
   loadMeta()
-  pingHealth()
-  connectLogs()
-})
-
-onBeforeUnmount(() => {
-  if (ws) ws.close()
+  nodeStore.refresh()
 })
 </script>
 
 <template>
-  <el-container style="min-height: 100vh">
-    <el-header style="background: #1f2d40; color: #fff; display: flex; align-items: center">
-      <h2 style="margin: 0">gb28181-simulator</h2>
-      <el-tag style="margin-left: 16px" :type="status === 'ok' ? 'success' : 'danger'">{{ status }}</el-tag>
-    </el-header>
-    <el-main>
-      <el-row :gutter="16">
-        <el-col :span="8">
-          <el-card shadow="hover">
-            <template #header>Version</template>
-            <p><b>Version:</b> {{ version }}</p>
-            <p><b>Commit:</b> {{ commit }}</p>
-            <p><b>Go:</b> {{ goVersion }}</p>
-            <p><b>Platform:</b> {{ platform }}</p>
-          </el-card>
-        </el-col>
-        <el-col :span="16">
-          <el-card shadow="hover">
-            <template #header>Live log stream (WS /api/logs/stream)</template>
-            <el-table :data="logs" height="420" stripe>
-              <el-table-column prop="time" label="Time" width="220" />
-              <el-table-column prop="level" label="Level" width="100" />
-              <el-table-column prop="msg" label="Message" />
-            </el-table>
-          </el-card>
-        </el-col>
-      </el-row>
-    </el-main>
+  <el-container style="min-height:100vh">
+    <el-aside width="200px" style="background:#001529;color:#fff">
+      <div style="height:60px;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:bold">
+        gb28181-simulator
+      </div>
+      <el-menu
+        :default-active="route.path"
+        router
+        background-color="#001529"
+        text-color="rgba(255,255,255,0.65)"
+        active-text-color="#fff"
+      >
+        <el-menu-item v-for="item in menu" :key="item.path" :index="item.path">
+          <span>{{ item.title }}</span>
+        </el-menu-item>
+      </el-menu>
+    </el-aside>
+
+    <el-container>
+      <el-header style="background:#fff;border-bottom:1px solid #eee;display:flex;align-items:center;justify-content:space-between">
+        <div style="font-size:14px;color:#666">
+          <el-breadcrumb separator="/">
+            <el-breadcrumb-item>{{ route.meta.title || '首页' }}</el-breadcrumb-item>
+          </el-breadcrumb>
+        </div>
+        <div style="font-size:12px;color:#888">
+          <el-tag type="success" size="small">{{ meta.status }}</el-tag>
+          <span style="margin-left:12px">v{{ meta.version }}</span>
+        </div>
+      </el-header>
+
+      <el-main style="background:#f5f7fa">
+        <router-view />
+      </el-main>
+    </el-container>
   </el-container>
 </template>
