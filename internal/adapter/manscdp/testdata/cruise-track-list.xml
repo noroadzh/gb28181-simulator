@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+	<CmdType>CruiseTrackList</CmdType>
+	<SN>91</SN>
+	<DeviceID>34020000001320000001</DeviceID>
+	<ItemList>
+		<Item>
+			<ID>track-1</ID>
+			<Name>Horizon</Name>
+			<WaypointCount>5</WaypointCount>
+		</Item>
+		<Item>
+			<ID>track-2</ID>
+			<Name>Perimeter</Name>
+			<WaypointCount>8</WaypointCount>
+		</Item>
+	</ItemList>
+</Response>

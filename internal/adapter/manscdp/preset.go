@@ -19,23 +19,23 @@ type presetQueryEnvelope struct {
 
 // presetSetEnvelope is the wire shape of a Preset set command.
 type presetSetEnvelope struct {
-	XMLName    xml.Name `xml:"Control"`
-	CmdType    string   `xml:"CmdType"`
-	SN         string   `xml:"SN"`
-	DeviceID   string   `xml:"DeviceID"`
-	ChannelID  string   `xml:"ChannelID,omitempty"`
-	PresetIndex int    `xml:"PresetIndex,omitempty"`
-	Name       string   `xml:"Name,omitempty"`
+	XMLName     xml.Name `xml:"Control"`
+	CmdType     string   `xml:"CmdType"`
+	SN          string   `xml:"SN"`
+	DeviceID    string   `xml:"DeviceID"`
+	ChannelID   string   `xml:"ChannelID,omitempty"`
+	PresetIndex int      `xml:"PresetIndex,omitempty"`
+	Name        string   `xml:"Name,omitempty"`
 }
 
 // presetListResponseEnvelope is the wire shape of a Preset list response.
 type presetListResponseEnvelope struct {
-	XMLName xml.Name `xml:"Response"`
-	CmdType string   `xml:"CmdType"`
-	SN      uint32   `xml:"SN"`
-	DeviceID string  `xml:"DeviceID"`
-	SumNum  int      `xml:"SumNum"`
-	Items   []presetItemEnvelope `xml:"PresetList>Item"`
+	XMLName  xml.Name             `xml:"Response"`
+	CmdType  string               `xml:"CmdType"`
+	SN       uint32               `xml:"SN"`
+	DeviceID string               `xml:"DeviceID"`
+	SumNum   int                  `xml:"SumNum"`
+	Items    []presetItemEnvelope `xml:"PresetList>Item"`
 }
 
 // presetAckEnvelope is the wire shape of a Preset set acknowledgement response.

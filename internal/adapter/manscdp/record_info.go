@@ -22,11 +22,11 @@ type recordInfoQueryEnvelope struct {
 
 // recordInfoResponseEnvelope is the wire shape of a RecordInfo response.
 type recordInfoResponseEnvelope struct {
-	XMLName    xml.Name `xml:"Response"`
-	CmdType    string   `xml:"CmdType"`
-	SN         uint32   `xml:"SN"`
-	DeviceID   string   `xml:"DeviceID"`
-	SumNum     int      `xml:"SumNum"`
+	XMLName    xml.Name                 `xml:"Response"`
+	CmdType    string                   `xml:"CmdType"`
+	SN         uint32                   `xml:"SN"`
+	DeviceID   string                   `xml:"DeviceID"`
+	SumNum     int                      `xml:"SumNum"`
 	DeviceList []recordInfoItemEnvelope `xml:"DeviceList>Item"`
 }
 

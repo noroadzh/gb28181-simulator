@@ -86,6 +86,11 @@ func (c *MANSCDPCodecAdapter) MarshalMediaStatus(ms model.MediaStatus) (string, 
 			ms.Video.Width, ms.Video.Height, ms.Video.Bitrate, ms.Video.FrameRate, ms.Video.Codec))
 	}
 	fmt.Fprintf(&b, "  <Record>%s</Record>\r\n", ms.RecordStatus.String())
+	if ms.Position != nil {
+		fmt.Fprintf(&b, "  <Longitude>%v</Longitude>\r\n", ms.Position.Longitude())
+		fmt.Fprintf(&b, "  <Latitude>%v</Latitude>\r\n", ms.Position.Latitude())
+		fmt.Fprintf(&b, "  <Speed>%v</Speed>\r\n", ms.Position.Speed())
+	}
 	b.WriteString("</Notify>\r\n")
 	return b.String(), nil
 }

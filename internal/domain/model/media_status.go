@@ -52,6 +52,7 @@ type MediaStatus struct {
 	Video        *VideoParam
 	Audio        *AudioParam
 	RecordStatus RecordStatus
+	Position     *Position
 }
 
 // String renders a log-safe summary.

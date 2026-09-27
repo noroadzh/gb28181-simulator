@@ -10,16 +10,16 @@ import (
 
 // alarmNotifyEnvelope is the wire shape of an Alarm notify.
 type alarmNotifyEnvelope struct {
-	XMLName      xml.Name `xml:"Notify"`
-	CmdType      string   `xml:"CmdType"`
-	SN           string   `xml:"SN"`
-	DeviceID     string   `xml:"DeviceID"`
-	ChannelID    string   `xml:"ChannelID,omitempty"`
-	AlarmPriority int     `xml:"AlarmPriority,omitempty"`
-	AlarmMethod  int      `xml:"AlarmMethod,omitempty"`
-	EventType    string   `xml:"EventType,omitempty"`
-	EventTime    string   `xml:"EventTime,omitempty"`
-	Description  string   `xml:"Description,omitempty"`
+	XMLName       xml.Name `xml:"Notify"`
+	CmdType       string   `xml:"CmdType"`
+	SN            string   `xml:"SN"`
+	DeviceID      string   `xml:"DeviceID"`
+	ChannelID     string   `xml:"ChannelID,omitempty"`
+	AlarmPriority int      `xml:"AlarmPriority,omitempty"`
+	AlarmMethod   int      `xml:"AlarmMethod,omitempty"`
+	EventType     string   `xml:"EventType,omitempty"`
+	EventTime     string   `xml:"EventTime,omitempty"`
+	Description   string   `xml:"Description,omitempty"`
 }
 
 // alarmAckEnvelope is the wire shape of an Alarm acknowledgement response.

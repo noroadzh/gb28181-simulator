@@ -8,10 +8,10 @@ import (
 
 // AlarmNotify is the wire shape of an Alarm notify.
 type AlarmNotify struct {
-	cmdType  string
-	sn       uint32
-	deviceID string
-	channelID string
+	cmdType       string
+	sn            uint32
+	deviceID      string
+	channelID     string
 	alarmPriority int
 	alarmMethod   int
 	eventType     string
@@ -22,15 +22,15 @@ type AlarmNotify struct {
 
 // AlarmNotifyParams is the flat input for NewAlarmNotify.
 type AlarmNotifyParams struct {
-	SN           uint32
-	DeviceID     string
-	ChannelID    string
+	SN            uint32
+	DeviceID      string
+	ChannelID     string
 	AlarmPriority int
-	AlarmMethod  int
-	EventType    string
-	EventTime    string
-	Description  string
-	ExtInfo      string
+	AlarmMethod   int
+	EventType     string
+	EventTime     string
+	Description   string
+	ExtInfo       string
 }
 
 // NewAlarmNotify builds an Alarm notify.

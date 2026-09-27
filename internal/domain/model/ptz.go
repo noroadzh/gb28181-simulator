@@ -8,13 +8,13 @@ import (
 
 // PTZControl is the wire shape of a PTZ control command.
 type PTZControl struct {
-	CmdType  string
-	SN       uint32
-	DeviceID string
+	CmdType   string
+	SN        uint32
+	DeviceID  string
 	ChannelID string
-	Command  string
-	Speed    int
-	Priority int
+	Command   string
+	Speed     int
+	Priority  int
 }
 
 // NewPTZControl builds a PTZ control command.
@@ -38,10 +38,10 @@ func (p PTZControl) String() string {
 
 // Telemetry is the wire shape of a device telemetry report.
 type Telemetry struct {
-	DeviceID   string
-	ChannelID  string
-	EventTime  string
-	DataItems  []TelemetryItem
+	DeviceID  string
+	ChannelID string
+	EventTime string
+	DataItems []TelemetryItem
 }
 
 // TelemetryItem is one telemetry data point.

@@ -8,9 +8,9 @@ import (
 
 // PresetQuery is the wire shape of a preset position query.
 type PresetQuery struct {
-	CmdType  string
-	SN       uint32
-	DeviceID string
+	CmdType   string
+	SN        uint32
+	DeviceID  string
 	ChannelID string
 }
 
@@ -66,23 +66,23 @@ const CmdTypePreset = "Preset"
 
 // PresetSet is the wire shape of a preset set command.
 type PresetSet struct {
-	CmdType    string
-	SN         uint32
-	DeviceID   string
-	ChannelID  string
+	CmdType     string
+	SN          uint32
+	DeviceID    string
+	ChannelID   string
 	PresetIndex int
-	Name       string
+	Name        string
 }
 
 // NewPresetSet builds a Preset set command.
 func NewPresetSet(deviceID, channelID string, sn uint32, presetIndex int, name string) PresetSet {
 	return PresetSet{
-		CmdType:    CmdTypePreset,
-		SN:         sn,
-		DeviceID:   strings.TrimSpace(deviceID),
-		ChannelID:  strings.TrimSpace(channelID),
+		CmdType:     CmdTypePreset,
+		SN:          sn,
+		DeviceID:    strings.TrimSpace(deviceID),
+		ChannelID:   strings.TrimSpace(channelID),
 		PresetIndex: presetIndex,
-		Name:       strings.TrimSpace(name),
+		Name:        strings.TrimSpace(name),
 	}
 }
 
