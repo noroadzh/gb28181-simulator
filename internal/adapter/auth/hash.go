@@ -4,6 +4,8 @@ import (
 	"crypto/md5"
 	"crypto/sha1"
 	"encoding/hex"
+
+	"github.com/your-org/gb28181-simulator/internal/adapter/sm"
 )
 
 // HashFunc returns the hex-encoded (lowercase) digest of its input.
@@ -27,4 +29,11 @@ func MD5Hash(s string) string {
 func SHA1Hash(s string) string {
 	sum := sha1.Sum([]byte(s))
 	return hex.EncodeToString(sum[:])
+}
+
+// SM3Hash is the SM3 implementation required by GB 35114. It is wired in
+// alongside MD5/SHA-1 so that Callers can pass it as a HashFunc without
+// changing any signature.
+func SM3Hash(s string) string {
+	return sm.HashSM3(s)
 }

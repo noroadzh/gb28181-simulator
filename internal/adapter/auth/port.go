@@ -1,10 +1,12 @@
 package auth
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/your-org/gb28181-simulator/internal/adapter/sm"
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
 	"github.com/your-org/gb28181-simulator/internal/domain/port"
 )
@@ -17,7 +19,10 @@ type AuthenticatorAdapter struct {
 	responder *Responder
 }
 
-var _ port.Authenticator = (*AuthenticatorAdapter)(nil)
+var (
+	_ port.Authenticator      = (*AuthenticatorAdapter)(nil)
+	_ port.SecurityInfoSigner = (*AuthenticatorAdapter)(nil)
+)
 
 // NewAuthenticatorAdapter returns a port.Authenticator backed by the legacy
 // Responder. A nil responder is rejected at construction time so callers
@@ -38,16 +43,53 @@ func (a *AuthenticatorAdapter) Verify(req model.Message, cred model.Credentials)
 	if !ok {
 		return fmt.Errorf("%w: %w", port.ErrMalformedCredentials, ErrMalformedAuthorization)
 	}
-	err := a.responder.Verify(reqStub{method: req.Method(), auth: h.Value()}, cred.Password())
+	stub := reqStub{method: req.Method(), auth: h.Value()}
+	// VerifyWithCredentials runs the Digest check and, when the header
+	// carries a security-info directive, the GB 35114 SM2 mutual-auth
+	// signature check against cred's public key.
+	err := a.responder.VerifyWithCredentials(stub, cred)
 	if err == nil {
 		return nil
 	}
 	// Only a parse failure may be challenged again; everything else —
-	// including an algorithm we refuse to compute — is a refusal.
+	// including an algorithm we refuse to compute or a failed SM2
+	// signature — is a refusal.
 	if errors.Is(err, ErrMalformedAuthorization) {
 		return fmt.Errorf("%w: %w", port.ErrMalformedCredentials, err)
 	}
 	return fmt.Errorf("%w: %w", port.ErrInvalidCredentials, err)
+}
+
+// SignSecurityInfo implements port.SecurityInfoSigner: it answers a
+// REGISTER whose Authorization advertises algorithm=SM3 with a server-side
+// SecurityInfo header signed by the credential's SM2 private key over the
+// same Digest response. GB 35114 §5.3.2 requires the port layer to sign
+// whenever algorithm=SM3 is used and the node holds an SM2 identity, so
+// the signature is emitted independently of whether the client itself
+// chose to carry a security-info directive. Returns ("", false) when the
+// request uses MD5, cannot be parsed, or the credential lacks an SM2
+// identity — the 200 OK stays byte-identical to a plain Digest exchange.
+func (a *AuthenticatorAdapter) SignSecurityInfo(req model.Message, cred model.Credentials) (model.Header, bool) {
+	h, ok := req.Header("Authorization")
+	if !ok {
+		return model.Header{}, false
+	}
+	fields, err := ParseAuthorization(h.Value())
+	if err != nil {
+		return model.Header{}, false
+	}
+	if !strings.EqualFold(fields.Alg, "SM3") {
+		return model.Header{}, false
+	}
+	priv := cred.SM2PrivateKey()
+	if priv == nil {
+		return model.Header{}, false
+	}
+	sig, err := sm.SignSM2(priv, []byte(fields.Response))
+	if err != nil {
+		return model.Header{}, false
+	}
+	return model.NewHeader("SecurityInfo", "SM2,"+hex.EncodeToString(sig)), true
 }
 
 // ChallengerAdapter implements port.Challenger by delegating to the legacy
@@ -68,20 +110,25 @@ func NewChallengerAdapter(c *Challenger) (*ChallengerAdapter, error) {
 	return &ChallengerAdapter{challenger: c}, nil
 }
 
-// Challenge implements port.Challenger. It produces a fresh nonce via the
-// legacy Challenger and wraps the result in a model.Challenge. The nonce
-// (returned by the legacy layer) is preserved so callers can build a
-// nonce-store on top.
+// Challenge implements port.Challenger. It produces a fresh challenge via
+// the legacy Challenger and parses the generated header back into a
+// model.Challenge so the domain layer sees exactly what the wire carries —
+// including the algorithm the operator configured and the GB 35114 Note
+// when Note-integrity mode is active. The nonce is also returned by the
+// legacy layer so callers can build a nonce-store on top.
 func (a *ChallengerAdapter) Challenge(realm string) (model.Challenge, error) {
-	_, nonce, err := a.challenger.Challenge(realm)
+	headerValue, _, err := a.challenger.Challenge(realm)
 	if err != nil {
 		return model.Challenge{}, err
 	}
-	// model.Challenge carries the minimum the domain layer needs to build
-	// a WWW-Authenticate header: realm, nonce, algorithm, opaque and qop.
-	// The full header value returned by the legacy layer is retained by
-	// the caller via port.Challenger metadata.
-	return model.NewChallenge(realm, nonce, "MD5", "", "auth")
+	ch, err := ParseChallenge(headerValue)
+	if err != nil {
+		return model.Challenge{}, err
+	}
+	if ch.Realm() != realm {
+		return model.Challenge{}, fmt.Errorf("auth: challenge realm %q does not match request %q", ch.Realm(), realm)
+	}
+	return ch, nil
 }
 
 // AuthorizerAdapter implements port.Authorizer by wrapping the Authorizer

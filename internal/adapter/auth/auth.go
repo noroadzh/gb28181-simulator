@@ -59,3 +59,7 @@ var ErrInvalidUTF8 = errors.New("auth: invalid UTF-8 in username/realm")
 // an algorithm= value we do not recognise (e.g. algorithm=SHA-256). The
 // default HashFunc covers MD5 and SHA-1; Change 12 will register SM3.
 var ErrUnknownAlgorithm = errors.New("auth: unknown algorithm")
+
+// ErrInvalidSecurityInfo is returned when the security-info directive
+// is missing, malformed, or its SM2 signature does not validate.
+var ErrInvalidSecurityInfo = errors.New("auth: invalid security-info")

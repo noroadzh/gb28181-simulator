@@ -3,10 +3,13 @@ package auth
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/your-org/gb28181-simulator/internal/domain/model"
 )
 
 // mockReq is a minimal Request implementation for testing without
@@ -310,5 +313,204 @@ func TestFixtures_SHA256Stable(t *testing.T) {
 		if got != want {
 			t.Errorf("SHA256 drift on %s: got=%s want=%s", e.Name(), got, want)
 		}
+	}
+}
+
+// --- GB35114 SM3 ----------------------------------------------------------
+
+// TestChallenger_SM3Algorithm emits a challenge carrying algorithm=SM3.
+func TestChallenger_SM3Algorithm(t *testing.T) {
+	c := NewChallenger(nil)
+	val, _, err := c.Challenge("3402000000", WithHashName("SM3"), WithNoteHash())
+	if err != nil {
+		t.Fatalf("Challenge: %v", err)
+	}
+	if !strings.Contains(val, "algorithm=SM3") {
+		t.Errorf("Challenge missing algorithm=SM3 in:\n%s", val)
+	}
+	if !strings.Contains(val, "Note=") {
+		t.Errorf("Challenge missing Note= when WithNoteHash used in:\n%s", val)
+	}
+}
+
+// TestBuildAuthorizationWithHash_SM3_Pass checks the GB 35114 SM3
+// client-side response formula end-to-end.
+func TestBuildAuthorizationWithHash_SM3_Pass(t *testing.T) {
+	const (
+		method   = "REGISTER"
+		username = "34020000001320000001"
+		realm    = "3402000000"
+		password = "12345678"
+		nonce    = "n-sm3"
+		uri      = "sip:34020000002000000001@3402000000"
+		qop      = "auth"
+		nc       = "00000001"
+		cnonce   = "c1c2c3c4"
+	)
+	ch, err := model.NewChallenge(realm, nonce, "SM3", "", qop)
+	if err != nil {
+		t.Fatalf("NewChallenge: %v", err)
+	}
+	cred, err := model.NewCredentials(username, realm, password)
+	if err != nil {
+		t.Fatalf("NewCredentials: %v", err)
+	}
+	got, err := BuildAuthorizationWithHash(SM3Hash, cred, ch, method, uri, nc, cnonce)
+	if err != nil {
+		t.Fatalf("BuildAuthorizationWithHash: %v", err)
+	}
+	// Verify the server can recompute and verify the response using SM3.
+	r := NewResponder(SM3Hash)
+	if err := r.Verify(&mockReq{method: method, authorization: got}, password); err != nil {
+		t.Fatalf("SM3 Verify failed: %v\nAuthorization:\n%s", err, got)
+	}
+}
+
+// TestBuildAuthorizationWithHash_SM3_MissingHash_Fails confirms the
+// security-critical path: answering an SM3 challenge without supplying an
+// SM3 HashFunc is rejected before any digest is computed.
+func TestBuildAuthorizationWithHash_SM3_MissingHash_Fails(t *testing.T) {
+	ch, err := model.NewChallenge("r", "n", "SM3", "", "auth")
+	if err != nil {
+		t.Fatalf("NewChallenge: %v", err)
+	}
+	cred, err := model.NewCredentials("u", "r", "p")
+	if err != nil {
+		t.Fatalf("NewCredentials: %v", err)
+	}
+	_, err = BuildAuthorizationWithHash(nil, cred, ch, "REGISTER", "sip:u@r", "00000001", "c")
+	if err == nil {
+		t.Fatalf("expected error when SM3 challenge answered without SM3 hash")
+	}
+	if !strings.Contains(err.Error(), ErrUnknownAlgorithm.Error()) {
+		t.Errorf("unexpected error type: %v", err)
+	}
+}
+
+// TestChallengeFromAuthHeader_RejectsUnsupportedAlgorithm (task §2.4).
+func TestChallengeFromAuthHeader_RejectsUnsupportedAlgorithm(t *testing.T) {
+	// SHA-256 is explicitly not supported by this stack.
+	_, err := ChallengeFromAuthHeader(`Digest realm="r", nonce="n", algorithm=SHA-256`)
+	if err == nil {
+		t.Fatalf("expected rejection of SHA-256 challenge")
+	}
+	if !strings.Contains(err.Error(), ErrUnknownAlgorithm.Error()) {
+		t.Errorf("expected ErrUnknownAlgorithm, got: %v", err)
+	}
+}
+
+// TestNoteIntegrity_SM3RoundTrip (task §4.1) covers the full GB 35114
+// Note-integrity cycle: a Challenger in SM3 NoteHash mode emits a Note
+// carrying a self-contained "<ts>:<sm3>" value; ParseChallenge surfaces
+// it on the client; BuildAuthorizationWithHash echoes it; and the
+// Responder re-hashes and accepts.
+func TestNoteIntegrity_SM3RoundTrip(t *testing.T) {
+	c := NewChallenger(nil)
+	val, _, err := c.Challenge("3402000000", WithHashName("SM3"), WithNoteHash())
+	if err != nil {
+		t.Fatalf("Challenge: %v", err)
+	}
+	ch, err := ParseChallenge(val)
+	if err != nil {
+		t.Fatalf("ParseChallenge: %v", err)
+	}
+	if ch.Note() == "" {
+		t.Fatalf("expected non-empty Note for SM3+NoteHash challenge")
+	}
+	cred, err := model.NewCredentials("34020000001320000001", "3402000000", "12345678")
+	if err != nil {
+		t.Fatalf("NewCredentials: %v", err)
+	}
+	authz, err := BuildAuthorizationWithHash(SM3Hash, cred, ch, "REGISTER",
+		"sip:34020000002000000001@3402000000", FormatNC(1), "0a4f113b")
+	if err != nil {
+		t.Fatalf("BuildAuthorizationWithHash: %v", err)
+	}
+	if !strings.Contains(authz, "Note=") {
+		t.Fatalf("expected Authorization to echo Note:\n%s", authz)
+	}
+	r := NewResponder(SM3Hash)
+	if err := r.Verify(&mockReq{method: "REGISTER", authorization: authz}, "12345678"); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+}
+
+// TestNoteIntegrity_ForgedNoteRejected (task §4.1) tamper-proofs the Note
+// value the client echoes: a single byte flip in the hash portion must
+// cause the Responder to return ErrMalformedAuthorization.
+func TestNoteIntegrity_ForgedNoteRejected(t *testing.T) {
+	c := NewChallenger(nil)
+	val, _, err := c.Challenge("3402000000", WithHashName("SM3"), WithNoteHash())
+	if err != nil {
+		t.Fatalf("Challenge: %v", err)
+	}
+	ch, err := ParseChallenge(val)
+	if err != nil {
+		t.Fatalf("ParseChallenge: %v", err)
+	}
+	cred, err := model.NewCredentials("34020000001320000001", "3402000000", "12345678")
+	if err != nil {
+		t.Fatalf("NewCredentials: %v", err)
+	}
+	authz, err := BuildAuthorizationWithHash(SM3Hash, cred, ch, "REGISTER",
+		"sip:34020000002000000001@3402000000", FormatNC(1), "0a4f113b")
+	if err != nil {
+		t.Fatalf("BuildAuthorizationWithHash: %v", err)
+	}
+	// Flip the last hex digit of the hash part inside Note="<ts>:<hash>".
+	// Locate the Note="..." substring and corrupt its hash half.
+	noteStart := strings.Index(authz, `Note="`)
+	if noteStart < 0 {
+		t.Fatalf("expected Note= in Authorization:\n%s", authz)
+	}
+	noteValStart := noteStart + len(`Note="`)
+	noteValEnd := strings.IndexByte(authz[noteValStart:], '"')
+	if noteValEnd < 0 {
+		t.Fatalf("unterminated Note value:\n%s", authz)
+	}
+	noteVal := authz[noteValStart : noteValStart+noteValEnd]
+	colon := strings.IndexByte(noteVal, ':')
+	if colon < 0 {
+		t.Fatalf("expected ts:hash Note format, got %q", noteVal)
+	}
+	hashPart := noteVal[colon+1:]
+	if len(hashPart) == 0 {
+		t.Fatalf("empty hash part in Note %q", noteVal)
+	}
+	lastByte := hashPart[len(hashPart)-1]
+	flipped := byte('0')
+	if lastByte == '0' {
+		flipped = '1'
+	}
+	forgedHash := hashPart[:len(hashPart)-1] + string(flipped)
+	forgedNote := noteVal[:colon+1] + forgedHash
+	forgedAuthz := authz[:noteValStart] + forgedNote + authz[noteValStart+noteValEnd:]
+	r := NewResponder(SM3Hash)
+	if err := r.Verify(&mockReq{method: "REGISTER", authorization: forgedAuthz}, "12345678"); err == nil {
+		t.Fatalf("expected ErrMalformedAuthorization for forged Note, got nil")
+	} else if !errors.Is(err, ErrMalformedAuthorization) {
+		t.Fatalf("expected ErrMalformedAuthorization for forged Note, got: %v", err)
+	}
+}
+
+// TestNoteIntegrity_MD5PathUnchanged (task §4.2) guarantees that an MD5
+// Challenger — the default and the only mode prior to this change — still
+// produces an opaque-token Note (not an SM3 hash) and emits no Note=
+// directive at all, byte-identical to the pre-change output.
+func TestNoteIntegrity_MD5PathUnchanged(t *testing.T) {
+	c := NewChallenger(nil)
+	val, _, err := c.Challenge("3402000000")
+	if err != nil {
+		t.Fatalf("Challenge: %v", err)
+	}
+	if strings.Contains(val, "Note=") {
+		t.Fatalf("MD5 challenge must not emit Note=:\n%s", val)
+	}
+	ch, err := ParseChallenge(val)
+	if err != nil {
+		t.Fatalf("ParseChallenge: %v", err)
+	}
+	if ch.Note() != "" {
+		t.Fatalf("MD5 challenge Note() must be empty, got %q", ch.Note())
 	}
 }

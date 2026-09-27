@@ -62,3 +62,14 @@ type Challenger interface {
 	// is the caller's responsibility, not the adapter's.
 	Challenge(realm string) (model.Challenge, error)
 }
+
+// SecurityInfoSigner produces an optional server-side SecurityInfo header
+// for a 200 OK when the peer carried a security-info directive and this
+// node has an SM2 identity.
+type SecurityInfoSigner interface {
+	// SignSecurityInfo signs the peer's Digest response with the server
+	// credential's SM2 private key and returns the SecurityInfo header.
+	// Returns ("", false) when the request does not carry a security-info
+	// directive or the server credential lacks an SM2 identity.
+	SignSecurityInfo(req model.Message, cred model.Credentials) (model.Header, bool)
+}

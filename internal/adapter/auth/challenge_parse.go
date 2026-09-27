@@ -53,7 +53,32 @@ func ParseChallenge(value string) (model.Challenge, error) {
 			}
 		}
 	}
-	return model.NewChallenge(realm, nonce, alg, params["opaque"], qop)
+	ch, err := model.NewChallenge(realm, nonce, alg, params["opaque"], qop)
+	if err != nil {
+		return model.Challenge{}, err
+	}
+	if note := params["note"]; note != "" {
+		ch = ch.WithNote(note)
+	}
+	return ch, nil
+}
+
+// ChallengeFromAuthHeader is a higher-level ParseChallenge that restricts
+// the algorithm to the set understood by this stack: MD5, MD5-sess, SM3,
+// SM3-sess. It is the preferred entry point when the caller knows the input
+// came from a WWW-Authenticate (or 401) header and wants to fail fast on
+// unsupported algorithms instead of silently producing a wrong response.
+func ChallengeFromAuthHeader(value string) (model.Challenge, error) {
+	ch, err := ParseChallenge(value)
+	if err != nil {
+		return model.Challenge{}, err
+	}
+	switch strings.ToUpper(ch.Algorithm()) {
+	case "", "MD5", "MD5-SESS", "SM3", "SM3-SESS":
+		return ch, nil
+	default:
+		return model.Challenge{}, fmt.Errorf("%w: %s", ErrUnknownAlgorithm, ch.Algorithm())
+	}
 }
 
 // parseDigestParams reads "key=value" pairs separated by commas, ignoring

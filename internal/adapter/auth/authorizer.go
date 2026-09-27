@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/your-org/gb28181-simulator/internal/adapter/sm"
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
 )
 
@@ -71,18 +72,17 @@ func BuildAuthorization(cred model.Credentials, ch model.Challenge, method, uri,
 //	       cnonce="..."
 //
 // When the challenge offers no qop the RFC 2617 §3 form is used and nc /
-// cnonce are omitted. An algorithm other than MD5 / MD5-sess is an error
-// rather than a silent downgrade — computing the wrong digest would only
-// produce a rejection the operator cannot diagnose.
+// cnonce are omitted. The algorithm is taken from ch.Algorithm(); MD5 /
+// MD5-sess use the supplied hash (default MD5) while SM3 / SM3-sess
+// require hash to be non-nil (an SM3 HashFunc). Any other algorithm is
+// rejected with ErrUnknownAlgorithm rather than silently producing a
+// wrong digest.
 func BuildAuthorizationWithHash(
 	hash HashFunc,
 	cred model.Credentials,
 	ch model.Challenge,
 	method, uri, nc, cnonce string,
 ) (string, error) {
-	if hash == nil {
-		hash = MD5Hash
-	}
 	if method == "" {
 		return "", fmt.Errorf("auth: empty method")
 	}
@@ -93,7 +93,16 @@ func BuildAuthorizationWithHash(
 	if alg == "" {
 		alg = DefaultAlgorithm
 	}
-	if !strings.EqualFold(alg, "MD5") && !strings.EqualFold(alg, "MD5-sess") {
+	switch strings.ToUpper(alg) {
+	case "", "MD5", "MD5-SESS":
+		if hash == nil {
+			hash = MD5Hash
+		}
+	case "SM3", "SM3-SESS":
+		if hash == nil {
+			return "", fmt.Errorf("%w: %s requires an SM3 HashFunc", ErrUnknownAlgorithm, alg)
+		}
+	default:
 		return "", fmt.Errorf("%w: %s", ErrUnknownAlgorithm, alg)
 	}
 	qop := ch.Qop()
@@ -123,6 +132,21 @@ func BuildAuthorizationWithHash(
 	}
 	if opaque := ch.Opaque(); opaque != "" {
 		fields = append(fields, `opaque=`+quote(opaque))
+	}
+	if note := ch.Note(); note != "" {
+		fields = append(fields, `Note=`+quote(note))
+	}
+	if priv := cred.SM2PrivateKey(); priv != nil {
+		// GB 35114 §B.2.2 style mutual-authentication: the device
+		// signs the Digest response with its SM2 private key and
+		// carries the signature in the SecurityInfo directive so the
+		// platform can verify device identity beyond the shared
+		// password.
+		sig, err := sm.SignSM2(priv, []byte(response))
+		if err != nil {
+			return "", fmt.Errorf("auth: sign digest response: %w", err)
+		}
+		fields = append(fields, `security-info="SM2,`+hex.EncodeToString(sig)+`"`)
 	}
 	return "Digest " + strings.Join(fields, ", "), nil
 }
