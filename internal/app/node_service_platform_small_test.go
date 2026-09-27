@@ -48,7 +48,7 @@ func smallFixture(t *testing.T, upstream port.SIPTransport) (
 	lc := newFakeLifecycle(cat)
 	lc.transport = upstream
 	sockets := &nodeSockets{fakeLifecycle: lc, perNode: map[string]port.SIPTransport{}}
-	svc, err := NewNodeService(cat, sockets, cat, func(string) (port.SIPTransport, error) {
+	svc, err := NewNodeService(cat, sockets, cat, func(addr string, _ model.NodeID) (port.SIPTransport, error) {
 		return upstream, nil
 	}, &fakeClock{now: time.Now()})
 	if err != nil {

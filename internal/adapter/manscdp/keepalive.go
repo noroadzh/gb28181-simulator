@@ -21,6 +21,23 @@ const xmlHeader = `<?xml version="1.0" encoding="UTF-8"?>` + "\n"
 // CmdTypeKeepalive is the MANSCDP command carried by a keepalive notify.
 const CmdTypeKeepalive = "Keepalive"
 
+// alarmNotify is the wire shape of an Alarm notify. Optional fields are
+// emitted only when set, per task 2.1: Priority and Description default to
+// absent so a minimal alarm stays minimal on the wire.
+type alarmNotify struct {
+	XMLName       xml.Name `xml:"Notify"`
+	CmdType       string   `xml:"CmdType"`
+	SN            uint32   `xml:"SN"`
+	DeviceID      string   `xml:"DeviceID"`
+	SourceID      string   `xml:"SourceID,omitempty"`
+	AlarmPriority int      `xml:"AlarmPriority,omitempty"`
+	AlarmMethod   int      `xml:"AlarmMethod,omitempty"`
+	EventType     string   `xml:"EventType,omitempty"`
+	EventTime     string   `xml:"EventTime,omitempty"`
+	Description   string   `xml:"Description,omitempty"`
+	Info          string   `xml:"Info,omitempty"`
+}
+
 // keepaliveNotify is the wire shape of a keepalive. Field order is the order
 // of the struct, which is what makes the output stable enough for a golden
 // test.
@@ -60,6 +77,32 @@ func (c *KeepaliveCodecAdapter) MarshalKeepalive(k model.Keepalive) (string, err
 		// validated device id cannot trigger it, but the error is
 		// wrapped rather than dropped.
 		return "", fmt.Errorf("manscdp: marshal keepalive: %w", err)
+	}
+	return xmlHeader + string(body) + "\n", nil
+}
+
+// MarshalAlarmNotify renders n as a MANSCDP Alarm notify, declaration
+// included and terminated by a newline. Optional fields (priority,
+// description, etc.) are emitted with omitempty so a minimal alarm stays
+// minimal on the wire (task 2.1).
+func (c *KeepaliveCodecAdapter) MarshalAlarmNotify(n model.AlarmNotify) (string, error) {
+	if n.DeviceID() == "" {
+		return "", fmt.Errorf("manscdp: alarm notify without a device id")
+	}
+	body, err := xml.MarshalIndent(alarmNotify{
+		CmdType:       n.CmdType(),
+		SN:            n.SN(),
+		DeviceID:      n.DeviceID(),
+		SourceID:      n.ChannelID(),
+		AlarmPriority: n.AlarmPriority(),
+		AlarmMethod:   n.AlarmMethod(),
+		EventType:     n.EventType(),
+		EventTime:     n.EventTime(),
+		Description:   n.Description(),
+		Info:          n.ExtInfo(),
+	}, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("manscdp: marshal alarm notify: %w", err)
 	}
 	return xmlHeader + string(body) + "\n", nil
 }

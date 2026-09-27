@@ -137,8 +137,8 @@ func TestCascadeRoute_PopPreferred(t *testing.T) {
 // the "no cascade context stays header-free" convention.
 func TestCascadeRoute_HeadersAndFromHeaders(t *testing.T) {
 	const (
-		routeRaw      = "34020000012000000001"
-		preferredRaw  = "34020000012160000001"
+		routeRaw     = "34020000012000000001"
+		preferredRaw = "34020000012160000001"
 	)
 	route, err := NewCascadeRoute("34020000011310000001", routeRaw, preferredRaw)
 	if err != nil {
@@ -241,8 +241,8 @@ func TestNodeProfile_CascadeChildrenValidation(t *testing.T) {
 		deviceB = "34020000011310000002"
 	)
 	for _, tc := range []struct {
-		name string
-		in   []string
+		name    string
+		in      []string
 		wantErr bool
 	}{
 		{"duplicate child", []string{deviceA, deviceA}, true},

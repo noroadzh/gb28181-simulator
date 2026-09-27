@@ -72,7 +72,6 @@ func startDevice(
 	t *testing.T,
 	ctx context.Context,
 	svc *app.NodeService,
-	server string,
 	reg model.Registration,
 ) model.NodeID {
 	t.Helper()
@@ -119,7 +118,7 @@ func TestPlatformSeesDeviceKeepalives(t *testing.T) {
 	platform := platformProfile(t, e2eServer, freeAddr(t))
 	platformNode := startPlatform(t, ctx, svc, accounts, platform)
 	platformID := platformNode.ID()
-	startDevice(t, ctx, svc, platformNode.Profile().Addr(),
+	startDevice(t, ctx, svc,
 		deviceRegistration(t, platformNode.Profile().Addr(), 3600, 200*time.Millisecond))
 
 	waitUntil(t, "the platform to record the device", 15*time.Second, func() bool {
@@ -174,7 +173,7 @@ func TestPlatformAnswersCatalogQuery(t *testing.T) {
 	platform := platformProfile(t, e2eServer, freeAddr(t))
 	platformNode := startPlatform(t, ctx, svc, accounts, platform)
 	platformID := platformNode.ID()
-	startDevice(t, ctx, svc, platformNode.Profile().Addr(),
+	startDevice(t, ctx, svc,
 		deviceRegistration(t, platformNode.Profile().Addr(), 3600, 5*time.Second))
 	waitUntil(t, "the platform to record the device", 15*time.Second, func() bool {
 		return len(devices.List(ctx, platformID)) == 1
@@ -271,7 +270,7 @@ func TestPlatformSweepsExpiredDevice(t *testing.T) {
 
 	// A beat well inside the granted lifetime, so the device would
 	// certainly have renewed had it been allowed to.
-	startDevice(t, ctx, svc, platformNode.Profile().Addr(),
+	startDevice(t, ctx, svc,
 		deviceRegistration(t, platformNode.Profile().Addr(), 2, 200*time.Millisecond))
 	waitUntil(t, "the platform to record the device", 15*time.Second, func() bool {
 		return len(devices.List(ctx, platformID)) == 1
@@ -307,7 +306,7 @@ func TestPlatformStopEndsTheSweeper(t *testing.T) {
 	platform := platformProfileWithPolicy(t, e2eServer, freeAddr(t), policy)
 	platformNode := startPlatform(t, ctx, svc, accounts, platform)
 	platformID := platformNode.ID()
-	startDevice(t, ctx, svc, platformNode.Profile().Addr(),
+	startDevice(t, ctx, svc,
 		deviceRegistration(t, platformNode.Profile().Addr(), 3600, 5*time.Second))
 	waitUntil(t, "the platform to record the device", 15*time.Second, func() bool {
 		return len(devices.List(ctx, platformID)) == 1

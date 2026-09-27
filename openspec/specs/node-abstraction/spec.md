@@ -1,4 +1,4 @@
-# node-abstraction Specification
+# node-abstraction 规范
 
 ## Purpose
 
@@ -11,12 +11,11 @@
 ### Requirement: Node identity is a validated immutable value object
 
 
-The system SHALL provide an immutable `NodeID` value object under `internal/domain/model/`
-representing a GB/T 28181 20-digit identifier, together with a `NodeKind` enumeration
-(`device` / `platform-large` / `platform-small`) and a `NodeProfile` carrying the node's
-signalling address, home domain and vendor. Constructors MUST reject malformed input rather
-than returning a partially initialised value, and a constructed identity MUST NOT be mutable
-by callers.
+系统 MUST 提供不可变的 `NodeID` 值对象，放在 `internal/domain/model/` 下，
+表示 GB/T 28181 的 20 位编码，并提供 `NodeKind` 枚举
+（`device` / `platform-large` / `platform-small`）与承载节点
+信令地址、归属域和厂商信息的 `NodeProfile`。构造函数 MUST 拒绝非法输入而非
+返回部分初始化的值；已构造的身份MUST NOT 被调用方修改。
 
 #### Scenario: 合法 20 位编码构造成功
 
@@ -37,11 +36,10 @@ by callers.
 ### Requirement: Node lifecycle is an explicit state machine
 
 
-The system SHALL define a node status enumeration with the states `Idle`, `Registering`,
-`Registered`, `Online`, `Offline`, `Fault`, plus an explicit legal-transition table under
-`internal/domain/model/`. A transition not present in the table MUST return the sentinel error
-`ErrIllegalTransition` and leave the status unchanged; it MUST NOT panic and MUST NOT silently
-succeed.
+系统 MUST 定义节点状态枚举，包含状态 `Idle`、`Registering`、
+`Registered`、`Online`、`Offline`、`Fault`，以及位于
+`internal/domain/model/` 的显式合法迁移表。表中不存在的迁移 MUST 返回哨兵错误
+`ErrIllegalTransition` 并保持状态不变；MUST NOT panic，MUST NOT 静默成功。
 
 #### Scenario: 合法迁移推进状态
 
@@ -61,24 +59,20 @@ succeed.
 ### Requirement: Multiple nodes coexist in one process with isolated lifecycles
 
 
-The system SHALL maintain a process-wide node registry (port `NodeRegistry` in
-`internal/domain/port/`) holding many nodes simultaneously. Each node MUST own an independent
-transport listener, an independent lifecycle, and independent log fields keyed by its node id.
-Starting or stopping one node MUST NOT affect any other node, and the registry MUST be safe for
-concurrent use.
+系统 MUST 维护进程级节点注册表（端口 `NodeRegistry`，位于 `internal/domain/port/`），同时持有多个节点。每个节点 MUST 拥有独立的传输监听器、独立生命周期，以及以节点 id 为键的独立日志字段。启动或停止某个节点 MUST NOT 影响其他节点，且注册表 MUST 是并发安全的。
 
 #### Scenario: 两个节点各自绑定独立端口并共存
 
 - **WHEN** 在同一进程内注册 `bind=127.0.0.1:5060` 与 `bind=127.0.0.1:5061` 的两个节点并同时启动
-- **THEN** 两者均启动成功并各自持有独立 listener（本 capability 交付的状态为 `Registering`，
-  `Online` 需由身份实现推进，见 design D9）；各自 listener 独立收发互不串扰；
-  `registry.List()` 返回 2 个节点
+- **THEN** 两者均启动成功并各自持有独立 列出ener（本 capability 交付的状态为 `Registering`，
+  `Online` 需由身份实现推进，见 design D9）；各自 列出ener 独立收发互不串扰；
+  `registry.列出()` 返回 2 个节点
 
 #### Scenario: 停止单个节点不影响其他节点
 
 - **WHEN** 停止其中一个节点
 - **THEN** 该节点状态变为 `Offline` 且其端口被释放（可立即重新绑定）；
-  另一节点的状态与 listener 均不受影响，可继续收发
+  另一节点的状态与 列出ener 均不受影响，可继续收发
 
 #### Scenario: 注册表并发安全
 
@@ -93,10 +87,7 @@ concurrent use.
 ### Requirement: Node lifecycle use cases are orchestrated in the app layer
 
 
-The system SHALL provide a `NodeService` under `internal/app/` that depends only on domain
-ports (`NodeRegistry`, `NodeLifecycle`, `SIPTransport`, `Clock`, `AuditSink`) and exposes
-intent-revealing methods for creating, starting, stopping and querying nodes. The service MUST
-NOT import adapter packages other than through ports.
+系统 MUST 提供放在 `internal/app/` 下的 `NodeService`，该服务仅依赖 domain ports（`NodeRegistry`、`NodeLifecycle`、`SIPTransport`、`Clock`、`AuditSink`），并暴露用于创建、启动、停止和查询节点的自解释方法。该服务 MUST 不得通过端口之外的路径导入 adapter 包。
 
 #### Scenario: 创建并启动节点
 
@@ -117,16 +108,13 @@ NOT import adapter packages other than through ports.
 ### Requirement: Node configuration is declarative and backward compatible
 
 
-The system SHALL accept an optional `nodes:` list in the YAML configuration, where each entry
-carries at least `id`, `kind`, `domain` and `addr`. An entry MAY additionally carry an optional
-registration section with the upstream platform address, authentication username and password,
-requested `expires` and `transport`; omitting that section keeps the node unregistered. An entry
-MAY also carry an optional platform section with the realm it challenges downstreams in, the
-accounts it accepts, and the expires window it grants; omitting it leaves the node serving with
-documented defaults (see `platform-large-node`). Omitting the whole `nodes:` section MUST preserve
-today's behaviour (process starts with zero nodes); an entry with an invalid id, unknown kind, or
-invalid registration or platform values MUST fail configuration loading with an actionable error
-rather than being skipped silently.
+系统 MUST 接受可选的 `nodes:` 列表，在 YAML 配置中每个条目至少包含
+`id`、`kind`、`domain` 和 `addr`。条目可以额外携带可选的注册段，包含上游平台地址、
+鉴权用户名与密码、请求的 `expires` 和 `transport`；省略该段保持节点未注册状态。条目
+还可以携带可选的 platform 段，包含对下游挑战的 realm、接受的账号，以及授予的
+有效期窗口；省略它以记录的默认值使节点提供服务（见 `platform-large-node`）。省略整个
+`nodes:` 段 MUST 保持当前行为（进程以零节点启动）；id 非法、kind 未知或注册/
+platform 值非法的条目 MUST 使配置加载失败并返回可操作的错误，而非被静默跳过。
 
 #### Scenario: 声明两个节点后被加载
 
@@ -166,19 +154,18 @@ rather than being skipped silently.
 ### Requirement: HTTP API exposes node inventory and per-node control
 
 
-The system SHALL expose JSON endpoints under the existing `/v1` prefix: `GET /v1/nodes`
-(list), `GET /v1/nodes/{id}` (detail), `POST /v1/nodes/{id}/start`, `POST /v1/nodes/{id}/stop`
-and `POST /v1/nodes/{id}/unregister` for per-node control, plus `GET /v1/nodes/{id}/devices`
-and `GET /v1/nodes/{id}/devices/{deviceID}` to read the online device table of a platform-large
-node. Unknown ids MUST return HTTP 404 with a JSON error body; illegal transitions MUST return
-HTTP 409. Starting a node that carries a registration configuration additionally performs its
-registration transaction: a successful registration leaves the node `online`, while a failed one
-returns a non-2xx response describing the failing stage and leaves the node `fault`. A node
-without a registration configuration stops at `registering`, exactly as before — except a
-platform-large node, which advances to `online` because serving is its registered behaviour.
-Unregistering a node that is online sends `Expires: 0` and leaves it `offline` on success; a
-failed unregistration returns a non-2xx response naming the failing stage and leaves the node
-`online`, and unregistering a node that is not online is an illegal transition (HTTP 409).
+系统 MUST 暴露 JSON 端点，在现有的 `/v1` 前缀下：
+`GET /v1/nodes`（列出）、`GET /v1/nodes/{id}`（详情）、
+`POST /v1/nodes/{id}/start`、`POST /v1/nodes/{id}/stop`
+以及 `POST /v1/nodes/{id}/unregister`，用于单节点控制；
+此外还包括 `GET /v1/nodes/{id}/devices`
+与 `GET /v1/nodes/{id}/devices/{deviceID}` 用于读取 platform-large 节点的在线设备表。
+未知 id MUST 返回 HTTP 404 及 JSON 错误体；非法迁移 MUST 返回 HTTP 409。
+携带注册配置的节点启动时会额外执行注册事务：注册成功使节点进入 `online`，失败则返回
+non-2xx 响应描述失败阶段并使节点进入 `fault`。没有注册配置的节点停在 `registering`，
+与之前一致——但 platform-large 节点会前进到 `online`，因为服务是其注册行为。
+注销在线节点会发送 `Expires: 0`，成功则使其进入 `offline`；注销失败则返回 non-2xx 响应
+命名失败阶段并使节点保持 `online`，注销非在线节点为非法迁移（HTTP 409）。
 
 #### Scenario: 列出节点
 

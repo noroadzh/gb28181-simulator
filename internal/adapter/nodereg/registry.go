@@ -199,6 +199,32 @@ func (r *Registry) RecordRegistration(_ context.Context, id model.NodeID, result
 	return updated, nil
 }
 
+// MutateProfile replaces the node's profile with the result of fn applied to
+// the current profile. fn runs inside the registry's write lock, so the
+// read-modify-write is atomic against other mutators. A fn that refuses the
+// mutation (error) leaves the stored profile untouched.
+func (r *Registry) MutateProfile(_ context.Context, id model.NodeID,
+	fn func(model.NodeProfile) (model.NodeProfile, error),
+) (model.Node, error) {
+	key := id.String()
+	if fn == nil {
+		return model.Node{}, fmt.Errorf("nodereg: nil profile mutator")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ent, ok := r.nodes[key]
+	if !ok {
+		return model.Node{}, fmt.Errorf("nodereg: unknown node %s", key)
+	}
+	np, err := fn(ent.node.Profile())
+	if err != nil {
+		return model.Node{}, fmt.Errorf("nodereg: mutate %s: %w", key, err)
+	}
+	updated := ent.node.WithProfile(np)
+	ent.node = updated
+	return updated, nil
+}
+
 // Unregister removes the node and releases its signalling address. Other
 // nodes are untouched.
 func (r *Registry) Unregister(_ context.Context, id model.NodeID) error {

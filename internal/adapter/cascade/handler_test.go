@@ -13,7 +13,7 @@ type stubTopology struct {
 	children map[string][]string
 }
 
-func (s *stubTopology) Parent(node string) string    { return s.parent[node] }
+func (s *stubTopology) Parent(node string) string     { return s.parent[node] }
 func (s *stubTopology) Children(node string) []string { return s.children[node] }
 
 // mustNodeID parses a raw 20-char device id or fails the test.

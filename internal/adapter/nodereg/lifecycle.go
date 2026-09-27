@@ -12,11 +12,12 @@ import (
 // Compile-time assertion: Lifecycle satisfies the domain lifecycle port.
 var _ port.NodeLifecycle = (*Lifecycle)(nil)
 
-// TransportFactory binds a signalling listener on addr and returns the
-// transport. It is the seam that keeps this package free of any concrete
-// transport: the caller (app layer) injects a factory that already knows
-// how to build one.
-type TransportFactory func(addr string) (port.SIPTransport, error)
+// TransportFactory binds a signalling listener on addr for the node with
+// the given id and returns the transport. It is the seam that keeps this
+// package free of any concrete transport: the caller (app layer) injects a
+// factory that already knows how to build one. The nodeID lets the factory
+// tag the transport so audit/capture events can be attributed.
+type TransportFactory func(addr string, nodeID model.NodeID) (port.SIPTransport, error)
 
 // Lifecycle drives registered nodes through their status machine, owning
 // one listener per node. Starting or stopping one node never touches
@@ -76,7 +77,7 @@ func (l *Lifecycle) Start(ctx context.Context, id model.NodeID) error {
 		return fmt.Errorf("nodereg: unknown node %s", id)
 	}
 	addr := node.Profile().Addr()
-	tr, err := l.factory(addr)
+	tr, err := l.factory(addr, id)
 	if err != nil {
 		// Roll the status back and make sure nothing stays bound.
 		rollback := model.StatusIdle

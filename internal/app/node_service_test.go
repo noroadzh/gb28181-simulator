@@ -71,6 +71,23 @@ func (c *fakeCatalogue) List(_ context.Context) []model.Node {
 	return out
 }
 
+func (c *fakeCatalogue) MutateProfile(_ context.Context, id model.NodeID,
+	fn func(model.NodeProfile) (model.NodeProfile, error)) (model.Node, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n, ok := c.nodes[id.String()]
+	if !ok {
+		return model.Node{}, fmt.Errorf("unknown node %s", id)
+	}
+	p, err := fn(n.Profile())
+	if err != nil {
+		return model.Node{}, err
+	}
+	next := n.WithProfile(p)
+	c.nodes[id.String()] = next
+	return next, nil
+}
+
 func (c *fakeCatalogue) Advance(_ context.Context, id model.NodeID, to model.Status) (model.Node, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -239,21 +256,14 @@ func testProfile(t *testing.T, id, addr string) model.NodeProfile {
 	return p
 }
 
-func mustID(t *testing.T, raw string) model.NodeID {
-	t.Helper()
-	id, err := model.ParseNodeID(raw)
-	if err != nil {
-		t.Fatalf("ParseNodeID(%q): %v", raw, err)
-	}
-	return id
-}
+// mustID was removed because it was unused; re-add if a future test needs it.
 
 func newTestService(t *testing.T) (*NodeService, *fakeCatalogue, *fakeLifecycle, *fakeClock) {
 	t.Helper()
 	cat := newFakeCatalogue()
 	lc := newFakeLifecycle(cat)
 	clock := &fakeClock{now: time.Date(2026, 9, 24, 10, 0, 0, 0, time.UTC)}
-	svc, err := NewNodeService(cat, lc, cat, func(string) (port.SIPTransport, error) {
+	svc, err := NewNodeService(cat, lc, cat, func(addr string, _ model.NodeID) (port.SIPTransport, error) {
 		return nil, errors.New("no transport in tests")
 	}, clock)
 	if err != nil {
@@ -407,7 +417,7 @@ func TestNodeService_ChangedAtUsesInjectedClock(t *testing.T) {
 func TestNewNodeService_RequiresPorts(t *testing.T) {
 	cat := newFakeCatalogue()
 	lc := newFakeLifecycle(cat)
-	factory := func(string) (port.SIPTransport, error) { return nil, nil }
+	factory := func(addr string, _ model.NodeID) (port.SIPTransport, error) { return nil, nil }
 	clock := &fakeClock{}
 	if _, err := NewNodeService(nil, lc, cat, factory, clock); err == nil {
 		t.Error("nil registry accepted")

@@ -93,11 +93,11 @@ func newSplitTransport(ctx context.Context, tr port.SIPTransport) *splitTranspor
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	s := &splitTransport{
-		tr:      tr,
-		cancel:  cancel,
-		done:    make(chan struct{}),
-		uas:     make(chan arrival, splitQueue),
-		uac:     make(chan arrival, splitQueue),
+		tr:       tr,
+		cancel:   cancel,
+		done:     make(chan struct{}),
+		uas:      make(chan arrival, splitQueue),
+		uac:      make(chan arrival, splitQueue),
 		handlers: make(map[string]*transactionHandler),
 	}
 	go s.run(runCtx)

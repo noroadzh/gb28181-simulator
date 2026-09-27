@@ -218,7 +218,7 @@ func registerRequest(t *testing.T, deviceID string, hdrs ...model.Header) model.
 	return msg
 }
 
-func acceptorFixture(t *testing.T, auth *fakeAuthenticator) (
+func acceptorFixture(t *testing.T, auth port.Authenticator) (
 	*Acceptor, *acceptorTransport, *fakeCredentials, *fakeDevices, model.NodeID,
 ) {
 	t.Helper()
@@ -405,6 +405,74 @@ func TestAcceptor_GrantsAndRecords(t *testing.T) {
 	}
 	if row.Transport() != "udp" {
 		t.Errorf("transport = %q, want udp", row.Transport())
+	}
+}
+
+// A 2022 peer sees its X-GB-Ver echoed back and the version is recorded.
+func TestAcceptor_GrantsEchoesGBVersion2022(t *testing.T) {
+	_, tr, creds, devices, _ := acceptorFixture(t, &fakeAuthenticator{})
+	creds.add(t, mustPlatformNode(t), "34020000011310000001", "secret")
+	req := registerRequest(t, "34020000011310000001",
+		model.NewHeader("Authorization", `Digest username="34020000011310000001", response="ok"`),
+		model.NewHeader("Expires", "3600"),
+		model.NewHeader("X-GB-Ver", "2022"))
+	resp := tr.deliver(t, req)
+
+	if resp.StatusCode() != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode())
+	}
+	if got := responseHeader(t, resp, "X-GB-Ver"); got != "2022" {
+		t.Errorf("X-GB-Ver = %q, want 2022", got)
+	}
+	rows := devices.List(context.Background(), mustPlatformNode(t))
+	if len(rows) != 1 {
+		t.Fatalf("table has %d rows, want 1", len(rows))
+	}
+	if !rows[0].Is2022() {
+		t.Error("recorded device is not 2022, want GBVersion=2022")
+	}
+}
+
+// A 2016 peer gets no X-GB-Ver header and an empty recorded version.
+func TestAcceptor_GrantsOmitsGBVersionWhenAbsent(t *testing.T) {
+	_, tr, creds, devices, _ := acceptorFixture(t, &fakeAuthenticator{})
+	creds.add(t, mustPlatformNode(t), "34020000011310000001", "secret")
+	req := registerRequest(t, "34020000011310000001",
+		model.NewHeader("Authorization", `Digest username="34020000011310000001", response="ok"`),
+		model.NewHeader("Expires", "3600"))
+	resp := tr.deliver(t, req)
+
+	if resp.StatusCode() != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode())
+	}
+	if _, ok := resp.Header("X-GB-Ver"); ok {
+		t.Error("200 OK carries X-GB-Ver for a 2016 REGISTER, want it absent")
+	}
+	rows := devices.List(context.Background(), mustPlatformNode(t))
+	if len(rows) != 1 || rows[0].Is2022() {
+		t.Error("recorded device should not be marked as 2022")
+	}
+}
+
+// Re-registering with a new version updates the stored GBVersion without
+// creating a second row.
+func TestAcceptor_ReRegistrationUpdatesGBVersion(t *testing.T) {
+	_, tr, creds, devices, _ := acceptorFixture(t, &fakeAuthenticator{})
+	creds.add(t, mustPlatformNode(t), "34020000011310000001", "secret")
+	base := []model.Header{
+		model.NewHeader("Authorization", `Digest username="34020000011310000001", response="ok"`),
+		model.NewHeader("Expires", "3600"),
+	}
+	tr.deliver(t, registerRequest(t, "34020000011310000001",
+		append(base, model.NewHeader("X-GB-Ver", "2016"))...))
+	tr.deliver(t, registerRequest(t, "34020000011310000001",
+		append(base, model.NewHeader("X-GB-Ver", "2022"))...))
+	rows := devices.List(context.Background(), mustPlatformNode(t))
+	if len(rows) != 1 {
+		t.Fatalf("table has %d rows after re-registering, want 1", len(rows))
+	}
+	if !rows[0].Is2022() {
+		t.Error("re-registration did not update GBVersion to 2022")
 	}
 }
 
@@ -627,5 +695,63 @@ func TestAcceptor_DistinguishesPortErrors(t *testing.T) {
 	}
 	if errors.Is(malformed, port.ErrInvalidCredentials) {
 		t.Error("a malformed error matches the invalid sentinel, want them distinct")
+	}
+}
+
+// signingFakeAuthenticator is a test double that always accepts verification
+// but only emits a SecurityInfo header when the Authorization advertises
+// algorithm=SM3 (task 5.1/5.2).
+type signingFakeAuthenticator struct {
+	fakeAuthenticator
+}
+
+func (f *signingFakeAuthenticator) SignSecurityInfo(req model.Message, _ model.Credentials) (model.Header, bool) {
+	// The real adapter is wired through port.SecurityInfoSigner; this fake
+	// mirrors the algorithm-based gate so acceptor tests stay fast.
+	h, ok := req.Header("Authorization")
+	if !ok {
+		return model.Header{}, false
+	}
+	if !strings.Contains(strings.ToLower(h.Value()), "algorithm=sm3") {
+		return model.Header{}, false
+	}
+	return model.NewHeader("SecurityInfo", "SM2,00000000"), true
+}
+
+// An SM3-capable peer (algorithm=SM3) that reaches the grant branch must see
+// a SecurityInfo header attached by the adapter (task 5.1).
+func TestAcceptor_SM3CapablePeerReceivesSecurityInfo(t *testing.T) {
+	_, tr, creds, _, _ := acceptorFixture(t, &signingFakeAuthenticator{})
+	creds.add(t, mustPlatformNode(t), "34020000011310000001", "secret")
+	authz := `Digest username="34020000011310000001", realm="3402000000", nonce="n1", uri="sip:3402000000@3402000000", response="ok", algorithm=SM3`
+	req := registerRequest(t, "34020000011310000001",
+		model.NewHeader("Authorization", authz),
+		model.NewHeader("Expires", "3600"))
+	resp := tr.deliver(t, req)
+
+	if resp.StatusCode() != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode())
+	}
+	if got := responseHeader(t, resp, "SecurityInfo"); got == "" {
+		t.Error("200 OK is missing SecurityInfo header for SM3-capable peer")
+	}
+}
+
+// An MD5-capable peer must not receive a SecurityInfo header so its response
+// is byte-identical to pre-change output (task 5.2).
+func TestAcceptor_MD5PeerNoSecurityInfo(t *testing.T) {
+	_, tr, creds, _, _ := acceptorFixture(t, &signingFakeAuthenticator{})
+	creds.add(t, mustPlatformNode(t), "34020000011310000001", "secret")
+	authz := `Digest username="34020000011310000001", realm="3402000000", nonce="n1", uri="sip:3402000000@3402000000", response="ok", algorithm=MD5`
+	req := registerRequest(t, "34020000011310000001",
+		model.NewHeader("Authorization", authz),
+		model.NewHeader("Expires", "3600"))
+	resp := tr.deliver(t, req)
+
+	if resp.StatusCode() != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode())
+	}
+	if h, _ := resp.Header("SecurityInfo"); h.Value() != "" {
+		t.Errorf("SecurityInfo = %q, want absent for MD5 peer", h.Value())
 	}
 }

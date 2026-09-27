@@ -13,4 +13,7 @@ type KeepaliveCodec interface {
 	// MarshalKeepalive renders the notify body. The result is placed
 	// verbatim as the message body.
 	MarshalKeepalive(k model.Keepalive) (string, error)
+
+	// MarshalAlarmNotify renders an Alarm notify body.
+	MarshalAlarmNotify(n model.AlarmNotify) (string, error)
 }

@@ -14,11 +14,14 @@ package siptest
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/your-org/gb28181-simulator/internal/adapter/auth"
 	"github.com/your-org/gb28181-simulator/internal/adapter/siptransport"
+	"github.com/your-org/gb28181-simulator/internal/adapter/sm"
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
 )
 
@@ -35,6 +38,12 @@ type UAS struct {
 	// silentMessages makes the UAS ignore keepalives instead of answering
 	// them, which is how a test drives a node into "unreachable".
 	silentMessages bool
+
+	// sm2Mode turns on GB/T 35114 SM3+SM2: SM3 challenges, SM2-verified
+	// answers and SM2-signed 200 OKs.
+	sm2Mode        bool
+	sm2DeviceCred  *model.Credentials
+	sm2SigningPriv []byte
 
 	challenger *auth.Challenger
 	responder  *auth.Responder
@@ -58,6 +67,19 @@ func WithGrantedExpiry(seconds uint32) UASOption {
 // watch a node give up after its tolerance runs out.
 func WithSilentMessages() UASOption {
 	return func(u *UAS) { u.silentMessages = true }
+}
+
+// WithSM2 turns on GB/T 35114 SM3+SM2 mode: challenges carry
+// algorithm=SM3, answers must carry a valid SM2 signature under device's
+// public key, and every 200 OK is signed with the platform key.
+func WithSM2(device model.Credentials, platformSigningKey []byte) UASOption {
+	return func(u *UAS) {
+		u.sm2Mode = true
+		u.sm2DeviceCred = &device
+		u.sm2SigningPriv = platformSigningKey
+		u.challenger = auth.NewChallenger(nil, auth.WithHashName("SM3"))
+		u.responder = auth.NewResponder(nil)
+	}
 }
 
 // NewUAS binds a listener on network ("udp" or "tcp") at addr and answers
@@ -154,7 +176,11 @@ func (u *UAS) answer(ctx context.Context, req model.Message, peer string) error 
 	base := echoHeaders(req)
 
 	if _, ok := req.Header("Authorization"); !ok {
-		challenge, _, err := u.challenger.Challenge(u.realm, auth.WithOpaque())
+		opts := []auth.ChallengeOption{auth.WithOpaque()}
+		if u.sm2Mode {
+			opts = append(opts, auth.WithHashName("SM3"))
+		}
+		challenge, _, err := u.challenger.Challenge(u.realm, opts...)
 		if err != nil {
 			return err
 		}
@@ -164,6 +190,10 @@ func (u *UAS) answer(ctx context.Context, req model.Message, peer string) error 
 			return err
 		}
 		return u.port.Send(ctx, resp, peer)
+	}
+
+	if u.sm2Mode {
+		return u.answerSM2(ctx, req, peer, base)
 	}
 
 	if err := u.responder.Verify(authorizationRequest{msg: req}, u.password); err != nil {
@@ -176,6 +206,45 @@ func (u *UAS) answer(ctx context.Context, req model.Message, peer string) error 
 	hdrs := append(base,
 		model.NewHeader("Expires", fmt.Sprintf("%d", u.grantedExpiry)),
 		model.NewHeader("Date", "Thu, 24 Sep 2026 12:00:00 GMT"),
+	)
+	if contact, ok := req.Header("Contact"); ok {
+		hdrs = append(hdrs, contact)
+	}
+	resp, err := model.NewResponse(200, "OK", hdrs, "")
+	if err != nil {
+		return err
+	}
+	return u.port.Send(ctx, resp, peer)
+}
+
+// answerSM2 handles a REGISTER in GB/T 35114 SM3+SM2 mode: the device's
+// SM2 signature is verified first and, on success, the 200 OK is signed
+// with the platform's private key.
+func (u *UAS) answerSM2(ctx context.Context, req model.Message, peer string, base []model.Header) error {
+	authValue, _ := req.Header("Authorization")
+	fields, err := auth.ParseAuthorization(authValue.Value())
+	if err != nil || !strings.EqualFold(fields.Alg, "SM3") {
+		resp, rerr := model.NewResponse(403, "Forbidden", base, "")
+		if rerr != nil {
+			return rerr
+		}
+		return u.port.Send(ctx, resp, peer)
+	}
+	if err := u.responder.VerifyWithCredentials(authorizationRequest{msg: req}, *u.sm2DeviceCred); err != nil {
+		resp, rerr := model.NewResponse(403, "Forbidden", base, "")
+		if rerr != nil {
+			return rerr
+		}
+		return u.port.Send(ctx, resp, peer)
+	}
+	sig, err := sm.SignSM2(u.sm2SigningPriv, []byte(fields.Response))
+	if err != nil {
+		return err
+	}
+	hdrs := append(base,
+		model.NewHeader("Expires", fmt.Sprintf("%d", u.grantedExpiry)),
+		model.NewHeader("Date", "Thu, 24 Sep 2026 12:00:00 GMT"),
+		model.NewHeader("SecurityInfo", "SM2,"+hex.EncodeToString(sig)),
 	)
 	if contact, ok := req.Header("Contact"); ok {
 		hdrs = append(hdrs, contact)

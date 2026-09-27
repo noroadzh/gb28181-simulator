@@ -2,6 +2,7 @@ package siptest_test
 
 import (
 	"context"
+	"encoding/hex"
 	"io"
 	"log/slog"
 	"net"
@@ -16,6 +17,7 @@ import (
 	"github.com/your-org/gb28181-simulator/internal/adapter/nodereg"
 	"github.com/your-org/gb28181-simulator/internal/adapter/siptest"
 	"github.com/your-org/gb28181-simulator/internal/adapter/siptransport"
+	"github.com/your-org/gb28181-simulator/internal/adapter/sm"
 	"github.com/your-org/gb28181-simulator/internal/app"
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
 	"github.com/your-org/gb28181-simulator/internal/domain/port"
@@ -233,7 +235,7 @@ func TestUAS_RejectsWrongPassword(t *testing.T) {
 func registrationService(t *testing.T) *app.NodeService {
 	t.Helper()
 	registry := nodereg.New()
-	factory := func(addr string) (port.SIPTransport, error) {
+	factory := func(addr string, _ model.NodeID) (port.SIPTransport, error) {
 		tr, err := siptransport.New("udp://" + addr)
 		if err != nil {
 			return nil, err
@@ -442,7 +444,9 @@ var hostPortPattern = regexp.MustCompile(`\d{1,3}(\.\d{1,3}){3}:\d+`)
 // masked, so the bytes that define the protocol stay comparable.
 func snapshot(m model.Message) string {
 	var sb strings.Builder
-	sb.WriteString("REGISTER " + m.URI().String() + " SIP/2.0\n")
+	sb.WriteString("REGISTER ")
+	sb.WriteString(m.URI().String())
+	sb.WriteString(" SIP/2.0\n")
 	for _, h := range m.Headers() {
 		value := hostPortPattern.ReplaceAllString(h.Value(), "<local>")
 		switch h.Name() {
@@ -455,7 +459,10 @@ func snapshot(m model.Message) string {
 		case "Authorization":
 			value = maskDigest(value)
 		}
-		sb.WriteString(h.Name() + ": " + value + "\n")
+		sb.WriteString(h.Name())
+		sb.WriteString(": ")
+		sb.WriteString(value)
+		sb.WriteString("\n")
 	}
 	return sb.String()
 }
@@ -519,5 +526,188 @@ func compareGolden(t *testing.T, name, got string) {
 	if string(want) != got {
 		t.Errorf("wire snapshot differs from %s:\n--- golden ---\n%s\n--- got ---\n%s",
 			path, want, got)
+	}
+}
+
+// --- GB/T 35114 SM2 end-to-end (task 5.1 / 5.2) ---------------------------
+// TestUAS_SM2Registration verifies that, when SM2 mode is enabled:
+//  1. the first REGISTER is challenged with an SM3 WWW-Authenticate header,
+//  2. a response carrying a correct SM2 signature is accepted (200 OK + SecurityInfo),
+//  3. a response with a wrong SM2 signature is rejected (403).
+func TestUAS_SM2Registration(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Build SM2 credentials for the "device".
+	devPriv, devPub, err := sm.GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair device: %v", err)
+	}
+	devCred, err := model.NewCredentials(e2eDeviceA, e2eDomain, e2ePasswd)
+	if err != nil {
+		t.Fatalf("NewCredentials: %v", err)
+	}
+	devCred = devCred.WithSM2KeyPair(devPriv, devPub)
+
+	// Build SM2 credentials for the "platform" (UAS) that signs 200 OKs.
+	platPriv, _, err := sm.GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair platform: %v", err)
+	}
+
+	uas, err := siptest.NewUAS("udp", freeAddr(t), e2eDomain, e2ePasswd,
+		siptest.WithSM2(devCred, platPriv))
+	if err != nil {
+		t.Fatalf("NewUAS: %v", err)
+	}
+	defer uas.Close()
+	go func() { _ = uas.Serve(ctx) }()
+
+	client, err := siptransport.New("udp://" + freeAddr(t))
+	if err != nil {
+		t.Fatalf("client transport: %v", err)
+	}
+	defer client.Close()
+	port := siptransport.NewPortAdapter(client)
+
+	requestURI := "sip:" + e2eServer + "@" + e2eDomain
+	first, err := model.NewRequest("REGISTER", requestURI, []model.Header{
+		model.NewHeader("From", "<sip:"+e2eDeviceA+"@"+e2eDomain+">;tag=abc"),
+		model.NewHeader("To", "<sip:"+e2eDeviceA+"@"+e2eDomain+">"),
+		model.NewHeader("Call-ID", "sm2-callid-1"),
+		model.NewHeader("CSeq", "1 REGISTER"),
+		model.NewHeader("Contact", "<sip:"+e2eDeviceA+"@"+client.LocalAddr()+">"),
+		model.NewHeader("Expires", "3600"),
+	}, "")
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	if err := port.Send(ctx, first, uas.Addr()); err != nil {
+		t.Fatalf("send REGISTER: %v", err)
+	}
+
+	resp, _, err := port.Receive(ctx)
+	if err != nil {
+		t.Fatalf("receive 401: %v", err)
+	}
+	if resp.StatusCode() != 401 {
+		t.Fatalf("status = %d, want 401", resp.StatusCode())
+	}
+	challenge := headerValue(t, resp, "WWW-Authenticate")
+	if !strings.HasPrefix(challenge, "Digest ") {
+		t.Fatalf("challenge = %q, want a Digest challenge", challenge)
+	}
+	if !strings.Contains(challenge, "algorithm=SM3") {
+		t.Fatalf("challenge missing SM3 algorithm: %s", challenge)
+	}
+
+	// Build the Authorization header using the device's SM2 private key so
+	// that the platform can verify the response. We bypass Authorize here
+	// because the adapter does not generate nc/cnonce (GB/T 35114 requires
+	// both for qop=auth).
+	// Parse the WWW-Authenticate header manually to extract fields.
+	challengeBody := strings.TrimSpace(strings.TrimPrefix(challenge, "Digest "))
+	realm, nonce, opaque, alg := "", "", "", "MD5"
+	for _, kv := range strings.Split(challengeBody, ", ") {
+		kv = strings.TrimSpace(kv)
+		if !strings.Contains(kv, "=") {
+			continue
+		}
+		parts := strings.SplitN(kv, "=", 2)
+		key := strings.ToLower(strings.TrimSpace(parts[0]))
+		val := strings.Trim(parts[1], `"`)
+		switch key {
+		case "realm":
+			realm = val
+		case "nonce":
+			nonce = val
+		case "opaque":
+			opaque = val
+		case "algorithm":
+			alg = val
+		}
+	}
+	qop := ""
+	if strings.Contains(challenge, `qop="auth"`) {
+		qop = "auth"
+	}
+	chModel, err := model.NewChallenge(realm, nonce, alg, opaque, qop)
+	if err != nil {
+		t.Fatalf("NewChallenge: %v", err)
+	}
+	authStr, err := sipauth.BuildAuthorizationWithHash(
+		sipauth.SM3Hash, devCred, chModel,
+		"REGISTER", requestURI, "00000001", "abc123",
+	)
+	if err != nil {
+		t.Fatalf("BuildAuthorizationWithHash: %v", err)
+	}
+	authHeader := model.NewHeader("Authorization", authStr)
+	second, err := model.NewRequest("REGISTER", requestURI, []model.Header{
+		model.NewHeader("From", "<sip:"+e2eDeviceA+"@"+e2eDomain+">;tag=abc"),
+		model.NewHeader("To", "<sip:"+e2eDeviceA+"@"+e2eDomain+">"),
+		model.NewHeader("Call-ID", "sm2-callid-1"),
+		model.NewHeader("CSeq", "2 REGISTER"),
+		model.NewHeader("Contact", "<sip:"+e2eDeviceA+"@"+client.LocalAddr()+">"),
+		model.NewHeader("Expires", "3600"),
+		authHeader,
+	}, "")
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	if err := port.Send(ctx, second, uas.Addr()); err != nil {
+		t.Fatalf("send authenticated REGISTER: %v", err)
+	}
+	resp, _, err = port.Receive(ctx)
+	if err != nil {
+		t.Fatalf("receive 200: %v", err)
+	}
+	if resp.StatusCode() != 200 {
+		t.Fatalf("status = %d, want 200: %s", resp.StatusCode(), resp)
+	}
+	secInfo := headerValue(t, resp, "SecurityInfo")
+	if !strings.HasPrefix(secInfo, "SM2,") {
+		t.Fatalf("SecurityInfo = %q, want SM2,<hex>", secInfo)
+	}
+	if _, err := hex.DecodeString(strings.TrimPrefix(secInfo, "SM2,")); err != nil {
+		t.Fatalf("SecurityInfo signature is not valid hex: %v", err)
+	}
+
+	// Now exercise the rejection path: build an Authorization header with
+	// a different SM2 private key so the signature does not verify.
+	wrongPriv, _, err := sm.GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair wrong: %v", err)
+	}
+	wrongCred := devCred.WithSM2KeyPair(wrongPriv, devPub)
+	wrongAuthStr, err := sipauth.BuildAuthorizationWithHash(
+		sipauth.SM3Hash, wrongCred, chModel,
+		"REGISTER", requestURI, "00000001", "abc123",
+	)
+	if err != nil {
+		t.Fatalf("BuildAuthorizationWithHash wrong: %v", err)
+	}
+	wrongAuth := model.NewHeader("Authorization", wrongAuthStr)
+	third, err := model.NewRequest("REGISTER", requestURI, []model.Header{
+		model.NewHeader("From", "<sip:"+e2eDeviceA+"@"+e2eDomain+">;tag=abc"),
+		model.NewHeader("To", "<sip:"+e2eDeviceA+"@"+e2eDomain+">"),
+		model.NewHeader("Call-ID", "sm2-callid-2"),
+		model.NewHeader("CSeq", "1 REGISTER"),
+		model.NewHeader("Contact", "<sip:"+e2eDeviceA+"@"+client.LocalAddr()+">"),
+		model.NewHeader("Expires", "3600"),
+		wrongAuth,
+	}, "")
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	if err := port.Send(ctx, third, uas.Addr()); err != nil {
+		t.Fatalf("send wrong-auth REGISTER: %v", err)
+	}
+	resp, _, err = port.Receive(ctx)
+	if err != nil {
+		t.Fatalf("receive 403: %v", err)
+	}
+	if resp.StatusCode() != 403 {
+		t.Fatalf("status = %d, want 403", resp.StatusCode())
 	}
 }

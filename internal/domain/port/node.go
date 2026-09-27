@@ -37,6 +37,12 @@ type NodeRegistry interface {
 	// node. Recording is data, not a lifecycle step: it never changes the
 	// node's status.
 	RecordRegistration(ctx context.Context, id model.NodeID, result model.RegistrationResult) (model.Node, error)
+
+	// MutateProfile calls fn with the node's current profile and stores the
+	// result. fn MUST return a modified profile (the returned profile replaces
+	// the node's profile). If the node is unknown the call returns a "not
+	// found" error.
+	MutateProfile(ctx context.Context, id model.NodeID, fn func(model.NodeProfile) (model.NodeProfile, error)) (model.Node, error)
 }
 
 // StagedFailure is an error that knows which stage of an operation it came

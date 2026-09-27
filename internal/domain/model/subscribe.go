@@ -8,8 +8,8 @@ import (
 
 // SubscribeInfo carries a parsed MANSCDP subscription request.
 type SubscribeInfo struct {
-	deviceID string
-	sn       uint32
+	deviceID  string
+	sn        uint32
 	channelID string
 }
 

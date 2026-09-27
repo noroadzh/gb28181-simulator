@@ -78,6 +78,79 @@ func TestMarshalKeepaliveRejectsEmpty(t *testing.T) {
 	}
 }
 
+// TestMarshalAlarmNotifyGolden pins the wire shape of an Alarm notify that
+// carries the optional priority/method/description fields (task 2.1). A
+// platform must be able to parse every field it emitted.
+func TestMarshalAlarmNotifyGolden(t *testing.T) {
+	n, err := model.NewAlarmNotify(model.AlarmNotifyParams{
+		SN:            7,
+		DeviceID:      "34020000001320000001",
+		ChannelID:     "34020000001320000001",
+		AlarmPriority: 1,
+		AlarmMethod:   5,
+		EventType:     "alarm",
+		EventTime:     "2026-09-25T12:00:00",
+		Description:   "motion detected",
+	})
+	if err != nil {
+		t.Fatalf("NewAlarmNotify: %v", err)
+	}
+	body, err := NewKeepaliveCodec().MarshalAlarmNotify(n)
+	if err != nil {
+		t.Fatalf("MarshalAlarmNotify: %v", err)
+	}
+	for _, want := range []string{
+		"<CmdType>Alarm</CmdType>",
+		"<SN>7</SN>",
+		"<DeviceID>34020000001320000001</DeviceID>",
+		"<AlarmPriority>1</AlarmPriority>",
+		"<AlarmMethod>5</AlarmMethod>",
+		"<Description>motion detected</Description>",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("alarm body missing %q:\n%s", want, body)
+		}
+	}
+	// Round-trip: a platform parses what a device emitted.
+	got, err := NewMANSCDPCodec().DecodeAlarmNotify(body)
+	if err != nil {
+		t.Fatalf("DecodeAlarmNotify round trip: %v", err)
+	}
+	if got.AlarmPriority() != 1 || got.AlarmMethod() != 5 ||
+		got.Description() != "motion detected" || got.EventType() != "alarm" {
+		t.Errorf("decoded alarm = %+v, want priority=1/method=5/desc=motion detected", got)
+	}
+}
+
+// TestMarshalAlarmNotifyMinimal verifies that an alarm without the optional
+// fields stays minimal on the wire (omitempty, task 2.1).
+func TestMarshalAlarmNotifyMinimal(t *testing.T) {
+	n, err := model.NewAlarmNotify(model.AlarmNotifyParams{
+		SN:       1,
+		DeviceID: "34020000001320000001",
+	})
+	if err != nil {
+		t.Fatalf("NewAlarmNotify: %v", err)
+	}
+	body, err := NewKeepaliveCodec().MarshalAlarmNotify(n)
+	if err != nil {
+		t.Fatalf("MarshalAlarmNotify: %v", err)
+	}
+	if strings.Contains(body, "<AlarmPriority>") {
+		t.Errorf("minimal alarm must omit AlarmPriority:\n%s", body)
+	}
+	if strings.Contains(body, "<Description>") {
+		t.Errorf("minimal alarm must omit Description:\n%s", body)
+	}
+}
+
+func TestMarshalAlarmNotifyRejectsEmptyDeviceID(t *testing.T) {
+	// Validation happens at NewAlarmNotify, not at Marshal.
+	if _, err := model.NewAlarmNotify(model.AlarmNotifyParams{DeviceID: ""}); err == nil {
+		t.Fatal("expected an error for an alarm without a device id")
+	}
+}
+
 func itoa(n uint32) string {
 	if n == 0 {
 		return "0"

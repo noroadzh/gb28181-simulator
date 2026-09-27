@@ -20,7 +20,7 @@ func platformFixture(t *testing.T, tr *acceptorTransport) (
 	cat := newFakeCatalogue()
 	lc := newFakeLifecycle(cat)
 	lc.transport = tr
-	svc, err := NewNodeService(cat, lc, cat, func(string) (port.SIPTransport, error) {
+	svc, err := NewNodeService(cat, lc, cat, func(addr string, _ model.NodeID) (port.SIPTransport, error) {
 		return tr, nil
 	}, &fakeClock{now: time.Now()})
 	if err != nil {

@@ -26,6 +26,7 @@ type Config struct {
 	Storage StorageConfig `mapstructure:"storage"`
 	Tracing TracingConfig `mapstructure:"tracing"`
 	Nodes   []NodeConfig  `mapstructure:"nodes"`
+	Capture CaptureConfig `mapstructure:"capture"`
 }
 
 // NodeConfig is one entry of the optional `nodes:` list. Every field except
@@ -210,6 +211,17 @@ type Level string
 // StorageConfig configures the SQLite-backed storage package.
 type StorageConfig struct {
 	Path string `mapstructure:"path"`
+}
+
+// CaptureConfig configures the SIP wire capture ring buffer. Capture is
+// disabled by default: when Enabled is false no capture store is created and
+// the global audit emitter stays a no-op, so behaviour is byte-identical to
+// a simulator built without this feature.
+type CaptureConfig struct {
+	Enabled bool `mapstructure:"enabled"`
+	// Capacity is the per-node ring size. 0 or negative falls back to the
+	// adapter default (2048).
+	Capacity int `mapstructure:"capacity"`
 }
 
 // Defaults returns a Config populated with safe defaults. Used when no file

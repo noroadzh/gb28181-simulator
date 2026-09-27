@@ -37,5 +37,5 @@
 ## 5. 验证与归档
 
 - [x] 5.1 `go build ./...` 与 `go test ./... -count=1` 全绿
-- [ ] 5.2 `openspec validate core-manscdp-and-ps --strict` 绿色
-- [ ] 5.3 `openspec archive core-manscdp-and-ps --yes` 归档
+- [x] 5.2 `openspec validate core-manscdp-and-ps --strict` 绿色
+- [x] 5.3 `openspec archive core-manscdp-and-ps --yes` 归档

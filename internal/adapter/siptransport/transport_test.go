@@ -283,6 +283,131 @@ func TestTransport_AuditHook_InjectEmitter(t *testing.T) {
 	}
 }
 
+func TestTransport_NodeIDPropagatesToAudit(t *testing.T) {
+	// Note: not t.Parallel() because we mutate the process-global emitter.
+	var mu sync.Mutex
+	var events []audit.WireEvent
+	emitter := audit.EmitterFunc(func(e audit.WireEvent) {
+		mu.Lock()
+		defer mu.Unlock()
+		events = append(events, e)
+	})
+	audit.SetEmitter(emitter)
+	defer audit.SetEmitter(nil)
+
+	nodeID := "34020000001320000001"
+	s1, s2, cleanup := newNodeIDPair(t, nodeID)
+	defer cleanup()
+
+	req := buildRequest(t)
+	done := make(chan struct{})
+	go func() {
+		_, _, _ = s2.Receive(context.Background())
+		close(done)
+	}()
+
+	if err := s1.Send(req, s2.LocalAddr()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("receive timed out")
+	}
+
+	// Give the receive goroutine a brief moment to publish the audit event.
+	time.Sleep(20 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(events) != 2 {
+		t.Fatalf("expected 2 audit events (tx + rx), got %d", len(events))
+	}
+	for i, e := range events {
+		if e.NodeID != nodeID {
+			t.Fatalf("event[%d]: NodeID = %q, want %q", i, e.NodeID, nodeID)
+		}
+	}
+}
+
+func TestTransport_NodeIDEmptyByDefault(t *testing.T) {
+	var mu sync.Mutex
+	var events []audit.WireEvent
+	emitter := audit.EmitterFunc(func(e audit.WireEvent) {
+		mu.Lock()
+		defer mu.Unlock()
+		events = append(events, e)
+	})
+	audit.SetEmitter(emitter)
+	defer audit.SetEmitter(nil)
+
+	s1, s2, cleanup := newTestPair(t)
+	defer cleanup()
+
+	req := buildRequest(t)
+	done := make(chan struct{})
+	go func() {
+		_, _, _ = s2.Receive(context.Background())
+		close(done)
+	}()
+
+	if err := s1.Send(req, s2.LocalAddr()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("receive timed out")
+	}
+
+	time.Sleep(20 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(events) != 2 {
+		t.Fatalf("expected 2 audit events (tx + rx), got %d", len(events))
+	}
+	for i, e := range events {
+		if e.NodeID != "" {
+			t.Fatalf("event[%d]: NodeID = %q, want empty", i, e.NodeID)
+		}
+	}
+}
+
+// newNodeIDPair creates two transports both tagged with nodeID. It mirrors
+// newTestPair but exercises the WithNodeID option.
+func newNodeIDPair(t *testing.T, nodeID string) (*siptransport.Transport, *siptransport.Transport, func()) {
+	t.Helper()
+	l1, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	l2, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		l1.Close()
+		t.Fatal(err)
+	}
+	addr1 := l1.LocalAddr().String()
+	addr2 := l2.LocalAddr().String()
+	l1.Close()
+	l2.Close()
+
+	s1, err := siptransport.New("udp://"+addr1, siptransport.WithNodeID(nodeID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2, err := siptransport.New("udp://"+addr2, siptransport.WithNodeID(nodeID))
+	if err != nil {
+		s1.Close()
+		t.Fatal(err)
+	}
+	cleanup := func() {
+		s1.Close()
+		s2.Close()
+	}
+	return s1, s2, cleanup
+}
+
 func TestAudit_RedactAuthHeader(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

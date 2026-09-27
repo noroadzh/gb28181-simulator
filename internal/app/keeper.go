@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand"
 	"strconv"
+	"slices"
 	"sync"
 	"time"
 
@@ -59,8 +61,61 @@ type Keeper struct {
 	newTicker port.TickerFactory
 	log       *slog.Logger
 
+	faults port.FaultStore
+
 	mu      sync.Mutex
 	running map[string]*session
+}
+
+// WithFaults attaches the fault store consulted before every outbound
+// keepalive and OPTIONS probe. Optional: without it the keeper's traffic
+// path is byte-identical to the pre-fault behaviour.
+func (k *Keeper) WithFaults(faults port.FaultStore) { k.faults = faults }
+
+// keeperFaultGate mirrors the acceptor's fault gate on the outbound path.
+// Evaluation order: blackhole, drop, delay, canned. Blackhole, drop and
+// canned verdicts surface as a RegistrationError so the run loop counts them
+// as failures; a delay verdict pauses the goroutine and then lets the packet
+// through.
+func (k *Keeper) keeperFaultGate(ctx context.Context, nodeID model.NodeID, method string) error {
+	if k.faults == nil {
+		return nil
+	}
+	profile, ok := k.faults.Get(ctx, nodeID)
+	if !ok || profile.IsZero() {
+		return nil
+	}
+	if slices.Contains(profile.Blackhole, method) {
+		k.recordFault(nodeID, model.FaultBlackhole)
+		return fmt.Errorf("keeper fault: blackholed %s", method)
+	}
+	if profile.Drop > 0 && rand.Float64() < profile.Drop {
+		k.recordFault(nodeID, model.FaultDrop)
+		return fmt.Errorf("keeper fault: dropped %s", method)
+	}
+	if !profile.Delay.IsZero() {
+		d := profile.Delay.Base
+		if profile.Delay.Jitter > 0 {
+			d += time.Duration(rand.Int63n(int64(profile.Delay.Jitter) + 1))
+		}
+		k.recordFault(nodeID, model.FaultDelay)
+		time.Sleep(d)
+	}
+	if status, canned := profile.Canned[method]; canned {
+		k.recordFault(nodeID, model.FaultCannedResponse)
+		return &RegistrationError{
+			Stage:      StageResponse,
+			StatusCode: status,
+			Err:        fmt.Errorf("keeper fault: canned %d", status),
+		}
+	}
+	return nil
+}
+
+func (k *Keeper) recordFault(nodeID model.NodeID, action model.FaultAction) {
+	if rec, ok := k.faults.(interface{ Record(model.NodeID, model.FaultAction) }); ok {
+		rec.Record(nodeID, action)
+	}
 }
 
 // session is one node's background work.
@@ -284,6 +339,10 @@ func (k *Keeper) heartbeat(ctx context.Context, s *session) error {
 	waitCtx, cancel := context.WithTimeout(ctx, s.reg.HeartbeatTimeout())
 	defer cancel()
 
+	if err := k.keeperFaultGate(ctx, s.id, "MESSAGE"); err != nil {
+		return &RegistrationError{Stage: StageSend, Err: err}
+	}
+
 	if err := s.tr.Send(waitCtx, msg, s.reg.Server()); err != nil {
 		return &RegistrationError{Stage: StageSend, Err: err}
 	}
@@ -345,6 +404,10 @@ func (k *Keeper) sendOptions(ctx context.Context, s *session) error {
 
 	waitCtx, cancel := context.WithTimeout(ctx, s.reg.HeartbeatTimeout())
 	defer cancel()
+
+	if err := k.keeperFaultGate(ctx, s.id, "OPTIONS"); err != nil {
+		return &RegistrationError{Stage: StageSend, Err: err}
+	}
 
 	if err := s.tr.Send(waitCtx, msg, s.reg.Server()); err != nil {
 		return &RegistrationError{Stage: StageSend, Err: err}

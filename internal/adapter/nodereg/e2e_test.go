@@ -14,7 +14,7 @@ import (
 
 // realFactory binds a genuine UDP listener through the siptransport
 // adapter, so this test exercises the real socket path rather than a stub.
-func realFactory(addr string) (port.SIPTransport, error) {
+func realFactory(addr string, _ model.NodeID) (port.SIPTransport, error) {
 	tr, err := siptransport.New("udp://" + addr)
 	if err != nil {
 		return nil, err

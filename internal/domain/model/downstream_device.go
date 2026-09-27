@@ -80,6 +80,12 @@ func (d DownstreamDevice) Transport() string { return d.transport }
 // GBVersion returns the protocol version the device stated, or "".
 func (d DownstreamDevice) GBVersion() string { return d.gbVersion }
 
+// Is2022 reports whether the device negotiated GB/T 28181-2022 semantics.
+// It is the single version gate: 2022-only wire behaviour (extra fields,
+// 2022 command replies, SDP capability modules) is emitted only when this
+// returns true, so 2016 peers keep today's byte-exact output.
+func (d DownstreamDevice) Is2022() bool { return d.gbVersion == "2022" }
+
 // RegisteredAt returns when the current registration was granted.
 func (d DownstreamDevice) RegisteredAt() time.Time { return d.registeredAt }
 

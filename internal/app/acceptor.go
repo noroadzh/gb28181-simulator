@@ -8,6 +8,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand"
+	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -67,6 +70,7 @@ type Acceptor struct {
 	manscdp       port.MANSCDPCodec
 	newTicker     port.TickerFactory
 	log           *slog.Logger
+	registry      port.NodeRegistry
 
 	dialogs      *DialogManager
 	playback     port.PlaybackPort
@@ -75,9 +79,10 @@ type Acceptor struct {
 	mediaService *MediaService
 	pipelines    map[string]*InboundPipeline
 
-	mu       sync.Mutex
-	serving  map[string]*platform
-	cascade  port.CascadeHandler
+	mu      sync.Mutex
+	serving map[string]*platform
+	cascade port.CascadeHandler
+	faults  port.FaultStore
 }
 
 // platform is one node's serving goroutine and the settings it serves with.
@@ -204,6 +209,25 @@ func (a *Acceptor) WithCascadeHandler(h port.CascadeHandler) *Acceptor {
 	return a
 }
 
+// WithNodeRegistry attaches the node registry the acceptor reads from when
+// answering catalog queries: the node's profile channels are appended to
+// the downstream device list, and their online/offline status is respected
+// (task 5.1). Without it a platform still serves, using only the device
+// table.
+func (a *Acceptor) WithNodeRegistry(r port.NodeRegistry) *Acceptor {
+	a.registry = r
+	return a
+}
+
+// WithFaults attaches the runtime fault store consulted before every
+// request reaches the dispatch switch (Change 13, design D6). It is
+// optional: an acceptor without one serves every request normally, which
+// is the default-off guarantee of the feature.
+func (a *Acceptor) WithFaults(fs port.FaultStore) *Acceptor {
+	a.faults = fs
+	return a
+}
+
 // routeOutbound consults the cascade handler before a message leaves the node.
 // The destination is always the original peer: responses go back to the
 // requester and NOTIFYs go to the subscriber, so the handler's next-hop advice
@@ -276,13 +300,13 @@ func (a *Acceptor) Serve(id model.NodeID, tr port.SIPTransport, realm string, po
 	defer a.mu.Unlock()
 	runCtx, cancel := context.WithCancel(a.ctx)
 	p := &platform{
-		id:         id,
-		tr:         tr,
-		realm:      realm,
-		policy:     policy,
-		sweepEvery: sweepIntervalFor(policy),
-		cancel:     cancel,
-		done:       make(chan struct{}),
+		id:          id,
+		tr:          tr,
+		realm:       realm,
+		policy:      policy,
+		sweepEvery:  sweepIntervalFor(policy),
+		cancel:      cancel,
+		done:        make(chan struct{}),
 		subscribers: make(map[string]*catalogSub),
 	}
 	a.serving[key] = p
@@ -383,58 +407,81 @@ func (a *Acceptor) run(ctx context.Context, p *platform) {
 		if !msg.IsRequest() {
 			continue
 		}
+		// Fault gate (Change 13, design D6): consult the node's armed
+		// fault profile before any handler runs. A skip swallows the
+		// request, an answer short-circuits the dispatch with the canned
+		// response, and a serve verdict falls through to the normal
+		// handlers unchanged. With no profile the byte path is identical.
 		var resp model.Message
-		switch msg.Method() {
-		case "REGISTER":
-			resp, err = a.handle(ctx, p, msg, peer)
-			if err != nil {
-				a.log.Error("cannot answer a REGISTER",
-					"node_id", p.id.String(), "peer", peer, "error", err.Error())
+		handled := false
+		if a.faults != nil {
+			canned, decision := a.faultGate(p, msg, peer)
+			switch decision {
+			case faultSkip:
 				continue
+			case faultAnswer:
+				resp = canned
+				handled = true
 			}
-		case "MESSAGE":
-			var answered bool
-			resp, answered = a.handleMessage(ctx, p, msg, peer)
-			if !answered {
+		}
+		if !handled {
+			switch msg.Method() {
+			case "REGISTER":
+				resp, err = a.handle(ctx, p, msg, peer)
+				if err != nil {
+					a.log.Error("cannot answer a REGISTER",
+						"node_id", p.id.String(), "peer", peer, "error", err.Error())
+					continue
+				}
+			case "MESSAGE":
+				var answered bool
+				resp, answered = a.handleMessage(ctx, p, msg, peer)
+				if !answered {
+					continue
+				}
+			case "INVITE":
+				resp, err = a.handleInvite(ctx, p, msg, peer)
+				if err != nil {
+					a.log.Warn("cannot answer an INVITE",
+						"node_id", p.id.String(), "peer", peer, "error", err.Error())
+					continue
+				}
+			case "ACK":
+				a.handleAck(ctx, p, msg, peer)
 				continue
+			case "BYE":
+				resp, err = a.handleBye(ctx, p, msg, peer)
+				if err != nil {
+					a.log.Warn("cannot answer a BYE",
+						"node_id", p.id.String(), "peer", peer, "error", err.Error())
+					continue
+				}
+			case "OPTIONS":
+				resp, err = a.handleOptions(ctx, p, msg, peer)
+				if err != nil {
+					a.log.Warn("cannot answer OPTIONS",
+						"node_id", p.id.String(), "peer", peer, "error", err.Error())
+					continue
+				}
+			case "SUBSCRIBE":
+				resp, err = a.handleSubscribe(ctx, p, msg, peer)
+				if err != nil {
+					a.log.Warn("cannot answer a SUBSCRIBE",
+						"node_id", p.id.String(), "peer", peer, "error", err.Error())
+					continue
+				}
+			default:
+				// A method this platform does not serve is dropped quietly —
+				// unless the fault profile configures an answer for it (Change
+				// 13's UnsupportedMethod knob).
+				canned, answer := a.faultUnsupported(p, msg)
+				if !answer {
+					a.log.Debug("ignoring an unsupported request",
+						"node_id", p.id.String(), "method", msg.Method(), "peer", peer)
+					continue
+				}
+				resp = canned
 			}
-		case "INVITE":
-			resp, err = a.handleInvite(ctx, p, msg, peer)
-			if err != nil {
-				a.log.Warn("cannot answer an INVITE",
-					"node_id", p.id.String(), "peer", peer, "error", err.Error())
-				continue
-			}
-		case "ACK":
-			a.handleAck(ctx, p, msg, peer)
-			continue
-		case "BYE":
-			resp, err = a.handleBye(ctx, p, msg, peer)
-			if err != nil {
-				a.log.Warn("cannot answer a BYE",
-					"node_id", p.id.String(), "peer", peer, "error", err.Error())
-				continue
-			}
-		case "OPTIONS":
-			resp, err = a.handleOptions(ctx, p, msg, peer)
-			if err != nil {
-				a.log.Warn("cannot answer OPTIONS",
-					"node_id", p.id.String(), "peer", peer, "error", err.Error())
-				continue
-			}
-		case "SUBSCRIBE":
-			resp, err = a.handleSubscribe(ctx, p, msg, peer)
-			if err != nil {
-				a.log.Warn("cannot answer a SUBSCRIBE",
-					"node_id", p.id.String(), "peer", peer, "error", err.Error())
-				continue
-			}
-		default:
-			// A method this platform does not serve must not be
-			// answered with an error, so it is dropped quietly.
-			a.log.Debug("ignoring an unsupported request",
-				"node_id", p.id.String(), "method", msg.Method(), "peer", peer)
-			continue
 		}
 		resp, dst, ok := a.routeOutbound(p, resp, peer)
 		var sendErr error
@@ -447,6 +494,122 @@ func (a *Acceptor) run(ctx context.Context, p *platform) {
 				"method", msg.Method(), "error", sendErr.Error())
 		}
 	}
+}
+
+// faultDecision is the gate's tri-state verdict for one inbound request
+// (design D6): serve through the normal handlers, skip silently, or answer
+// with the canned response the gate returns.
+type faultDecision int
+
+const (
+	faultServe  faultDecision = iota
+	faultSkip                 // swallow the request, nothing is sent
+	faultAnswer               // send the returned canned response
+)
+
+// faultGate consults the node's installed fault profile before the request
+// is dispatched. Evaluation order follows the profile contract: blackhole,
+// then probabilistic drop, then delay, then canned. Skip and answer
+// verdicts are counted on the store when it carries the counters extension.
+// A node with no profile — every fixture's default — returns faultServe
+// without touching the rand source or the clock, which is what keeps the
+// no-fault byte path identical.
+func (a *Acceptor) faultGate(p *platform, req model.Message, peer string) (model.Message, faultDecision) {
+	profile, ok := a.faults.Get(a.ctx, p.id)
+	if !ok || profile.IsZero() {
+		return model.Message{}, faultServe
+	}
+	method := req.Method()
+	if slices.Contains(profile.Blackhole, method) {
+		a.recordFault(p.id, model.FaultBlackhole)
+		return model.Message{}, faultSkip
+	}
+	if profile.Drop > 0 && rand.Float64() < profile.Drop {
+		a.recordFault(p.id, model.FaultDrop)
+		a.log.Info("fault profile dropped a request",
+			"node_id", p.id.String(), "method", method, "peer", peer)
+		return model.Message{}, faultSkip
+	}
+	// Delay withholds every answer — canned and served alike.
+	if !profile.Delay.IsZero() {
+		d := profile.Delay.Base
+		if profile.Delay.Jitter > 0 {
+			d += time.Duration(rand.Int63n(int64(profile.Delay.Jitter) + 1))
+		}
+		a.recordFault(p.id, model.FaultDelay)
+		time.Sleep(d)
+	}
+	if status, canned := profile.Canned[method]; canned {
+		a.recordFault(p.id, model.FaultCannedResponse)
+		resp, err := buildResponse(status, cannedReason(status), req, nil, "")
+		if err != nil {
+			a.log.Warn("cannot render the canned fault answer",
+				"node_id", p.id.String(), "method", method,
+				"status", status, "error", err.Error())
+			return model.Message{}, faultSkip
+		}
+		return resp, faultAnswer
+	}
+	return model.Message{}, faultServe
+}
+
+// faultUnsupported answers a method the node does not serve with the
+// profile's UnsupportedMethod status when one is configured; without a
+// profile the request stays a silent drop, the historical behaviour.
+func (a *Acceptor) faultUnsupported(p *platform, req model.Message) (model.Message, bool) {
+	if a.faults == nil {
+		return model.Message{}, false
+	}
+	profile, ok := a.faults.Get(a.ctx, p.id)
+	if !ok || profile.UnsupportedMethod == 0 {
+		return model.Message{}, false
+	}
+	a.recordFault(p.id, model.FaultUnsupportedMethod)
+	resp, err := buildResponse(profile.UnsupportedMethod,
+		cannedReason(profile.UnsupportedMethod), req, nil, "")
+	if err != nil {
+		a.log.Warn("cannot render the unsupported-method answer",
+			"node_id", p.id.String(), "status", profile.UnsupportedMethod,
+			"error", err.Error())
+		return model.Message{}, false
+	}
+	return resp, true
+}
+
+// recordFault bumps the store's counter for an action that actually fired.
+// A bare port.FaultStore has nowhere to put counters, so the extension is
+// discovered structurally and its absence never changes the gate outcome.
+func (a *Acceptor) recordFault(nodeID model.NodeID, action model.FaultAction) {
+	if rec, ok := a.faults.(interface {
+		Record(nodeID model.NodeID, action model.FaultAction)
+	}); ok {
+		rec.Record(nodeID, action)
+	}
+}
+
+// cannedReason returns a reason phrase for a canned fault status. SIP
+// shares most phrases with HTTP; the handful that differ are tabled here
+// and the rest fall back to http.StatusText.
+func cannedReason(status int) string {
+	if r, ok := sipReasons[status]; ok {
+		return r
+	}
+	if r := http.StatusText(status); r != "" {
+		return r
+	}
+	return "Fault"
+}
+
+var sipReasons = map[int]string{
+	480: "Temporarily Unavailable",
+	486: "Busy Here",
+	500: "Server Internal Error",
+	502: "Bad Gateway",
+	503: "Service Unavailable",
+	504: "Server Time-out",
+	600: "Busy Everywhere",
+	603: "Decline",
+	604: "Does Not Exist Anywhere",
 }
 
 // sweepLoop wakes the sweeper on the node's beat until the context ends.
@@ -528,6 +691,31 @@ func (a *Acceptor) handleMessage(
 		return a.handleMediaStatus(ctx, p, req, notify)
 	case notify.IsPlaybackControl():
 		return a.handlePlaybackControl(ctx, p, req, notify)
+	case notify.IsDeviceInfo():
+		return a.handleDeviceInfo(ctx, p, req, notify)
+	case notify.IsRecordInfo():
+		return a.handleRecordInfo(ctx, p, req, notify)
+	case notify.IsAlarm():
+		return a.handleAlarm(ctx, p, req, notify)
+	case notify.IsDeviceControl():
+		return a.handleDeviceControl(ctx, p, req, notify)
+	case notify.IsPresetQuery():
+		return a.handlePresetQuery(ctx, p, req, notify)
+	case notify.IsHomePosition():
+		if !a.is2022(ctx, p, notify.DeviceID()) {
+			return model.Message{}, false
+		}
+		return a.handleHomePosition(ctx, p, req, notify)
+	case notify.IsCruiseTrackList():
+		if !a.is2022(ctx, p, notify.DeviceID()) {
+			return model.Message{}, false
+		}
+		return a.handleCruiseTrackList(ctx, p, req, notify)
+	case notify.IsSnapShot():
+		if !a.is2022(ctx, p, notify.DeviceID()) {
+			return model.Message{}, false
+		}
+		return a.handleSnapShot(ctx, p, req, notify)
 	default:
 		a.log.Debug("ignoring an unsupported command",
 			"node_id", p.id.String(), "cmd", notify.CmdType(), "device_id", notify.DeviceID())
@@ -542,7 +730,7 @@ func (a *Acceptor) handleInvite(
 	ctx context.Context,
 	p *platform,
 	req model.Message,
-	peer string,
+	_ string,
 ) (model.Message, error) {
 	callID := headerValue(req, "Call-ID")
 	if callID == "" {
@@ -604,12 +792,14 @@ func (a *Acceptor) cancelInviteExpiry(callID string) {
 }
 
 // handleAck advances the dialog for an INVITE transaction but does not answer:
-// ACK carries no response in the SIP request/response model.
+// ACK carries no response in the SIP request/response model. Confirming the
+// dialog also cancels the INVITE expiry timer, so a confirmed dialog is not
+// torn down 30 s later by a stale timer.
 func (a *Acceptor) handleAck(
-	ctx context.Context,
+	_ context.Context,
 	p *platform,
 	req model.Message,
-	peer string,
+	_ string,
 ) {
 	callID := headerValue(req, "Call-ID")
 	if callID == "" || a.dialogs == nil {
@@ -619,17 +809,19 @@ func (a *Acceptor) handleAck(
 		if _, err := a.dialogs.Confirm(callID, nil); err != nil {
 			a.log.Warn("ACK could not confirm dialog",
 				"node_id", p.id.String(), "call_id", callID, "error", err.Error())
+			return
 		}
+		a.cancelInviteExpiry(callID)
 	}
 }
 
 // handleBye terminates the dialog identified by the Call-ID and answers with
 // 200 OK.
 func (a *Acceptor) handleBye(
-	ctx context.Context,
+	_ context.Context,
 	p *platform,
 	req model.Message,
-	peer string,
+	_ string,
 ) (model.Message, error) {
 	callID := headerValue(req, "Call-ID")
 	if callID != "" && a.dialogs != nil {
@@ -644,10 +836,10 @@ func (a *Acceptor) handleBye(
 // the platform serves; a minimal 200 OK is enough for the peer to mark the
 // link healthy.
 func (a *Acceptor) handleOptions(
-	ctx context.Context,
-	p *platform,
+	_ context.Context,
+	_ *platform,
 	req model.Message,
-	peer string,
+	_ string,
 ) (model.Message, error) {
 	hdrs := []model.Header{
 		model.NewHeader("Allow", "REGISTER, MESSAGE, INVITE, ACK, BYE, OPTIONS, SUBSCRIBE"),
@@ -844,7 +1036,7 @@ func (a *Acceptor) handleMediaStatus(
 // handlePlaybackControl forwards a downstream PlaybackControl notify to the
 // playback port. When the port is absent the notify is merely acknowledged.
 func (a *Acceptor) handlePlaybackControl(
-	ctx context.Context,
+	_ context.Context,
 	p *platform,
 	req model.Message,
 	notify model.Notify,
@@ -859,6 +1051,481 @@ func (a *Acceptor) handlePlaybackControl(
 	resp, err := buildResponse(200, "OK", req, nil, "")
 	if err != nil {
 		a.log.Warn("cannot answer a PlaybackControl",
+			"node_id", p.id.String(), "error", err.Error())
+		return model.Message{}, false
+	}
+	return resp, true
+}
+
+// handleDeviceInfo answers a DeviceInfo query with the static facts the
+// device registry holds about the requester: vendor, model, firmware.
+// A query without an SN is refused silently (the answer could not be
+// correlated anyway).
+func (a *Acceptor) handleDeviceInfo(
+	ctx context.Context,
+	p *platform,
+	req model.Message,
+	notify model.Notify,
+) (model.Message, bool) {
+	if !notify.HasSN() {
+		a.log.Warn("ignoring a DeviceInfo query without a sequence number",
+			"node_id", p.id.String(), "device_id", notify.DeviceID())
+		return model.Message{}, false
+	}
+	_ = ctx
+	_ = p
+	item, itemErr := model.NewDeviceInfoItem(model.DeviceInfoItemParams{
+		DeviceID:     notify.DeviceID(),
+		Name:         "GB28181 Simulator Device",
+		Manufacturer: "Simulator",
+		Model:        "virtual-camera-1",
+		Firmware:     "1.0.0",
+	})
+	if itemErr != nil {
+		a.log.Warn("cannot build a device info item",
+			"node_id", p.id.String(), "error", itemErr.Error())
+		return model.Message{}, false
+	}
+	info := model.DeviceInfoResponse{
+		DeviceID: notify.DeviceID(),
+		SN:       notify.SN(),
+		SumNum:   1,
+		Items:    []model.DeviceInfoItem{item},
+	}
+	body, err := a.manscdp.MarshalDeviceInfoResponse(info)
+	if err != nil {
+		a.log.Warn("cannot render a device info answer",
+			"node_id", p.id.String(), "error", err.Error())
+		return model.Message{}, false
+	}
+	resp, err := buildResponse(200, "OK", req, []model.Header{
+		model.NewHeader("Content-Type", contentTypeMANSCDP),
+	}, body)
+	if err != nil {
+		a.log.Warn("cannot answer a DeviceInfo query",
+			"node_id", p.id.String(), "error", err.Error())
+		return model.Message{}, false
+	}
+	return resp, true
+}
+
+// handleRecordInfo answers a RecordInfo query with the synthetic record
+// list the device reports for the requested time range. An empty StartTime
+// or EndTime in the query is treated as "no bound" on that side.
+func (a *Acceptor) handleRecordInfo(
+	_ context.Context,
+	p *platform,
+	req model.Message,
+	notify model.Notify,
+) (model.Message, bool) {
+	if !notify.HasSN() {
+		a.log.Warn("ignoring a RecordInfo query without a sequence number",
+			"node_id", p.id.String(), "device_id", notify.DeviceID())
+		return model.Message{}, false
+	}
+	query, qErr := a.manscdp.DecodeRecordInfoQuery(req.Body())
+	if qErr != nil {
+		a.log.Warn("cannot read a record info query",
+			"node_id", p.id.String(), "error", qErr.Error())
+		return model.Message{}, false
+	}
+	all := []model.RecordInfoItem{model.NewRecordInfoItem(model.RecordInfoItemParams{
+		Name:      "recording-1",
+		DeviceID:  notify.DeviceID(),
+		StartTime: "20260925T000000",
+		EndTime:   "20260925T010000",
+		FilePath:  "/records/" + notify.DeviceID() + "/20260925T000000.mp4",
+	})}
+	items := all
+	if query.StartTime != "" {
+		filtered := make([]model.RecordInfoItem, 0, len(items))
+		for _, it := range items {
+			if it.EndTime() > query.StartTime {
+				filtered = append(filtered, it)
+			}
+		}
+		items = filtered
+	}
+	if query.EndTime != "" {
+		filtered := make([]model.RecordInfoItem, 0, len(items))
+		for _, it := range items {
+			if it.StartTime() <= query.EndTime {
+				filtered = append(filtered, it)
+			}
+		}
+		items = filtered
+	}
+	respBody := model.RecordInfoResponse{
+		DeviceID: notify.DeviceID(),
+		SN:       notify.SN(),
+		SumNum:   len(items),
+		Items:    items,
+	}
+	body, err := a.manscdp.MarshalRecordInfoResponse(respBody)
+	if err != nil {
+		a.log.Warn("cannot render a record info answer",
+			"node_id", p.id.String(), "error", err.Error())
+		return model.Message{}, false
+	}
+	resp, err := buildResponse(200, "OK", req, []model.Header{
+		model.NewHeader("Content-Type", contentTypeMANSCDP),
+	}, body)
+	if err != nil {
+		a.log.Warn("cannot answer a RecordInfo query",
+			"node_id", p.id.String(), "error", err.Error())
+		return model.Message{}, false
+	}
+	return resp, true
+}
+
+// handleAlarm acknowledges an Alarm notify a downstream pushed. The event is
+// appended to the serving node's in-memory alarm log when a node registry is
+// attached, so the runtime API and Web UI can observe what arrived on the
+// wire; without one it is only logged.
+func (a *Acceptor) handleAlarm(
+	ctx context.Context,
+	p *platform,
+	req model.Message,
+	_ model.Notify,
+) (model.Message, bool) {
+	alarm, err := a.manscdp.DecodeAlarmNotify(req.Body())
+	if err != nil {
+		a.log.Warn("cannot read an alarm notify",
+			"node_id", p.id.String(), "error", err.Error())
+		return model.Message{}, false
+	}
+	if a.registry != nil {
+		snap, snapErr := model.NewAlarmSnapshot(
+			fmt.Sprintf("%s-%d", alarm.DeviceID(), alarm.SN()),
+			alarm.DeviceID(), alarm.ChannelID(),
+			alarm.AlarmPriority(), alarm.AlarmMethod(),
+			alarm.Description(), alarm.EventTime(),
+		)
+		if snapErr == nil {
+			if _, mErr := a.registry.MutateProfile(ctx, p.id, func(np model.NodeProfile) (model.NodeProfile, error) {
+				return np.AppendAlarm(snap)
+			}); mErr != nil {
+				a.log.Debug("alarm snapshot not stored",
+					"node_id", p.id.String(), "error", mErr.Error())
+			}
+		}
+	}
+	ack := model.NewAlarmAck(alarm.DeviceID(), alarm.SN(), "OK")
+	body, err := a.manscdp.MarshalAlarmAck(ack)
+	if err != nil {
+		a.log.Warn("cannot render an alarm ack",
+			"node_id", p.id.String(), "error", err.Error())
+		return model.Message{}, false
+	}
+	a.log.Debug("alarm received", "node_id", p.id.String(),
+		"device_id", alarm.DeviceID(), "event", alarm.EventType(),
+		"time", alarm.EventTime())
+	resp, err := buildResponse(200, "OK", req, []model.Header{
+		model.NewHeader("Content-Type", contentTypeMANSCDP),
+	}, body)
+	if err != nil {
+		a.log.Warn("cannot answer an Alarm notify",
+			"node_id", p.id.String(), "error", err.Error())
+		return model.Message{}, false
+	}
+	return resp, true
+}
+
+// is2022 reports whether the device identified by deviceID is registered on p
+// and negotiated GB/T 28181-2022 semantics. Unknown or 2016 devices return
+// false, which is the gate used by the 2022 command handlers.
+func (a *Acceptor) is2022(ctx context.Context, p *platform, deviceID string) bool {
+	dev, ok := a.devices.Lookup(ctx, p.id, deviceID)
+	return ok && dev.Is2022()
+}
+
+// handleHomePosition answers a GB/T 28181-2022 HomePosition command.
+// A query returns the profile guard position; a set validates coordinates
+// and updates the node profile. A 2016 peer never reaches this handler
+// because handleMessage gates it.
+func (a *Acceptor) handleHomePosition(
+	ctx context.Context,
+	p *platform,
+	req model.Message,
+	notify model.Notify,
+) (model.Message, bool) {
+	// Query takes precedence: if the body can be parsed as a query the peer
+	// asked for the guard position.
+	if query, qErr := a.manscdp.DecodeHomePositionQuery(req.Body()); qErr == nil {
+		body, mErr := a.marshalHomePositionQuery(p, query, notify.SN())
+		if mErr != nil {
+			return model.Message{}, false
+		}
+		resp, err := buildResponse(200, "OK", req, []model.Header{
+			model.NewHeader("Content-Type", contentTypeMANSCDP),
+		}, body)
+		if err != nil {
+			return model.Message{}, false
+		}
+		return resp, true
+	}
+	// Otherwise treat it as a set command.
+	set, sErr := a.manscdp.DecodeHomePositionSet(req.Body())
+	if sErr != nil {
+		a.log.Warn("cannot read a HomePosition set",
+			"node_id", p.id.String(), "error", sErr.Error())
+		return model.Message{}, false
+	}
+	// Validate coordinates: required fields must be present and non-empty.
+	if set.Longitude == "" || set.Latitude == "" {
+		errBody, _ := a.manscdp.MarshalHomePositionResponse(model.HomePositionResponse{
+			DeviceID: set.DeviceID,
+			SN:       notify.SN(),
+			Result:   "ERROR",
+		}, notify.SN())
+		resp, err := buildResponse(200, "OK", req, []model.Header{
+			model.NewHeader("Content-Type", contentTypeMANSCDP),
+		}, errBody)
+		if err != nil {
+			return model.Message{}, false
+		}
+		return resp, true
+	}
+	if a.registry != nil {
+		if _, err := a.registry.MutateProfile(ctx, p.id, func(np model.NodeProfile) (model.NodeProfile, error) {
+			pos, posErr := model.NewHomePosition(model.HomePositionParams{
+				DeviceID:  set.DeviceID,
+				Longitude: set.Longitude,
+				Latitude:  set.Latitude,
+				Altitude:  set.Altitude,
+				Azimuth:   set.Azimuth,
+			})
+			if posErr != nil {
+				return np, posErr
+			}
+			return np.WithHomePosition(pos)
+		}); err != nil {
+			a.log.Warn("cannot store a guard position",
+				"node_id", p.id.String(), "error", err.Error())
+		}
+	}
+	okBody, _ := a.manscdp.MarshalHomePositionResponse(model.HomePositionResponse{
+		DeviceID: set.DeviceID,
+		SN:       notify.SN(),
+		Result:   "OK",
+	}, notify.SN())
+	resp, err := buildResponse(200, "OK", req, []model.Header{
+		model.NewHeader("Content-Type", contentTypeMANSCDP),
+	}, okBody)
+	if err != nil {
+		return model.Message{}, false
+	}
+	return resp, true
+}
+
+// marshalHomePositionQuery renders a HomePosition query answer from the
+// profile guard position when one is configured; otherwise it answers with
+// an empty response body.
+func (a *Acceptor) marshalHomePositionQuery(
+	p *platform,
+	query model.HomePositionQuery,
+	sn uint32,
+) (string, error) {
+	if a.registry != nil {
+		if node, ok := a.registry.Get(a.ctx, p.id); ok {
+			if pos, hasPos := node.Profile().HomePosition(); hasPos {
+				resp := model.HomePositionResponse{
+					DeviceID:  pos.DeviceID(),
+					Longitude: pos.Longitude(),
+					Latitude:  pos.Latitude(),
+					Altitude:  pos.Altitude(),
+					Azimuth:   pos.Azimuth(),
+				}
+				return a.manscdp.MarshalHomePositionResponse(resp, sn)
+			}
+		}
+	}
+	// No position configured — return a minimal OK body.
+	return a.manscdp.MarshalHomePositionResponse(model.HomePositionResponse{
+		DeviceID: query.DeviceID,
+		SN:       sn,
+		Result:   "OK",
+	}, sn)
+}
+
+// handleCruiseTrackList answers a GB/T 28181-2022 CruiseTrackList query with
+// the cruise tracks configured on the node profile.
+func (a *Acceptor) handleCruiseTrackList(
+	ctx context.Context,
+	p *platform,
+	req model.Message,
+	notify model.Notify,
+) (model.Message, bool) {
+	_, err := a.manscdp.DecodeCruiseTrackListQuery(req.Body())
+	if err != nil {
+		a.log.Warn("cannot read a CruiseTrackList query",
+			"node_id", p.id.String(), "error", err.Error())
+		return model.Message{}, false
+	}
+	items := []model.CruiseTrack{}
+	if a.registry != nil {
+		if node, ok := a.registry.Get(ctx, p.id); ok {
+			items = node.Profile().CruiseTracks()
+			if items == nil {
+				items = []model.CruiseTrack{}
+			}
+		}
+	}
+	resp := model.CruiseTrackListResponse{
+		DeviceID: notify.DeviceID(),
+		SN:       notify.SN(),
+		Items:    items,
+	}
+	body, err := a.manscdp.MarshalCruiseTrackListResponse(resp, notify.SN())
+	if err != nil {
+		a.log.Warn("cannot render a CruiseTrackList response",
+			"node_id", p.id.String(), "error", err.Error())
+		return model.Message{}, false
+	}
+	a.log.Debug("answering a cruise track list query", "node_id", p.id.String(),
+		"device_id", notify.DeviceID(), "tracks", len(items))
+	respMsg, err := buildResponse(200, "OK", req, []model.Header{
+		model.NewHeader("Content-Type", contentTypeMANSCDP),
+	}, body)
+	if err != nil {
+		return model.Message{}, false
+	}
+	return respMsg, true
+}
+
+// handleSnapShot acknowledges a GB/T 28181-2022 SnapShot capture command.
+// The simulator does not produce a JPEG payload; it records the capture
+// event on the node profile and answers OK.
+func (a *Acceptor) handleSnapShot(
+	ctx context.Context,
+	p *platform,
+	req model.Message,
+	notify model.Notify,
+) (model.Message, bool) {
+	cmd, err := a.manscdp.DecodeSnapShotCommand(req.Body())
+	if err != nil {
+		a.log.Warn("cannot read a SnapShot command",
+			"node_id", p.id.String(), "error", err.Error())
+		return model.Message{}, false
+	}
+	if a.registry != nil {
+		if _, err := a.registry.MutateProfile(ctx, p.id, func(np model.NodeProfile) (model.NodeProfile, error) {
+			rec, recErr := model.NewSnapShotRecord(model.SnapShotRecordParams{
+				DeviceID:  cmd.DeviceID,
+				ChannelID: cmd.ChannelID,
+			})
+			if recErr != nil {
+				return np, recErr
+			}
+			return np.AppendSnapShot(rec)
+		}); err != nil {
+			a.log.Warn("cannot record a snapshot",
+				"node_id", p.id.String(), "error", err.Error())
+		}
+	}
+	a.log.Debug("snapshot captured", "node_id", p.id.String(),
+		"device_id", cmd.DeviceID, "channel", cmd.ChannelID)
+	body, err := a.manscdp.MarshalSnapShotResponse(model.SnapShotResponse{
+		DeviceID: cmd.DeviceID,
+		SN:       notify.SN(),
+		Result:   "OK",
+	}, notify.SN())
+	if err != nil {
+		a.log.Warn("cannot render a SnapShot response",
+			"node_id", p.id.String(), "error", err.Error())
+		return model.Message{}, false
+	}
+	resp, err := buildResponse(200, "OK", req, []model.Header{
+		model.NewHeader("Content-Type", contentTypeMANSCDP),
+	}, body)
+	if err != nil {
+		return model.Message{}, false
+	}
+	return resp, true
+}
+
+// handlePresetQuery answers a PresetQuery with the preset list the node's
+// profile carries. Without a node registry (or for a node the registry does
+// not know) the answer is an empty list, which is still a valid answer for
+// a device that exposes no presets.
+func (a *Acceptor) handlePresetQuery(
+	ctx context.Context,
+	p *platform,
+	req model.Message,
+	notify model.Notify,
+) (model.Message, bool) {
+	if !notify.HasSN() {
+		a.log.Warn("ignoring a PresetQuery without a sequence number",
+			"node_id", p.id.String(), "device_id", notify.DeviceID())
+		return model.Message{}, false
+	}
+	presets := []model.PresetItem{}
+	if a.registry != nil {
+		if node, ok := a.registry.Get(ctx, p.id); ok {
+			presets = node.Profile().Presets()
+			if presets == nil {
+				presets = []model.PresetItem{}
+			}
+		}
+	}
+	list, err := model.NewPresetListResponse(notify.DeviceID(), notify.SN(), presets)
+	if err != nil {
+		a.log.Warn("cannot build a preset list answer",
+			"node_id", p.id.String(), "error", err.Error())
+		return model.Message{}, false
+	}
+	body, err := a.manscdp.MarshalPresetList(list)
+	if err != nil {
+		a.log.Warn("cannot render a preset list answer",
+			"node_id", p.id.String(), "error", err.Error())
+		return model.Message{}, false
+	}
+	a.log.Debug("answering a preset query", "node_id", p.id.String(),
+		"sn", notify.SN(), "sum", list.SumNum)
+	resp, err := buildResponse(200, "OK", req, []model.Header{
+		model.NewHeader("Content-Type", contentTypeMANSCDP),
+	}, body)
+	if err != nil {
+		a.log.Warn("cannot answer a PresetQuery",
+			"node_id", p.id.String(), "error", err.Error())
+		return model.Message{}, false
+	}
+	return resp, true
+}
+
+// handleDeviceControl acknowledges a PTZ DeviceControl command. The
+// simulator does not move cameras; it only logs the motion requested.
+// A 2022 TeleBoot element inside the control body is treated as a reboot
+// request and logged accordingly.
+func (a *Acceptor) handleDeviceControl(
+	_ context.Context,
+	p *platform,
+	req model.Message,
+	_ model.Notify,
+) (model.Message, bool) {
+	// TeleBoot is a 2022 control element with its own XML tag. Detect it
+	// before the generic PTZ decoder so we can log the reboot separately.
+	if strings.Contains(req.Body(), "<TeleBoot>") {
+		a.log.Debug("TeleBoot reboot requested", "node_id", p.id.String())
+		resp, err := buildResponse(200, "OK", req, nil, "")
+		if err != nil {
+			a.log.Warn("cannot answer a TeleBoot",
+				"node_id", p.id.String(), "error", err.Error())
+			return model.Message{}, false
+		}
+		return resp, true
+	}
+	control, err := a.manscdp.DecodePTZControl(req.Body())
+	if err != nil {
+		a.log.Warn("cannot read a device control",
+			"node_id", p.id.String(), "error", err.Error())
+		return model.Message{}, false
+	}
+	a.log.Debug("PTZ control received", "node_id", p.id.String(),
+		"device_id", control.DeviceID)
+	resp, err := buildResponse(200, "OK", req, nil, "")
+	if err != nil {
+		a.log.Warn("cannot answer a DeviceControl",
 			"node_id", p.id.String(), "error", err.Error())
 		return model.Message{}, false
 	}
@@ -905,8 +1572,9 @@ func (a *Acceptor) refresh(
 // node it arrived at — never with another node's, so two platforms sharing
 // a process cannot see each other's downstreams.
 //
-// A query without an SN is ignored: the answer could not be matched to the
-// question, and a platform guessing one would only confuse the peer.
+// When a node registry is attached the node's profile channels are appended
+// to the downstream device list; their ChannelStatus is mapped to the GB/T
+// 28181 CatalogStatus so online/offline enforcement is visible upstream.
 func (a *Acceptor) answerCatalog(
 	ctx context.Context,
 	p *platform,
@@ -918,7 +1586,35 @@ func (a *Acceptor) answerCatalog(
 			"node_id", p.id.String(), "device_id", notify.DeviceID())
 		return model.Message{}, false
 	}
-	catalog, err := model.NewCatalogFromDevices(p.id.String(), notify.SN(), a.devices.List(ctx, p.id))
+	items := make([]model.CatalogItem, 0)
+	for _, d := range a.devices.List(ctx, p.id) {
+		item, err := model.NewCatalogItemFromDevice(d)
+		if err != nil {
+			continue
+		}
+		items = append(items, item)
+	}
+	if a.registry != nil {
+		if node, ok := a.registry.Get(ctx, p.id); ok {
+			for _, ch := range node.Profile().Channels() {
+				status := model.CatalogStatusON
+				if ch.Status() == model.ChannelStatusOffline {
+					status = model.CatalogStatusOFF
+				}
+				catalogItem, err := model.NewCatalogItem(model.CatalogItemParams{
+					DeviceID: ch.ID(),
+					Name:     ch.Name(),
+					Status:   status,
+					ParentID: ch.ParentID(),
+				})
+				if err != nil {
+					continue
+				}
+				items = append(items, catalogItem)
+			}
+		}
+	}
+	catalog, err := model.NewCatalog(p.id.String(), notify.SN(), items)
 	if err != nil {
 		a.log.Warn("cannot build a catalog answer",
 			"node_id", p.id.String(), "error", err.Error())
@@ -976,7 +1672,7 @@ func (a *Acceptor) handle(ctx context.Context, p *platform, req model.Message, p
 			"node_id", p.id.String(), "username", username, "error", err.Error())
 		return buildResponse(403, "Forbidden", req, nil, "")
 	}
-	return a.grant(ctx, p, req, username, peer)
+	return a.grant(ctx, p, req, username, peer, cred)
 }
 
 // challenge answers 401 with a fresh WWW-Authenticate for the node's realm.
@@ -989,6 +1685,12 @@ func (a *Acceptor) challenge(req model.Message, p *platform) (model.Message, err
 		ch.Realm(), ch.Nonce(), ch.Algorithm())
 	if ch.Opaque() != "" {
 		value += fmt.Sprintf(`, opaque=%q`, ch.Opaque())
+	}
+	// GB 35114 Note integrity: echo the SM3-hashed Note only when the
+	// Challenger emitted one, so MD5 peers see the old byte-identical
+	// 401.
+	if note := ch.Note(); note != "" {
+		value += fmt.Sprintf(`, Note=%q`, note)
 	}
 	return buildResponse(401, "Unauthorized", req, []model.Header{
 		model.NewHeader("WWW-Authenticate", value),
@@ -1003,6 +1705,7 @@ func (a *Acceptor) grant(
 	req model.Message,
 	username string,
 	peer string,
+	cred model.Credentials,
 ) (model.Message, error) {
 	now := a.clock.Now()
 	requested, hasExpires := requestedExpires(req)
@@ -1014,10 +1717,16 @@ func (a *Acceptor) grant(
 			a.log.Info("downstream unregistered", "node_id", p.id.String(), "device_id", username)
 		}
 		a.notifyCatalogChange(ctx, p)
-		return buildResponse(200, "OK", req, []model.Header{
+		hdrs := []model.Header{
 			model.NewHeader("Expires", "0"),
 			model.NewHeader("Date", httpDate(now)),
-		}, "")
+		}
+		if signer, ok := a.authenticator.(port.SecurityInfoSigner); ok {
+			if h, ok := signer.SignSecurityInfo(req, cred); ok {
+				hdrs = append(hdrs, h)
+			}
+		}
+		return buildResponse(200, "OK", req, hdrs, "")
 	}
 
 	granted := p.policy.Negotiate(requested)
@@ -1060,6 +1769,17 @@ func (a *Acceptor) grant(
 	}
 	if contact != "" {
 		hdrs = append(hdrs, model.NewHeader("Contact", contact))
+	}
+	// X-GB-Ver is echoed only when the peer declared it: a 2016 REGISTER
+	// gets today's byte-identical answer, a 2022 one learns the negotiated
+	// version (GB/T 28181-2022 Annex I).
+	if gbVersion != "" {
+		hdrs = append(hdrs, model.NewHeader("X-GB-Ver", gbVersion))
+	}
+	if signer, ok := a.authenticator.(port.SecurityInfoSigner); ok {
+		if h, ok := signer.SignSecurityInfo(req, cred); ok {
+			hdrs = append(hdrs, h)
+		}
 	}
 	return buildResponse(200, "OK", req, hdrs, "")
 }
@@ -1268,7 +1988,7 @@ func extractMediaAddress(body string) string {
 // INVITE session. The resulting pipeline is tracked in a.pipelines and will
 // be closed when the dialog ends (via the DialogManager onDelete callback).
 func (a *Acceptor) createInboundPipeline(
-	ctx context.Context,
+	_ context.Context,
 	_ *platform,
 	callID, mediaType, sdpBody string,
 ) {

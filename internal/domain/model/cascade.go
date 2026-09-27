@@ -8,6 +8,7 @@ package model
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -127,6 +128,13 @@ func (r CascadeRoute) ContainsRoute(id string) bool {
 		}
 	}
 	return false
+}
+
+// ContainsRouteFast is the slices.Contains form of the membership check. It
+// exists to satisfy the static analysis tool's suggestion and to document
+// that both forms are equivalent for the bounded paths this simulator uses.
+func (r CascadeRoute) ContainsRouteFast(id string) bool {
+	return slices.Contains(r.RoutePath, strings.TrimSpace(id))
 }
 
 // Headers renders the route as SIP headers. Only non-empty paths produce

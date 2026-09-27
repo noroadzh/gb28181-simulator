@@ -12,11 +12,30 @@ import (
 	"github.com/your-org/gb28181-simulator/internal/domain/port"
 )
 
-// TransportFactory binds a signalling listener on addr and returns the
-// transport. The app layer decides how listeners are built; this package
-// never imports an adapter, so the concrete construction stays in the
-// composition root (cmd).
-type TransportFactory func(addr string) (port.SIPTransport, error)
+// TransportFactory binds a signalling listener on addr for the node with
+// the given id and returns the transport. The app layer decides how
+// listeners are built; this package never imports an adapter, so the
+// concrete construction stays in the composition root (cmd). The nodeID
+// lets the composition root tag the transport for capture attribution.
+type TransportFactory func(addr string, nodeID model.NodeID) (port.SIPTransport, error)
+
+// AlarmInput is the payload for the trigger-alarm runtime API. Priority is
+// 1..4 (GB/T 28181 alarm priority); method is the alarm method code from the
+// same spec; description is free text for the NOTIFY body; channelID targets
+// a specific channel, or empty for a device-level alarm.
+type AlarmInput struct {
+	Priority    int    `json:"priority"`
+	Method      int    `json:"method"`
+	Description string `json:"description"`
+	ChannelID   string `json:"channelId,omitempty"`
+}
+
+// faultCounterSource is the optional counters side of a FaultStore. The
+// port keeps Install/Get/Clean minimal; the concrete store also records
+// per-action counters that the HTTP API surfaces.
+type faultCounterSource interface {
+	FaultCounters(nodeID model.NodeID) map[model.FaultAction]uint64
+}
 
 // NodeService orchestrates the node use cases. It depends only on domain
 // ports — never on internal/adapter/... (design D6).
@@ -28,15 +47,18 @@ type TransportFactory func(addr string) (port.SIPTransport, error)
 // confirms node lifecycle events are out of scope for this change and are
 // deferred to Change 13, so AuditSink is deliberately not injected yet.
 type NodeService struct {
-	registry  port.NodeRegistry
-	lifecycle port.NodeLifecycle
-	advancer  port.NodeAdvancer
-	factory   TransportFactory
-	clock     port.Clock
-	log       *slog.Logger
-	registrar *Registrar
-	keeper    *Keeper
-	acceptor  *Acceptor
+	registry       port.NodeRegistry
+	lifecycle      port.NodeLifecycle
+	advancer       port.NodeAdvancer
+	factory        TransportFactory
+	clock          port.Clock
+	log            *slog.Logger
+	registrar      *Registrar
+	keeper         *Keeper
+	acceptor       *Acceptor
+	keepaliveCodec port.KeepaliveCodec
+	faults         port.FaultStore
+	captures       port.CaptureStore
 
 	// splits holds the message splitter of every node that is both halves
 	// of a cascade. A platform-small serves and registers over one
@@ -109,6 +131,103 @@ func (s *NodeService) WithRegistrar(r *Registrar) (*NodeService, error) {
 	return s, nil
 }
 
+// WithFaults attaches the runtime fault store. When nil, fault API calls
+// return a stable 503-equivalent error so the HTTP layer never arms or
+// queries a nil store.
+func (s *NodeService) WithFaults(fs port.FaultStore) (*NodeService, error) {
+	if fs == nil {
+		return nil, fmt.Errorf("app: NodeService requires a non-nil FaultStore")
+	}
+	s.faults = fs
+	return s, nil
+}
+
+// InstallFault arms (or re-arms) the node with the supplied fault profile.
+// A zero profile clears faults, but callers should prefer ClearFault when
+// they only want to clear; the HTTP layer uses both.
+func (s *NodeService) InstallFault(ctx context.Context, id model.NodeID, p model.FaultProfile) error {
+	if s.faults == nil {
+		return fmt.Errorf("app: fault store not configured")
+	}
+	return s.faults.Install(ctx, id, p)
+}
+
+// GetFault returns the installed profile plus action counters for the node.
+// A node with no profile yields the zero profile and false. Counters come
+// from the optional faultCounterSource side of the store; a store that does
+// not expose counters yields an empty map.
+func (s *NodeService) GetFault(ctx context.Context, id model.NodeID) (model.FaultProfile, map[model.FaultAction]uint64, bool) {
+	if s.faults == nil {
+		return model.FaultProfile{}, nil, false
+	}
+	p, ok := s.faults.Get(ctx, id)
+	if !ok {
+		return model.FaultProfile{}, nil, false
+	}
+	if cs, canCount := s.faults.(faultCounterSource); canCount {
+		return p, cs.FaultCounters(id), true
+	}
+	return p, map[model.FaultAction]uint64{}, true
+}
+
+// ClearFault removes the profile and resets counters for node id. Clearing a
+// node without a profile is a no-op returning nil.
+func (s *NodeService) ClearFault(ctx context.Context, id model.NodeID) error {
+	if s.faults == nil {
+		return fmt.Errorf("app: fault store not configured")
+	}
+	return s.faults.Clear(ctx, id)
+}
+
+// WithCaptures attaches the per-node capture store backing the HTTP capture
+// query and pcap export endpoints. Without one those endpoints report that
+// capture is not configured instead of reading a nil store.
+func (s *NodeService) WithCaptures(store port.CaptureStore) (*NodeService, error) {
+	if store == nil {
+		return nil, fmt.Errorf("app: NodeService requires a non-nil CaptureStore")
+	}
+	s.captures = store
+	return s, nil
+}
+
+// QueryCapture returns up to limit capture events for the node, oldest first
+// among the returned subset. An unknown node is an error; a node with an
+// empty buffer yields a nil slice. Queries never evict.
+func (s *NodeService) QueryCapture(ctx context.Context, id model.NodeID, limit int) ([]port.CaptureEvent, error) {
+	if _, ok := s.registry.Get(ctx, id); !ok {
+		return nil, fmt.Errorf("app: query capture of node %s: %w", id, model.ErrUnknownNode)
+	}
+	if s.captures == nil {
+		return nil, fmt.Errorf("app: capture store not configured")
+	}
+	if limit <= 0 {
+		limit = defaultCaptureQueryLimit
+	}
+	return s.captures.Query(id.String(), limit), nil
+}
+
+// CapturePCAP renders the node's buffered capture as a pcap document
+// (LINKTYPE_ETHERNET). An unknown node is an error; an empty buffer yields a
+// valid empty pcap.
+func (s *NodeService) CapturePCAP(ctx context.Context, id model.NodeID) ([]byte, error) {
+	if _, ok := s.registry.Get(ctx, id); !ok {
+		return nil, fmt.Errorf("app: pcap export of node %s: %w", id, model.ErrUnknownNode)
+	}
+	if s.captures == nil {
+		return nil, fmt.Errorf("app: capture store not configured")
+	}
+	data, err := s.captures.PCAP(id.String())
+	if err != nil {
+		return nil, fmt.Errorf("app: pcap export of node %s: %w", id, err)
+	}
+	return data, nil
+}
+
+// defaultCaptureQueryLimit caps an unbounded capture query so one caller
+// cannot drain the whole ring in a single response.
+const defaultCaptureQueryLimit = 256
+
+
 // WithKeeper attaches the keepalive and renewal use case. Without one a
 // registered node still comes online — its registration simply is not held
 // open, which is what tests and the other identities want.
@@ -128,6 +247,18 @@ func (s *NodeService) WithAcceptor(a *Acceptor) (*NodeService, error) {
 		return nil, fmt.Errorf("app: NodeService requires a non-nil Acceptor")
 	}
 	s.acceptor = a
+	return s, nil
+}
+
+// WithKeepaliveCodec attaches the codec used to render outbound MANSCDP
+// notify bodies (keepalive, alarm). Without one TriggerAlarm records the
+// snapshot but does not send upstream, which is what tests that do not
+// exercise the wire path want.
+func (s *NodeService) WithKeepaliveCodec(c port.KeepaliveCodec) (*NodeService, error) {
+	if c == nil {
+		return nil, fmt.Errorf("app: NodeService requires a non-nil KeepaliveCodec")
+	}
+	s.keepaliveCodec = c
 	return s, nil
 }
 
@@ -486,6 +617,129 @@ func (s *NodeService) Device(ctx context.Context, id model.NodeID, deviceID stri
 		return model.DownstreamDevice{}, model.ErrUnknownDevice
 	}
 	return dev, nil
+}
+
+// TriggerAlarm makes the node emit an Alarm NOTIFY upstream and records
+// the snapshot in its profile. It returns the stored snapshot. Upstream
+// delivery is best-effort: a node with no live registration still records
+// the snapshot, because the HTTP caller drives the simulation.
+func (s *NodeService) TriggerAlarm(ctx context.Context, id model.NodeID, in AlarmInput) (model.AlarmSnapshot, error) {
+	node, ok := s.registry.Get(ctx, id)
+	if !ok {
+		return model.AlarmSnapshot{}, fmt.Errorf("app: trigger alarm: %w", model.ErrUnknownNode)
+	}
+	now := s.clock.Now()
+	snap, err := model.NewAlarmSnapshot(
+		fmt.Sprintf("%s-%d", id.String(), now.UnixNano()),
+		id.String(),
+		in.ChannelID,
+		in.Priority,
+		in.Method,
+		in.Description,
+		now.Format("2006-01-02T15:04:05"),
+	)
+	if err != nil {
+		return model.AlarmSnapshot{}, fmt.Errorf("app: trigger alarm: %w", err)
+	}
+	if _, err := s.registry.MutateProfile(ctx, id, func(p model.NodeProfile) (model.NodeProfile, error) {
+		return p.AppendAlarm(snap)
+	}); err != nil {
+		return model.AlarmSnapshot{}, fmt.Errorf("app: trigger alarm: %w", err)
+	}
+	// Best-effort upstream delivery: a snapshot recorded without a wire
+	// send is still a valid simulation step (design: HTTP callers may
+	// drive state without a live upstream).
+	reg, wants := node.Registration()
+	if wants && s.keepaliveCodec != nil {
+		_ = s.sendAlarmNotify(ctx, node, reg, snap)
+	}
+	s.log.Info("alarm snapshot recorded",
+		"node_id", id.String(),
+		"alarm_id", snap.ID(),
+		"priority", snap.Priority(),
+		"upstream_sent", wants && s.keepaliveCodec != nil)
+	return snap, nil
+}
+
+// sendAlarmNotify builds and sends an Alarm NOTIFY MESSAGE to the upstream
+// platform. It is fire-and-forget: the snapshot is already stored before
+// this is called, and a send failure only costs a log line.
+func (s *NodeService) sendAlarmNotify(ctx context.Context, node model.Node, reg model.Registration, snap model.AlarmSnapshot) error {
+	tr := s.upstreamSocket(node.ID())
+	if tr == nil {
+		return nil
+	}
+	domain := node.Profile().Domain()
+	uri := registrationRequestURI(domain, reg)
+	notify, err := model.NewAlarmNotify(model.AlarmNotifyParams{
+		SN:            1,
+		DeviceID:      snap.DeviceID(),
+		ChannelID:     snap.ChannelID(),
+		AlarmPriority: snap.Priority(),
+		AlarmMethod:   snap.Method(),
+		EventTime:     snap.EventTime(),
+		Description:   snap.Description(),
+	})
+	if err != nil {
+		s.log.Warn("build alarm notify", "node_id", node.ID().String(), "error", err.Error())
+		return err
+	}
+	body, err := s.keepaliveCodec.MarshalAlarmNotify(notify)
+	if err != nil {
+		s.log.Warn("marshal alarm notify", "node_id", node.ID().String(), "error", err.Error())
+		return err
+	}
+	msg, err := model.NewRequest("MESSAGE", uri, []model.Header{
+		model.NewHeader("From", "<sip:"+node.ID().String()+"@"+domain+">;tag="+randomTag()),
+		model.NewHeader("To", "<sip:"+node.ID().String()+"@"+domain+">"),
+		model.NewHeader("Call-ID", randomCallID()),
+		model.NewHeader("CSeq", "1 MESSAGE"),
+		model.NewHeader("Content-Type", "Application/MANSCDP+XML"),
+		model.NewHeader("Max-Forwards", "70"),
+	}, body)
+	if err != nil {
+		return err
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := tr.Send(waitCtx, msg, reg.Server()); err != nil {
+		s.log.Warn("send alarm notify", "node_id", node.ID().String(), "error", err.Error())
+		return err
+	}
+	s.log.Info("alarm notify sent", "node_id", node.ID().String(), "alarm_id", snap.ID())
+	return nil
+}
+
+// SetPosition overwrites the node's last-known geographic position.
+func (s *NodeService) SetPosition(ctx context.Context, id model.NodeID, pos model.Position) error {
+	if _, err := s.registry.MutateProfile(ctx, id, func(p model.NodeProfile) (model.NodeProfile, error) {
+		return p.WithPosition(pos), nil
+	}); err != nil {
+		s.log.Warn("set position rejected", "node_id", id.String(), "error", err.Error())
+		return fmt.Errorf("app: set position: %w", err)
+	}
+	s.log.Info("position stored",
+		"node_id", id.String(),
+		"longitude", pos.Longitude(), "latitude", pos.Latitude(), "speed", pos.Speed())
+	return nil
+}
+
+// SetChannelStatus updates one of the node's channels to status. An unknown
+// channel id is an error.
+func (s *NodeService) SetChannelStatus(ctx context.Context, id model.NodeID, channelID string, status model.ChannelStatus) error {
+	if channelID == "" {
+		return nil
+	}
+	if _, err := s.registry.MutateProfile(ctx, id, func(p model.NodeProfile) (model.NodeProfile, error) {
+		return p.WithChannelStatus(channelID, status)
+	}); err != nil {
+		s.log.Warn("set channel status rejected",
+			"node_id", id.String(), "channel_id", channelID, "error", err.Error())
+		return fmt.Errorf("app: set channel status: %w", err)
+	}
+	s.log.Info("channel status stored",
+		"node_id", id.String(), "channel_id", channelID, "status", status.String())
+	return nil
 }
 
 // MarkRegistered advances a node to StatusRegistered. Start calls it once a

@@ -10,12 +10,12 @@ import (
 
 // configCommandEnvelope is the wire shape of a ConfigDownload command.
 type configCommandEnvelope struct {
-	XMLName   xml.Name `xml:"Query"`
-	CmdType   string   `xml:"CmdType"`
-	SN        string   `xml:"SN"`
-	DeviceID  string   `xml:"DeviceID"`
-	ConfigType string  `xml:"ConfigType,omitempty"`
-	ItemNum   int      `xml:"ItemNum,omitempty"`
+	XMLName    xml.Name `xml:"Query"`
+	CmdType    string   `xml:"CmdType"`
+	SN         string   `xml:"SN"`
+	DeviceID   string   `xml:"DeviceID"`
+	ConfigType string   `xml:"ConfigType,omitempty"`
+	ItemNum    int      `xml:"ItemNum,omitempty"`
 }
 
 // configAckEnvelope is the wire shape of a ConfigDownload ack response.

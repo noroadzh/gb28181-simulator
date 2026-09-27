@@ -118,3 +118,31 @@ func TestDownstreamDevice_StringIsLogSafe(t *testing.T) {
 		t.Error("String() is empty")
 	}
 }
+
+func TestDownstreamDeviceIs2022(t *testing.T) {
+	now := time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		version string
+		want    bool
+	}{
+		{"2022", true},
+		{"2016", false},
+		{"", false},
+		{"2022-1", false},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.version, func(t *testing.T) {
+			dev, err := NewDownstreamDevice(DownstreamDeviceParams{
+				DeviceID: "34020000011310000001", Addr: "127.0.0.1:15060",
+				GBVersion: tc.version, Now: now,
+			})
+			if err != nil {
+				t.Fatalf("NewDownstreamDevice: %v", err)
+			}
+			if got := dev.Is2022(); got != tc.want {
+				t.Errorf("Is2022() = %v, want %v (version=%q)", got, tc.want, tc.version)
+			}
+		})
+	}
+}

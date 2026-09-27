@@ -1,124 +1,124 @@
-# core-manscdp-and-ps Specification
+# core-manscdp-and-ps 规范
 
 ## Purpose
 `core-manscdp-and-ps` 是 GB/T 28181 的协议内容层：MANSCDP XML 消息的编解码，以及 PS↔RTP 双向转封装。它让"能解析命令"成为"能执行命令"，为后续级联、动态目录、云台控制等能力提供可复用的协议基础。
 
 ## Requirements
 
-### Requirement: MANSCDP XML encode/decode round trips for full command set
+### 需求：MANSCDP XML 全量命令集编解码往返
 
-The system SHALL encode and decode the following MANSCDP command types without data loss:
-- DeviceInfo Query / Response
-- RecordInfo Query / Response
-- Alarm Notify / Ack
-- ConfigDownload Command / Ack
-- PTZControl / Telemetry
-- Preset Query / Set
+系统 MUST 无数据丢失地编解码以下 MANSCDP 命令类型：
+- DeviceInfo 查询 / 响应
+- RecordInfo 查询 / 响应
+- Alarm 通知 / 确认
+- ConfigDownload 命令 / 确认
+- PTZControl / 遥测
+- Preset 查询 / 设置
 
 编解码结果必须通过字节级 golden test 锁定；未知命令类型必须返回可解析结果而不报错。
 
-#### Scenario: DeviceInfo query round trip
+#### 场景：DeviceInfo 查询往返
 
-- **WHEN** a DeviceInfo request is encoded then decoded
-- **THEN** every field (DeviceID, SN, StartTime, EndTime, etc.) survives exactly
+- **WHEN** 一条 DeviceInfo 请求先编码再解码
+- **THEN** 所有字段（DeviceID、SN、StartTime、EndTime 等）逐字节保留
 
-#### Scenario: RecordInfo response with optional fields
+#### 场景：RecordInfo 响应含可选字段
 
-- **WHEN** a RecordInfo response contains optional fields (Video, Audio, Summary)
-- **THEN** decoding yields the same set of optional fields without loss
+- **WHEN** 一条 RecordInfo 响应包含可选字段（Video、Audio、Summary）
+- **THEN** 解码得到相同的可选字段集合，无丢失
 
-#### Scenario: Alarm notify without prior registration
+#### 场景：未预先注册时收到 Alarm 通知
 
-- **WHEN** an Alarm notify arrives for an unregistered DeviceID
-- **THEN** decoding still succeeds and yields a valid Notify message
+- **WHEN** 一条 Alarm 通知到达，其 DeviceID 未注册
+- **THEN** 解码仍然成功并产出合法 Notify 消息
 
-#### Scenario: PTZ control preserves speed and direction
+#### 场景：PTZ 控制保持速度与方向
 
-- **WHEN** a PTZ command carries speed values in 1–255 and direction bits
-- **THEN** encoded bytes preserve the exact numeric range and bit layout
+- **WHEN** 一条 PTZ 命令携带 1–255 速度值与方向位
+- **THEN** 编码字节保持精确的数值范围与位布局
 
-#### Scenario: Preset set acknowledges with the preset index
+#### 场景：Preset 设置响应带预置位索引
 
-- **WHEN** a Preset set command is sent with preset index 1–255
-- **THEN** the response contains the same preset index in its SN or Result
+- **WHEN** 发送一条携带预置位索引 1–255 的 Preset set 命令
+- **THEN** 响应在其 SN 或 Result 中包含相同的预置位索引
 
-#### Scenario: Unknown command type is parseable
+#### 场景：未知命令类型可被解析
 
-- **WHEN** a MANSCDP body contains an unrecognized CmdType
-- **THEN** decoding returns a generic Notify without error
+- **WHEN** MANSCDP body 含未识别的 CmdType
+- **THEN** 解码返回通用 Notify 且不报错
 
-### Requirement: PS depacketizer splits frames by pack header
+### 需求：PS 解包器按 pack header 切割帧
 
-The system SHALL depacketize a PS stream by locating `00 00 01 BA` start codes and using the pack header length to cut ES frames. It SHALL handle MPEG-2 Video and MPEG-1/2 Audio PES payloads without external boundaries.
+系统 MUST 通过定位 `00 00 01 BA` 起始码并利用 pack header 长度切割 ES 帧来解包 PS 流。MUST 在无需外部边界信息的情况下处理 MPEG-2 Video 与 MPEG-1/2 Audio 的 PES 有效载荷。
 
 PS 解包以 `00 00 01 BA` 为帧边界，不依赖外部注入的 marker。
 
-#### Scenario: A contiguous PS stream is depacketized correctly
+#### 场景：连续 PS 流正确解包
 
-- **WHEN** a PS stream containing multiple pack headers is fed to the depacketizer
-- **THEN** ES frames are extracted exactly at each `00 00 01 BA` boundary
+- **WHEN** 一条含多个 pack header 的 PS 流送入解包器
+- **THEN** ES 帧恰好在每个 `00 00 01 BA` 边界被提取
 
-#### Scenario: A short PS packet is rejected
+#### 场景：过短 PS 包被拒绝
 
-- **WHEN** a PS packet is shorter than the header declares
-- **THEN** the depacketizer returns an error and does not return truncated frames
+- **WHEN** 一条 PS 包的长度小于头部声明值
+- **THEN** 解包器返回错误，不返回截断帧
 
-#### Scenario: A single PS packet yields one ES frame
+#### 场景：单个 PS 包产出一个 ES 帧
 
-- **WHEN** one PS packet contains exactly one complete PES payload
-- **THEN** the depacketizer yields exactly one ES frame with the correct timestamp
+- **WHEN** 一条 PS 包恰好包含一个完整 PES 有效载荷
+- **THEN** 解包器恰好产出一个带正确时间戳的 ES 帧
 
-### Requirement: PS packetizer wraps ES frames into pack headers
+### 需求：PS 封装器将 ES 帧打包进 pack header
 
-The system SHALL encapsulate ES frames into PS packets with:
-- System header `00 00 01 BA`
-- Pack header with correct SCR and mux rate
-- PES header `00 00 01 E0` (video) or `00 00 01 C0` (audio) with PTS/DTS
-- PES payload as the ES frame
+系统 MUST 将 ES 帧封装为 PS 包，包含：
+- 系统头部 `00 00 01 BA`
+- 携带正确 SCR 与 mux rate 的 pack header
+- PES 头部 `00 00 01 E0`（视频）或 `00 00 01 C0`（音频），带 PTS/DTS
+- 以 ES 帧为内容的 PES 有效载荷
 
 PS 封装以字节级 golden test 锁定：封包的每一层（系统、包、PES）都要能被解包端还原。
 
-#### Scenario: One ES frame survives a PS round trip
+#### 场景：一个 ES 帧经 PS 往返后无损
 
-- **WHEN** an ES frame is packetized then depacketized
-- **THEN** the resulting ES bytes equal the original frame and the PTS survives
+- **WHEN** 一个 ES 帧先封装再解包
+- **THEN** 产出 ES 字节与原帧一致，PTS 保留
 
-#### Scenario: Video and audio streams use different stream IDs
+#### 场景：视频与音频流使用不同流 ID
 
-- **WHEN** a video ES frame is packetized
-- **THEN** the PES header uses stream ID `0xE0`
-- **WHEN** an audio ES frame is packetized
-- **THEN** the PES header uses stream ID `0xC0`
+- **WHEN** 一个视频 ES 帧被封装
+- **THEN** PES 头部使用流 ID `0xE0`
+- **WHEN** 一个音频 ES 帧被封装
+- **THEN** PES 头部使用流 ID `0xC0`
 
-### Requirement: RTP payloader splits PS frames into MTU-sized packets
+### 需求：RTP payloader 将 PS 帧切片为 MTU 大小包
 
-The system SHALL slice PS frames into RTP packets no larger than a configurable MTU (default 1400 bytes), set `marker bit = 1` on the last slice, increment sequence numbers, and stamp the RTP timestamp from the frame's PTS in 90 kHz domain.
+系统 MUST 将 PS 帧切片为 RTP 包，大小不超过可配置的 MTU（默认 1400 字节），在最后一个切片上设置 `marker bit = 1`，递增 sequence number，并依据帧的 PTS 以 90 kHz 域打 RTP timestamp 戳。
 
-#### Scenario: A PS frame slices into MTU-sized packets
+#### 场景：PS 帧切片为 MTU 大小包
 
-- **WHEN** a PS frame is packetized into RTP
-- **THEN** each payload is at most the MTU, sequence numbers are strictly increasing, and the last packet of the frame carries the marker bit
+- **WHEN** 一个 PS 帧被分包为 RTP
+- **THEN** 每个 payload 至多为 MTU 大小，sequence number 严格递增，且帧的最后一个包携带 marker bit
 
-#### Scenario: Sliced packets reassemble to the original frame
+#### 场景：切片包重组还原原始帧
 
-- **WHEN** RTP packets that sliced one PS frame are received, possibly out of order or with duplicates
-- **THEN** they reassemble to the byte-identical PS frame, ordered and deduplicated by sequence
+- **WHEN** 切片自同一 PS 帧的 RTP 包被接收，可能乱序或重复
+- **THEN** 按 sequence 排序去重后重组出字节一致的 PS 帧
 
-### Requirement: RTP depayloader reassembles frames by SSRC and sequence
+### 需求：RTP 解包器按 SSRC 与 sequence 重组帧
 
-The system SHALL reassemble RTP packets back into PS frames grouped by SSRC and payload type, ordered by sequence with deduplication. It SHALL detect packet loss and report it without blocking subsequent frames.
+系统 MUST 将 RTP 包按照 SSRC 与 payload type 分组、按 sequence number 排序并去重后，重组为 PS 帧。MUST 检测丢包并报告，但不阻塞后续帧。
 
-#### Scenario: Out-of-order packets reassemble correctly
+#### 场景：乱序包正确重组
 
-- **WHEN** RTP packets arrive with sequence numbers 100, 102, 101
-- **THEN** the depayloader buffers 101 and reassembles the frame after 102 arrives
+- **WHEN** RTP 包按 sequence 100、102、101 到达
+- **THEN** 解包器缓冲 101，在 102 到达后重组出完整帧
 
-#### Scenario: Duplicate packets are ignored
+#### 场景：重复包被忽略
 
-- **WHEN** two RTP packets with the same sequence number arrive
-- **THEN** the second is silently dropped and does not corrupt the reassembled frame
+- **WHEN** 两条相同 sequence number 的 RTP 包到达
+- **THEN** 第二条被静默丢弃，不破坏已重组帧
 
-#### Scenario: Missing sequence reports a gap
+#### 场景：缺失 sequence 上报间隙
 
-- **WHEN** sequence number 101 is missing after 100
-- **THEN** the depayloader reports a one-packet gap and continues reassembling from 102
+- **WHEN** sequence 100 之后缺失 101
+- **THEN** 解包器上报一个包的间隙，并从 102 继续重组

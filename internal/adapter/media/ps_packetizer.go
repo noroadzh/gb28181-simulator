@@ -33,9 +33,10 @@ const defaultMuxRate = 9000000
 // PSPacketizer turns ES frames into program-stream packets.
 //
 // Every ES frame becomes one PS frame. The PS frame always starts with
-//   00 00 01 BA <pack header>
-//   00 00 01 Ex <PES header with PTS>   (E0 = video, C0 = audio)
-//   <ES payload>
+//
+//	00 00 01 BA <pack header>
+//	00 00 01 Ex <PES header with PTS>   (E0 = video, C0 = audio)
+//	<ES payload>
 type PSPacketizer struct {
 	muxRate uint32
 }
@@ -64,13 +65,13 @@ func (p *PSPacketizer) Packetize(frame model.ESFrame) (model.PSFrame, error) {
 	// Pack header (12 bytes total, preceded by 00 00 01 BA).
 	muxVal := p.muxRate / 8 / 50 // bits/s -> bytes/s -> 50-byte units
 	packHeader := make([]byte, 12)
-	packHeader[0] = 0x44 // '01' + SCR=0 + marker + 0
+	packHeader[0] = 0x44                                    // '01' + SCR=0 + marker + 0
 	binary.BigEndian.PutUint32(packHeader[1:5], 0x00010001) // SCR=0 with mandatory marker bits
 	binary.BigEndian.PutUint16(packHeader[5:7], uint16(muxVal))
 
 	// PES header (variable length, minimum 9 bytes after stream_id).
 	esLen := len(frame.Payload)
-	pesHeaderLen := 9 // fixed PES header size (length field excluded)
+	pesHeaderLen := 9            // fixed PES header size (length field excluded)
 	pesTotal := 2 + pesHeaderLen // length field + PES header only
 	pesHeader := make([]byte, pesTotal)
 	binary.BigEndian.PutUint16(pesHeader[0:2], uint16(pesHeaderLen+esLen))
@@ -106,7 +107,7 @@ func (p *PSPacketizer) Header() []byte {
 	sh[0] = 0x00
 	sh[1] = 0x00
 	sh[2] = 0x01
-	sh[3] = 0xBB // system header start code
+	sh[3] = 0xBB                            // system header start code
 	binary.BigEndian.PutUint16(sh[4:6], 14) // header length = 14
 	// Rate bound = 1 Mbps, 1 video stream, 1 audio stream
 	sh[6] = 0x80

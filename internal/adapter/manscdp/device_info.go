@@ -20,11 +20,11 @@ type deviceInfoQueryEnvelope struct {
 
 // deviceInfoResponseEnvelope is the wire shape of a DeviceInfo response.
 type deviceInfoResponseEnvelope struct {
-	XMLName    xml.Name `xml:"Response"`
-	CmdType    string   `xml:"CmdType"`
-	SN         uint32   `xml:"SN"`
-	DeviceID   string   `xml:"DeviceID"`
-	SumNum     int      `xml:"SumNum"`
+	XMLName    xml.Name                 `xml:"Response"`
+	CmdType    string                   `xml:"CmdType"`
+	SN         uint32                   `xml:"SN"`
+	DeviceID   string                   `xml:"DeviceID"`
+	SumNum     int                      `xml:"SumNum"`
 	DeviceList []deviceInfoItemEnvelope `xml:"DeviceList>Item"`
 }
 

@@ -15,7 +15,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/your-org/gb28181-simulator/internal/adapter/audit"
 	sipauth "github.com/your-org/gb28181-simulator/internal/adapter/auth"
+	"github.com/your-org/gb28181-simulator/internal/adapter/capture"
 	"github.com/your-org/gb28181-simulator/internal/adapter/cascade"
 	"github.com/your-org/gb28181-simulator/internal/adapter/credstore"
 	"github.com/your-org/gb28181-simulator/internal/adapter/devicereg"
@@ -81,9 +83,10 @@ var (
 
 // bindTransport is the listener factory handed to the node lifecycle. It is
 // the only place that knows how a signalling socket is built, so the domain
-// and app layers stay transport-agnostic.
-func bindTransport(addr string) (port.SIPTransport, error) {
-	tr, err := siptransport.New(addr)
+// and app layers stay transport-agnostic. nodeID tags the socket so capture
+// events (Change 13) can be attributed to the owning node.
+func bindTransport(addr string, nodeID model.NodeID) (port.SIPTransport, error) {
+	tr, err := siptransport.New(addr, siptransport.WithNodeID(nodeID.String()))
 	if err != nil {
 		return nil, err
 	}
@@ -154,6 +157,10 @@ func run() error {
 	// these variables resolved in Provide order.
 	var cfg *platformconfig.Config
 	var nodeSvc *app.NodeService
+	// capStore holds the per-node capture store when the `capture:` section
+	// enables it; it is wired into the node service after the container is
+	// built so the HTTP capture endpoints can read it.
+	var capStore port.CaptureStore
 	// Background work (keepalive, renewal) must not be tied to a request,
 	// so it runs on the process context and is stopped explicitly on the
 	// way out.
@@ -295,6 +302,12 @@ func run() error {
 			}
 			nodeAcceptor = acceptor
 
+			// Fault injection: one store shared by the acceptor (request
+			// gate) and the node service (HTTP fault API).
+			faults := app.NewFaultStore(registry)
+			acceptor.WithFaults(faults)
+			svc.WithFaults(faults)
+
 			// Wire platform-small supplementary capabilities onto the acceptor:
 			// dialog tracking (INVITE/ACK/BYE), playback, subscription and
 			// media-status ports. These are no-ops unless the node is a
@@ -303,20 +316,21 @@ func run() error {
 			acceptor.WithDialogs(dialogMgr).
 				WithPlayback(playback.NewPortAdapter()).
 				WithSubscribe(subscribe.NewPortAdapter()).
-				WithMediaStatus(mediastatus.NewPortAdapter())
+				WithMediaStatus(mediastatus.NewPortAdapter()).
+				WithNodeRegistry(registry)
 
-			// Compose the four media source adapters behind a single factory
-					// so the app layer never has to import internal/adapter directly.
-					// The SSRC used here is a process-default; per-session SDP can
-					// override it later when INVITE handling (#9) lands.
-					const defaultSSRC uint32 = 0xABCDEF01
-					mediaService = app.NewMediaService(
-						func(cfg model.MediaConfig) port.MediaSource { return media.NewFileSource(cfg) },
-						func() port.PSPacketizer { return media.NewPSPacketizer() },
-						func(mtu int) port.RTPizer { return media.NewRTPizer(defaultSSRC, mtu) },
-						logging.L(),
-					)
-					defer func() { _ = mediaService.Close() }()
+				// Compose the four media source adapters behind a single factory
+			// so the app layer never has to import internal/adapter directly.
+			// The SSRC used here is a process-default; per-session SDP can
+			// override it later when INVITE handling (#9) lands.
+			const defaultSSRC uint32 = 0xABCDEF01
+			mediaService = app.NewMediaService(
+				func(cfg model.MediaConfig) port.MediaSource { return media.NewFileSource(cfg) },
+				func() port.PSPacketizer { return media.NewPSPacketizer() },
+				func(mtu int) port.RTPizer { return media.NewRTPizer(defaultSSRC, mtu) },
+				logging.L(),
+			)
+			defer func() { _ = mediaService.Close() }()
 
 			// Register every configured node; starting them is an explicit
 			// operation (design D9), so an empty list costs nothing.
@@ -384,9 +398,25 @@ func run() error {
 			}, nodeSvc), nil
 		})
 
+	// Capture wiring (design D4): when the `capture:` section enables it,
+	// the process-global audit emitter becomes a bridge into the per-node
+	// ring buffer store. With capture disabled the emitter stays the no-op
+	// it was initialised to, so behaviour is byte-identical.
+	if cfg.Capture.Enabled {
+		capStore = capture.NewWithCapacity(cfg.Capture.Capacity)
+		audit.SetEmitter(capture.AuditBridge(capStore))
+		logging.L().Info("capture enabled", "capacity", cfg.Capture.Capacity)
+	}
+
 	cancel, err := c.Build()
 	if err != nil {
 		return fmt.Errorf("build container: %w", err)
+	}
+
+	if nodeSvc != nil && capStore != nil {
+		if _, err := nodeSvc.WithCaptures(capStore); err != nil {
+			return fmt.Errorf("node service: %w", err)
+		}
 	}
 	defer cancel.Close()
 	// Registered after the container's own shutdown, so it runs first:

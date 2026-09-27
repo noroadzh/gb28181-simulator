@@ -17,6 +17,8 @@ const (
 	CatalogModel = "simulator"
 	// CatalogStatusON is the status of a device that is in the online table.
 	CatalogStatusON = "ON"
+	// CatalogStatusOFF is the status of a device that is offline.
+	CatalogStatusOFF = "OFF"
 )
 
 // CatalogItem is one entry of a catalog answer: a device the platform
@@ -34,6 +36,7 @@ type CatalogItem struct {
 	civilCode    string
 	address      string
 	status       string
+	parentID     string
 
 	parental    int
 	safetyWay   int
@@ -52,6 +55,7 @@ type CatalogItemParams struct {
 	CivilCode    string
 	Address      string
 	Status       string
+	ParentID     string
 
 	Parental    int
 	SafetyWay   int
@@ -104,6 +108,7 @@ func NewCatalogItem(p CatalogItemParams) (CatalogItem, error) {
 		civilCode:    civilCode,
 		address:      strings.TrimSpace(p.Address),
 		status:       status,
+		parentID:     strings.TrimSpace(p.ParentID),
 		parental:     p.Parental,
 		safetyWay:    p.SafetyWay,
 		registerWay:  registerWay,
@@ -146,6 +151,9 @@ func (c CatalogItem) Address() string { return c.address }
 
 // Status returns "ON" for every device in the online table.
 func (c CatalogItem) Status() string { return c.status }
+
+// ParentID returns the parent device id, or "" for a top-level device.
+func (c CatalogItem) ParentID() string { return c.parentID }
 
 // Parental reports whether the device has sub-devices (0 until a channel
 // model exists).

@@ -34,6 +34,8 @@ const (
 	CmdTypeDeviceControl = "DeviceControl"
 	// CmdTypePresetQuery is the preset position query command.
 	CmdTypePresetQuery = "PresetQuery"
+	// The GB/T 28181-2022 command constants (HomePosition, CruiseTrackList,
+	// SnapShot) live in gb2022.go next to their value objects.
 )
 
 // Notify is a MANSCDP notify a platform received: what the peer said,
@@ -110,6 +112,21 @@ func (n Notify) IsAlarm() bool { return n.cmdType == CmdTypeAlarm }
 
 // IsDeviceControl reports whether the notify carries a DeviceControl (PTZ) command.
 func (n Notify) IsDeviceControl() bool { return n.cmdType == CmdTypeDeviceControl }
+
+// IsPresetQuery reports whether the notify carries a PresetQuery command.
+func (n Notify) IsPresetQuery() bool { return n.cmdType == CmdTypePresetQuery }
+
+// IsHomePosition reports whether the notify carries a GB/T 28181-2022
+// HomePosition command (query or set).
+func (n Notify) IsHomePosition() bool { return n.cmdType == CmdTypeHomePosition }
+
+// IsCruiseTrackList reports whether the notify carries a GB/T 28181-2022
+// CruiseTrackList query.
+func (n Notify) IsCruiseTrackList() bool { return n.cmdType == CmdTypeCruiseTrackList }
+
+// IsSnapShot reports whether the notify carries a GB/T 28181-2022
+// SnapShot capture command.
+func (n Notify) IsSnapShot() bool { return n.cmdType == CmdTypeSnapShot }
 
 // HasSN reports whether the notify carried a sequence number, which a
 // catalog answer has to echo.

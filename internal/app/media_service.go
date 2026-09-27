@@ -144,18 +144,11 @@ func (p *InboundPipeline) WriteRTP(ctx context.Context, pkt model.RTPPacket) err
 // underlying writer; the deizer is closed last.
 func (p *InboundPipeline) Close() error {
 	var first error
-	if p.depkt != nil {
-		if err := p.depkt.Close(); err != nil && first == nil {
-			first = err
+	for _, c := range []func() error{p.depkt.Close, p.w.Close, p.deizer.Close} {
+		if c == nil {
+			continue
 		}
-	}
-	if p.w != nil {
-		if err := p.w.Close(); err != nil && first == nil {
-			first = err
-		}
-	}
-	if p.deizer != nil {
-		if err := p.deizer.Close(); err != nil && first == nil {
+		if err := c(); err != nil && first == nil {
 			first = err
 		}
 	}

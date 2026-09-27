@@ -151,6 +151,26 @@ type NodeProfile struct {
 	// traffic to when it receives a message whose destination is not
 	// itself. Empty means "direct only" — no forwarding is configured.
 	cascadeChildren []string
+
+	// channels is the device's mutable channel list. Empty for non-device
+	// nodes or when the device exposes only a single logical channel.
+	channels []Channel
+	// alarms is an append-only log of alarm snapshots emitted by this node.
+	alarms []AlarmSnapshot
+	// position is the last-known geographic position, if any.
+	position *Position
+	// presets is the device's preset position list. Empty when the device
+	// does not expose presets or when none have been configured.
+	presets []PresetItem
+	// homePosition is the GB/T 28181-2022 guard position stored when a
+	// downstream sets it; empty when never configured.
+	homePosition *HomePosition
+	// cruiseTracks is the list of cruise tracks exposed to the downstream
+	// when it queries CruiseTrackList; empty when never configured.
+	cruiseTracks []CruiseTrack
+	// snapshots is an append-only log of SnapShot records emitted by this
+	// node.
+	snapshots []SnapShotRecord
 }
 
 // NewNodeProfile validates id with ParseNodeID and requires a non-empty
@@ -343,6 +363,199 @@ func (p NodeProfile) HasCascadeRouting() bool {
 	return p.HasCascadeParent() || p.HasCascadeChildren()
 }
 
+// WithChannels returns a copy whose dynamic channel list is channels. All
+// entries must be valid and unique by id; an empty list clears it.
+func (p NodeProfile) WithChannels(channels []Channel) (NodeProfile, error) {
+	seen := make(map[string]struct{}, len(channels))
+	for _, ch := range channels {
+		if ch.ID() == "" {
+			return p, fmt.Errorf("model: channel without id for node %s", p.id)
+		}
+		if _, dup := seen[ch.ID()]; dup {
+			return p, fmt.Errorf("model: duplicate channel %s for node %s", ch.ID(), p.id)
+		}
+		seen[ch.ID()] = struct{}{}
+	}
+	cp := p
+	if len(channels) == 0 {
+		cp.channels = nil
+	} else {
+		cp.channels = append([]Channel(nil), channels...)
+	}
+	return cp, nil
+}
+
+// Channels returns a copy of the node's channel list; nil when none.
+func (p NodeProfile) Channels() []Channel {
+	if len(p.channels) == 0 {
+		return nil
+	}
+	return append([]Channel(nil), p.channels...)
+}
+
+// ChannelByID returns the channel with the given id and whether it exists.
+func (p NodeProfile) ChannelByID(id string) (Channel, bool) {
+	for _, ch := range p.channels {
+		if ch.ID() == id {
+			return ch, true
+		}
+	}
+	return Channel{}, false
+}
+
+// WithChannelStatus returns a copy whose channel id has status. An unknown
+// channel id is an error, not a silent no-op.
+func (p NodeProfile) WithChannelStatus(id string, status ChannelStatus) (NodeProfile, error) {
+	idx := -1
+	for i, ch := range p.channels {
+		if ch.ID() == id {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return p, fmt.Errorf("model: unknown channel %s for node %s", id, p.id)
+	}
+	cp := p
+	cp.channels = append([]Channel(nil), p.channels...)
+	cp.channels[idx] = cp.channels[idx].WithStatus(status)
+	return cp, nil
+}
+
+// AppendAlarm returns a copy with snap added to the alarm log. Snap must be
+// constructed via NewAlarmSnapshot; duplicates by id are refused.
+func (p NodeProfile) AppendAlarm(snap AlarmSnapshot) (NodeProfile, error) {
+	if snap.ID() == "" {
+		return p, fmt.Errorf("model: alarm snapshot without id for node %s", p.id)
+	}
+	for _, a := range p.alarms {
+		if a.ID() == snap.ID() {
+			return p, fmt.Errorf("model: duplicate alarm %s for node %s", snap.ID(), p.id)
+		}
+	}
+	cp := p
+	cp.alarms = append(cp.alarms, snap)
+	return cp, nil
+}
+
+// Alarms returns a copy of the node's alarm log; nil when empty.
+func (p NodeProfile) Alarms() []AlarmSnapshot {
+	if len(p.alarms) == 0 {
+		return nil
+	}
+	return append([]AlarmSnapshot(nil), p.alarms...)
+}
+
+// WithPosition returns a copy carrying pos as the last-known position.
+func (p NodeProfile) WithPosition(pos Position) NodeProfile {
+	cp := p
+	pp := pos
+	cp.position = &pp
+	return cp
+}
+
+// Position returns the last-known position and whether one was set.
+func (p NodeProfile) Position() (Position, bool) {
+	if p.position == nil {
+		return Position{}, false
+	}
+	return *p.position, true
+}
+
+// WithPresets returns a copy whose preset list is items. Empty or nil clears
+// it; duplicates by PresetIndex are refused.
+func (p NodeProfile) WithPresets(items []PresetItem) (NodeProfile, error) {
+	seen := make(map[int]struct{}, len(items))
+	cp := p
+	cp.presets = nil
+	for _, it := range items {
+		if _, dup := seen[it.PresetIndex]; dup {
+			return p, fmt.Errorf("model: duplicate preset index %d for node %s", it.PresetIndex, p.id)
+		}
+		seen[it.PresetIndex] = struct{}{}
+		cp.presets = append(cp.presets, it)
+	}
+	return cp, nil
+}
+
+// Presets returns a copy of the node's preset list; nil when none.
+func (p NodeProfile) Presets() []PresetItem {
+	if len(p.presets) == 0 {
+		return nil
+	}
+	return append([]PresetItem(nil), p.presets...)
+}
+
+// WithHomePosition returns a copy carrying pos as the GB/T 28181-2022 guard
+// position. An unconstructed HomePosition is refused so a malformed set
+// command cannot clear a configured position silently.
+func (p NodeProfile) WithHomePosition(pos HomePosition) (NodeProfile, error) {
+	if pos.DeviceID() == "" {
+		return p, fmt.Errorf("model: empty home position for node %s", p.id)
+	}
+	cp := p
+	cp.homePosition = &pos
+	return cp, nil
+}
+
+// HomePosition returns the stored guard position and whether one exists.
+func (p NodeProfile) HomePosition() (HomePosition, bool) {
+	if p.homePosition == nil {
+		return HomePosition{}, false
+	}
+	return *p.homePosition, true
+}
+
+// WithCruiseTracks returns a copy whose cruise track list is tracks. All
+// entries must be valid and unique by id; an empty list clears it.
+func (p NodeProfile) WithCruiseTracks(tracks []CruiseTrack) (NodeProfile, error) {
+	seen := make(map[string]struct{}, len(tracks))
+	for _, t := range tracks {
+		if t.ID() == "" {
+			return p, fmt.Errorf("model: cruise track without id for node %s", p.id)
+		}
+		if _, dup := seen[t.ID()]; dup {
+			return p, fmt.Errorf("model: duplicate cruise track %s for node %s", t.ID(), p.id)
+		}
+		seen[t.ID()] = struct{}{}
+	}
+	cp := p
+	if len(tracks) == 0 {
+		cp.cruiseTracks = nil
+	} else {
+		cp.cruiseTracks = append([]CruiseTrack(nil), tracks...)
+	}
+	return cp, nil
+}
+
+// CruiseTracks returns a copy of the node's cruise track list; nil when none.
+func (p NodeProfile) CruiseTracks() []CruiseTrack {
+	if len(p.cruiseTracks) == 0 {
+		return nil
+	}
+	return append([]CruiseTrack(nil), p.cruiseTracks...)
+}
+
+// AppendSnapShot returns a copy with rec added to the snapshot log. Snap must
+// be constructed via NewSnapShotRecord; duplicates by (device, channel, time)
+// are tolerated — each capture is a distinct event.
+func (p NodeProfile) AppendSnapShot(rec SnapShotRecord) (NodeProfile, error) {
+	if rec.DeviceID() == "" {
+		return p, fmt.Errorf("model: snapshot record without device id for node %s", p.id)
+	}
+	cp := p
+	cp.snapshots = append(cp.snapshots, rec)
+	return cp, nil
+}
+
+// SnapShots returns a copy of the node's snapshot log; nil when empty.
+func (p NodeProfile) SnapShots() []SnapShotRecord {
+	if len(p.snapshots) == 0 {
+		return nil
+	}
+	return append([]SnapShotRecord(nil), p.snapshots...)
+}
+
 // String renders a log-safe one-line summary; never contains secrets.
 func (p NodeProfile) String() string {
 	return fmt.Sprintf("NodeProfile<id=%s kind=%s addr=%s domain=%s vendor=%q>",
@@ -407,6 +620,49 @@ func (n Node) WithRegistrationResult(res RegistrationResult) (Node, error) {
 	cp := n
 	cp.profile = profile
 	return cp, nil
+}
+
+// WithProfile returns a copy of the node whose profile is profile. The
+// status and identity are untouched: swapping dynamic simulation state is
+// data, not a lifecycle step, and a node cannot change its own id — the
+// id from profile is replaced by the receiver's.
+func (n Node) WithProfile(profile NodeProfile) Node {
+	profile.id = n.profile.id
+	cp := n
+	cp.profile = profile
+	return cp
+}
+
+// WithChannels returns a copy of the node whose profile carries the
+// given channels. Used by handlers that want to mutate the device's
+// channel list (e.g. when an upper-layer requests a fresh catalog) and
+// need the change to take effect immediately. Other dynamic fields
+// (alarms, position) are preserved.
+func (n Node) WithChannels(channels []Channel) Node {
+	cp := n
+	cp.profile.channels = append([]Channel(nil), channels...)
+	return cp
+}
+
+// WithPosition returns a copy of the node whose profile carries the
+// given position. Pass nil to clear it.
+func (n Node) WithPosition(pos *Position) Node {
+	cp := n
+	if pos == nil {
+		cp.profile.position = nil
+	} else {
+		copy := *pos
+		cp.profile.position = &copy
+	}
+	return cp
+}
+
+// AppendAlarm returns a copy of the node whose profile records an
+// additional alarm snapshot. Order is preserved (oldest first).
+func (n Node) AppendAlarm(a AlarmSnapshot) Node {
+	cp := n
+	cp.profile.alarms = append(append([]AlarmSnapshot(nil), n.profile.alarms...), a)
+	return cp
 }
 
 // String renders a log-safe one-line summary.

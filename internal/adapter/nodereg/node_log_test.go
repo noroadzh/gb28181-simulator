@@ -120,7 +120,7 @@ func assertOnlyNodeID(t *testing.T, out, want, other string) {
 
 // logTestFactory binds a real UDP listener so Start exercises the same path
 // production does.
-func logTestFactory(addr string) (port.SIPTransport, error) {
+func logTestFactory(addr string, _ model.NodeID) (port.SIPTransport, error) {
 	tr, err := siptransport.New(addr)
 	if err != nil {
 		return nil, err

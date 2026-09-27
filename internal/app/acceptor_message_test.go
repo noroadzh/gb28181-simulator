@@ -3,12 +3,14 @@ package app
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/your-org/gb28181-simulator/internal/adapter/nodereg"
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
 	"github.com/your-org/gb28181-simulator/internal/domain/port"
 )
@@ -18,12 +20,14 @@ import (
 // is what the assertions read. The body it renders is a readable stand-in —
 // the real bytes are the codec's own golden tests' business.
 type fakeMANSCDP struct {
-	mu         sync.Mutex
-	notify     model.Notify
-	decodeErr  error
-	bodies     []string
-	catalogs   []model.Catalog
-	marshalErr error
+	mu          sync.Mutex
+	notify      model.Notify
+	decodeErr   error
+	bodies      []string
+	catalogs    []model.Catalog
+	marshalErr  error
+	recordQuery model.RecordInfoQuery
+	presetLists []model.PresetListResponse
 }
 
 func newFakeMANSCDP() *fakeMANSCDP { return &fakeMANSCDP{} }
@@ -45,7 +49,8 @@ func (f *fakeMANSCDP) MarshalCatalog(catalog model.Catalog) (string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "catalog sn=%d sum=%d", catalog.SN(), catalog.SumNum())
 	for _, it := range catalog.Items() {
-		b.WriteString(" " + it.DeviceID())
+		b.WriteByte(' ')
+		b.WriteString(it.DeviceID())
 	}
 	return b.String(), nil
 }
@@ -56,6 +61,137 @@ func (f *fakeMANSCDP) rendered() []model.Catalog {
 	out := make([]model.Catalog, len(f.catalogs))
 	copy(out, f.catalogs)
 	return out
+}
+
+func (f *fakeMANSCDP) setRecordQuery(q model.RecordInfoQuery) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.recordQuery = q
+}
+
+func (f *fakeMANSCDP) renderedPresetLists() []model.PresetListResponse {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]model.PresetListResponse, len(f.presetLists))
+	copy(out, f.presetLists)
+	return out
+}
+
+func (f *fakeMANSCDP) DecodeDeviceInfoQuery(body string) (model.DeviceInfoQuery, error) {
+	return model.DeviceInfoQuery{}, nil
+}
+
+func (f *fakeMANSCDP) MarshalDeviceInfoResponse(resp model.DeviceInfoResponse) (string, error) {
+	return "device-info-response", nil
+}
+
+func (f *fakeMANSCDP) DecodeRecordInfoQuery(body string) (model.RecordInfoQuery, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.bodies = append(f.bodies, body)
+	return f.recordQuery, f.decodeErr
+}
+
+func (f *fakeMANSCDP) MarshalRecordInfoResponse(resp model.RecordInfoResponse) (string, error) {
+	return fmt.Sprintf("record-info-response-SumNum=%d", resp.SumNum), nil
+}
+
+func (f *fakeMANSCDP) DecodeAlarmNotify(body string) (model.AlarmNotify, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.decodeErr != nil {
+		return model.AlarmNotify{}, f.decodeErr
+	}
+	return model.NewAlarmNotify(model.AlarmNotifyParams{
+		SN:            f.notify.SN(),
+		DeviceID:      f.notify.DeviceID(),
+		EventType:     "alarm",
+		AlarmPriority: 1,
+		AlarmMethod:   1,
+	})
+}
+
+func (f *fakeMANSCDP) MarshalAlarmAck(ack model.AlarmAck) (string, error) {
+	return "alarm-ack", nil
+}
+
+func (f *fakeMANSCDP) DecodePTZControl(body string) (model.PTZControl, error) {
+	return model.PTZControl{}, nil
+}
+
+func (f *fakeMANSCDP) MarshalPTZControl(control model.PTZControl) (string, error) {
+	return "ptz-control", nil
+}
+
+func (f *fakeMANSCDP) DecodePresetQuery(body string) (model.PresetQuery, error) {
+	return model.PresetQuery{}, nil
+}
+
+func (f *fakeMANSCDP) MarshalPresetList(resp model.PresetListResponse) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.presetLists = append(f.presetLists, resp)
+	return "preset-list", nil
+}
+
+func (f *fakeMANSCDP) MarshalPresetAck(ack model.PresetAck) (string, error) {
+	return "preset-ack", nil
+}
+
+func (f *fakeMANSCDP) DecodeHomePositionQuery(body string) (model.HomePositionQuery, error) {
+	return model.HomePositionQuery{}, nil
+}
+
+func (f *fakeMANSCDP) MarshalHomePositionQuery(_ model.HomePositionQuery, _ uint32) (string, error) {
+	return "home-position-query", nil
+}
+
+func (f *fakeMANSCDP) DecodeHomePositionSet(body string) (model.HomePositionSet, error) {
+	return model.HomePositionSet{}, nil
+}
+
+func (f *fakeMANSCDP) MarshalHomePositionSet(_ model.HomePosition, _ uint32) (string, error) {
+	return "home-position-set", nil
+}
+
+func (f *fakeMANSCDP) DecodeHomePositionResponse(body string) (model.HomePositionResponse, error) {
+	return model.HomePositionResponse{}, nil
+}
+
+func (f *fakeMANSCDP) MarshalHomePositionResponse(_ model.HomePositionResponse, _ uint32) (string, error) {
+	return "home-position-response", nil
+}
+
+func (f *fakeMANSCDP) DecodeCruiseTrackListQuery(body string) (model.CruiseTrackListQuery, error) {
+	return model.CruiseTrackListQuery{}, nil
+}
+
+func (f *fakeMANSCDP) MarshalCruiseTrackListQuery(_ model.CruiseTrackListQuery, _ uint32) (string, error) {
+	return "cruise-track-list-query", nil
+}
+
+func (f *fakeMANSCDP) DecodeCruiseTrackListResponse(body string) (model.CruiseTrackListResponse, error) {
+	return model.CruiseTrackListResponse{}, nil
+}
+
+func (f *fakeMANSCDP) MarshalCruiseTrackListResponse(_ model.CruiseTrackListResponse, _ uint32) (string, error) {
+	return "cruise-track-list-response", nil
+}
+
+func (f *fakeMANSCDP) DecodeSnapShotCommand(body string) (model.SnapShotCommand, error) {
+	return model.SnapShotCommand{}, nil
+}
+
+func (f *fakeMANSCDP) MarshalSnapShotCommand(_ model.SnapShotCommand, _ uint32) (string, error) {
+	return "snapshot-command", nil
+}
+
+func (f *fakeMANSCDP) DecodeSnapShotResponse(body string) (model.SnapShotResponse, error) {
+	return model.SnapShotResponse{}, nil
+}
+
+func (f *fakeMANSCDP) MarshalSnapShotResponse(_ model.SnapShotResponse, _ uint32) (string, error) {
+	return "snapshot-response", nil
 }
 
 func (f *fakeMANSCDP) setNotify(n model.Notify) {
@@ -400,7 +536,9 @@ func TestAcceptor_IgnoresUnknownCommand(t *testing.T) {
 	h := newMessageHarness(t, defaultHarnessPolicy(t))
 	h.register(t, "34020000011310000001", "3600")
 
-	h.codec.setNotify(mustNotify(t, "Alarm", "34020000011310000001", 3))
+	// Alarm used to be unknown but Change 10 answers it; a genuinely
+	// unknown command type keeps testing the ignore path.
+	h.codec.setNotify(mustNotify(t, "MobilePosition", "34020000011310000001", 3))
 	h.silence(t, messageRequest(t, "34020000011310000001", "<Notify/>"))
 }
 
@@ -529,35 +667,9 @@ func inviteRequest(t *testing.T, deviceID, callID, body string) model.Message {
 	return msg
 }
 
-func ackRequest(t *testing.T, deviceID, callID string) model.Message {
-	t.Helper()
-	msg, err := model.NewRequest("ACK", "sip:"+deviceID+"@3402000000", []model.Header{
-		model.NewHeader("From", "<sip:"+deviceID+"@3402000000>;tag=inv1"),
-		model.NewHeader("To", "<sip:34020000002000000001@3402000000>"),
-		model.NewHeader("Call-ID", callID),
-		model.NewHeader("CSeq", "1 ACK"),
-		model.NewHeader("Via", "SIP/2.0/UDP 127.0.0.1:15060;branch=z9hG4bK-inv"),
-	}, "")
-	if err != nil {
-		t.Fatalf("NewRequest: %v", err)
-	}
-	return msg
-}
-
-func byeRequest(t *testing.T, deviceID, callID string) model.Message {
-	t.Helper()
-	msg, err := model.NewRequest("BYE", "sip:34020000002000000001@3402000000", []model.Header{
-		model.NewHeader("From", "<sip:"+deviceID+"@3402000000>;tag=inv1"),
-		model.NewHeader("To", "<sip:34020000002000000001@3402000000>"),
-		model.NewHeader("Call-ID", callID),
-		model.NewHeader("CSeq", "1 BYE"),
-		model.NewHeader("Via", "SIP/2.0/UDP 127.0.0.1:15060;branch=z9hG4bK-inv"),
-	}, "")
-	if err != nil {
-		t.Fatalf("NewRequest: %v", err)
-	}
-	return msg
-}
+// ackRequest and byeRequest were defined for tests that never used them;
+// they were removed to silence the unusedfunc linter. Re-add if a future
+// test needs to construct those requests in isolation.
 
 var validSDP = `v=0
 o=34020000011310000001 0 0 IN IP4 127.0.0.1
@@ -896,4 +1008,193 @@ func TestAcceptor_MediaStatusFromStrangerAnswers200(t *testing.T) {
 	if !handled {
 		t.Error("MediaStatus handler was not called for stranger device")
 	}
+}
+
+// newMessageHarnessWithRegistry is like newMessageHarness but also registers
+// the platform node in a nodereg.Registry and attaches it to the acceptor.
+func newMessageHarnessWithRegistry(t *testing.T) (*messageHarness, *nodereg.Registry) {
+	t.Helper()
+	h := newMessageHarness(t, defaultHarnessPolicy(t))
+	reg := nodereg.New()
+	profile, err := model.NewNodeProfile(h.nodeID.String(), "127.0.0.1:5060", "3402000000", "")
+	if err != nil {
+		t.Fatalf("NewNodeProfile: %v", err)
+	}
+	if _, err := reg.Register(context.Background(), profile); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	h.acceptor.WithNodeRegistry(reg)
+	return h, reg
+}
+
+// TestAcceptor_AnswersDeviceInfo verifies the acceptor answers a DeviceInfo
+// query with the XML body the codec renders (task 6.1).
+func TestAcceptor_AnswersDeviceInfo(t *testing.T) {
+	h := newMessageHarness(t, defaultHarnessPolicy(t))
+	h.register(t, "34020000011310000001", "3600")
+	h.codec.setNotify(mustNotify(t, model.CmdTypeDeviceInfo, "34020000011310000001", 11))
+	resp := h.tr.deliver(t, messageRequest(t, "34020000011310000001", "<Query/>"))
+	if resp.StatusCode() != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode())
+	}
+	if got := resp.Body(); !strings.Contains(got, "device-info-response") {
+		t.Errorf("device info body missing expected marker:\n%s", got)
+	}
+}
+
+// TestAcceptor_AnswersAlarmAndStoresSnapshot verifies the acceptor sends an
+// AlarmAck and appends the alarm snapshot to the serving node's in-memory
+// profile when a node registry is attached (tasks 3.2/6.2).
+func TestAcceptor_AnswersAlarmAndStoresSnapshot(t *testing.T) {
+	h, reg := newMessageHarnessWithRegistry(t)
+	h.register(t, "34020000011310000001", "3600")
+	h.codec.setNotify(mustNotify(t, model.CmdTypeAlarm, "34020000011310000001", 9))
+	resp := h.tr.deliver(t, messageRequest(t, "34020000011310000001", "<Notify/>"))
+	if resp.StatusCode() != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode())
+	}
+	if got := resp.Body(); !strings.Contains(got, "alarm-ack") {
+		t.Errorf("alarm ack missing in body:\n%s", got)
+	}
+	node, ok := reg.Get(context.Background(), h.nodeID)
+	if !ok {
+		t.Fatal("platform node not found in registry")
+	}
+	if len(node.Profile().Alarms()) != 1 {
+		t.Fatalf("alarms in profile = %d, want 1", len(node.Profile().Alarms()))
+	}
+	snap := node.Profile().Alarms()[0]
+	if snap.Priority() != 1 || snap.Method() != 1 || snap.Description() != "" {
+		t.Errorf("snapshot = %+v, want priority=1/method=1", snap)
+	}
+}
+
+// TestAcceptor_AnswersRecordInfoFiltersByTimeRange verifies the acceptor
+// rejects records outside the query's StartTime/EndTime window and echoes
+// the query SN (task 6.3).
+func TestAcceptor_AnswersRecordInfoFiltersByTimeRange(t *testing.T) {
+	h := newMessageHarness(t, defaultHarnessPolicy(t))
+	// No device registered: stranger query still answers 200 (other tests
+	// cover the gate). Time range is the thing under test.
+	h.codec.setNotify(mustNotify(t, model.CmdTypeRecordInfo, "34020000011310000001", 13))
+	h.codec.setRecordQuery(model.RecordInfoQuery{
+		DeviceID:  "34020000011310000001",
+		StartTime: "20260925T010000",
+		EndTime:   "20260925T020000",
+	})
+	resp := h.tr.deliver(t, messageRequest(t, "34020000011310000001", "<Query/>"))
+	if resp.StatusCode() != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode())
+	}
+	body := resp.Body()
+	if !strings.Contains(body, "SumNum=0") {
+		t.Errorf("filtered record list must be empty:\n%s", body)
+	}
+	// A query covering the synthetic record must return one item.
+	h.codec.setNotify(mustNotify(t, model.CmdTypeRecordInfo, "34020000011310000001", 14))
+	h.codec.setRecordQuery(model.RecordInfoQuery{
+		DeviceID:  "34020000011310000001",
+		StartTime: "20260924T000000",
+		EndTime:   "20260926T000000",
+	})
+	resp = h.tr.deliver(t, messageRequest(t, "34020000011310000001", "<Query/>"))
+	if resp.StatusCode() != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode())
+	}
+	body = resp.Body()
+	if !strings.Contains(body, "SumNum=1") {
+		t.Errorf("matching record list must have SumNum=1:\n%s", body)
+	}
+}
+
+// TestAcceptor_AnswersPresetQueryFromProfile verifies the acceptor answers a
+// PresetQuery with the preset list the node's profile carries, returning an
+// empty list when there are no presets (task 3.5).
+func TestAcceptor_AnswersPresetQueryFromProfile(t *testing.T) {
+	h, reg := newMessageHarnessWithRegistry(t)
+	node, _ := reg.Get(context.Background(), h.nodeID)
+	next, _ := node.Profile().WithPresets([]model.PresetItem{
+		{PresetIndex: 1, Name: "Entrance"},
+		{PresetIndex: 2, Name: "Parking"},
+	})
+	reg.MutateProfile(context.Background(), h.nodeID, func(np model.NodeProfile) (model.NodeProfile, error) {
+		return next, nil
+	})
+	// Register one device so the platform is "serving".
+	h.register(t, "34020000011310000001", "3600")
+	h.codec.setNotify(mustNotify(t, model.CmdTypePresetQuery, "34020000011310000001", 5))
+	resp := h.tr.deliver(t, messageRequest(t, "34020000011310000001", "<Query/>"))
+	if resp.StatusCode() != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode())
+	}
+	rendered := h.codec.renderedPresetLists()
+	if len(rendered) != 1 {
+		t.Fatalf("rendered %d preset lists, want 1", len(rendered))
+	}
+	if rendered[0].SumNum != 2 {
+		t.Errorf("preset list sum = %d, want 2", rendered[0].SumNum)
+	}
+	if len(rendered[0].Items) != 2 ||
+		rendered[0].Items[0].PresetIndex != 1 || rendered[0].Items[0].Name != "Entrance" {
+		t.Errorf("preset items = %+v", rendered[0].Items)
+	}
+}
+
+// TestAcceptor_CatalogIncludesProfileChannels verifies the catalog answer
+// carries the dynamic channels the node's profile registered, mixing the
+// static device with the mutable channel items (task 5.2).
+func TestAcceptor_CatalogIncludesProfileChannels(t *testing.T) {
+	h, reg := newMessageHarnessWithRegistry(t)
+	// Prepare a profile with two channels.
+	channels := []model.Channel{
+		mustChannel(t, "34020000001320000001", "channel-1", "34020000001320000001", model.ChannelStatusOnline),
+		mustChannel(t, "34020000001320000002", "channel-2", "34020000001320000002", model.ChannelStatusOffline),
+	}
+	base, err := model.NewNodeProfile(h.nodeID.String(), "127.0.0.1:5060", "3402000000", "")
+	if err != nil {
+		t.Fatalf("NewNodeProfile: %v", err)
+	}
+	next, _ := base.WithChannels(channels)
+	if _, err := reg.MutateProfile(context.Background(), h.nodeID, func(np model.NodeProfile) (model.NodeProfile, error) {
+		return next, nil
+	}); err != nil {
+		t.Fatalf("MutateProfile: %v", err)
+	}
+	// Register one device so the catalog is non-empty.
+	h.register(t, "34020000011310000001", "3600")
+	h.codec.setNotify(mustNotify(t, model.CmdTypeCatalog, "34020000002000000001", 7))
+	resp := h.tr.deliver(t, messageRequest(t, "34020000011310000001", "<Query/>"))
+	if resp.StatusCode() != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode())
+	}
+	rendered := h.codec.rendered()
+	if len(rendered) != 1 {
+		t.Fatalf("rendered %d catalogs, want 1", len(rendered))
+	}
+	if rendered[0].SumNum() != 3 {
+		t.Fatalf("sum = %d, want 3 (1 device + 2 channels)", rendered[0].SumNum())
+	}
+	ids := make([]string, 0, len(rendered[0].Items()))
+	for _, it := range rendered[0].Items() {
+		ids = append(ids, it.DeviceID())
+	}
+	sort.Strings(ids)
+	want := []string{
+		"34020000001320000001",
+		"34020000001320000002",
+		"34020000011310000001",
+	}
+	if !reflect.DeepEqual(ids, want) {
+		t.Errorf("catalog ids = %v, want %v", ids, want)
+	}
+}
+
+// mustChannel is a test helper that builds a validated Channel.
+func mustChannel(t *testing.T, id, name, parentID string, status model.ChannelStatus) model.Channel {
+	t.Helper()
+	ch, err := model.NewChannel(id, name, parentID, status)
+	if err != nil {
+		t.Fatalf("NewChannel: %v", err)
+	}
+	return ch
 }

@@ -65,7 +65,7 @@ func newFakeFactory() *fakeFactory {
 	return &fakeFactory{bound: map[string]bool{}, refuse: map[string]bool{}}
 }
 
-func (f *fakeFactory) bind(addr string) (port.SIPTransport, error) {
+func (f *fakeFactory) bind(addr string, _ model.NodeID) (port.SIPTransport, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.failNext || f.refuse[addr] || f.bound[addr] {

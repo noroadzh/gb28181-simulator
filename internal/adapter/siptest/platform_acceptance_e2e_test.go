@@ -28,8 +28,8 @@ func platformService(t *testing.T, ctx context.Context, accounts *credstore.Stor
 ) {
 	t.Helper()
 	registry := nodereg.New()
-	factory := func(addr string) (port.SIPTransport, error) {
-		tr, err := siptransport.New("udp://" + addr)
+	factory := func(addr string, nodeID model.NodeID) (port.SIPTransport, error) {
+		tr, err := siptransport.New("udp://"+addr, siptransport.WithNodeID(nodeID.String()))
 		if err != nil {
 			return nil, err
 		}

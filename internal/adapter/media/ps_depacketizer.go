@@ -24,9 +24,10 @@ import (
 // cut.
 //
 // Every PS frame written by the packetizer follows the layout:
-//   00 00 01 BA <12-byte pack header>
-//   00 00 01 E0 <2-byte PES length> <9-byte PES header> <ES payload>   (video)
-//   00 00 01 C0 <2-byte PES length> <9-byte PES header> <ES payload>   (audio)
+//
+//	00 00 01 BA <12-byte pack header>
+//	00 00 01 E0 <2-byte PES length> <9-byte PES header> <ES payload>   (video)
+//	00 00 01 C0 <2-byte PES length> <9-byte PES header> <ES payload>   (audio)
 type PSDepacketizer struct {
 	buf []byte
 }
@@ -158,11 +159,12 @@ func findStartCode(b []byte, code uint32) int {
 // decodePTS decodes a 5-byte MPEG-2 PTS into a uint64 (90 kHz domain).
 //
 // Format (40 bits):
-//   byte 0: '0010' + 3 bits + '1'             -> bits 33..32 of PTS are the 3 bits, top 4 bits are the marker
-//   byte 1: 8 bits                            -> PTS[31..24]
-//   byte 2: (PTS[21..15] << 1) | '1'         -> 7+1 = 8 bits
-//   byte 3: 8 bits                            -> PTS[15..8]
-//   byte 4: (PTS[6..0] << 1) | '1'            -> 7+1 = 8 bits
+//
+//	byte 0: '0010' + 3 bits + '1'             -> bits 33..32 of PTS are the 3 bits, top 4 bits are the marker
+//	byte 1: 8 bits                            -> PTS[31..24]
+//	byte 2: (PTS[21..15] << 1) | '1'         -> 7+1 = 8 bits
+//	byte 3: 8 bits                            -> PTS[15..8]
+//	byte 4: (PTS[6..0] << 1) | '1'            -> 7+1 = 8 bits
 //
 // We discard the top 4 bits ('0010' marker) and the trailing '1' bits.
 func decodePTS(b []byte) uint64 {

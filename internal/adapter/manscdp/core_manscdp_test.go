@@ -122,6 +122,63 @@ func TestMarshalRecordInfoResponse_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestMarshalRecordInfoResponse_EmptyList verifies an empty record list renders
+// a valid answer with SumNum=0 (task 2.2).
+func TestMarshalRecordInfoResponse_EmptyList(t *testing.T) {
+	resp, _ := model.NewRecordInfoResponse("34020000002160000001", 2002, nil)
+	body, err := NewMANSCDPCodec().MarshalRecordInfoResponse(resp)
+	if err != nil {
+		t.Fatalf("MarshalRecordInfoResponse: %v", err)
+	}
+	if !strings.Contains(body, "<SumNum>0</SumNum>") {
+		t.Errorf("empty record list must have SumNum=0:\n%s", body)
+	}
+	// Round-trip: empty items decode back to an empty slice.
+	got, err := NewMANSCDPCodec().DecodeRecordInfoResponse(body)
+	if err != nil {
+		t.Fatalf("DecodeRecordInfoResponse round trip: %v", err)
+	}
+	if len(got.Items) != 0 {
+		t.Errorf("decoded items = %d, want 0", len(got.Items))
+	}
+}
+
+// TestMarshalRecordInfoResponse_PopulatedList verifies multiple items are
+// rendered with SumNum equal to the length (task 2.2).
+func TestMarshalRecordInfoResponse_PopulatedList(t *testing.T) {
+	items := []model.RecordInfoItem{
+		model.NewRecordInfoItem(model.RecordInfoItemParams{
+			Name: "rec_A", DeviceID: "34020000002160000001", ChannelID: "1",
+			StartTime: "2025-01-01T00:00:00Z", EndTime: "2025-01-01T00:30:00Z",
+			FilePath: "/records/a.mp4",
+		}),
+		model.NewRecordInfoItem(model.RecordInfoItemParams{
+			Name: "rec_B", DeviceID: "34020000002160000001", ChannelID: "2",
+			StartTime: "2025-01-01T00:30:00Z", EndTime: "2025-01-01T01:00:00Z",
+			FilePath: "/records/b.mp4",
+		}),
+	}
+	resp, _ := model.NewRecordInfoResponse("34020000002160000001", 2003, items)
+	body, err := NewMANSCDPCodec().MarshalRecordInfoResponse(resp)
+	if err != nil {
+		t.Fatalf("MarshalRecordInfoResponse: %v", err)
+	}
+	if !strings.Contains(body, "<SumNum>2</SumNum>") {
+		t.Errorf("populated record list must have SumNum=2:\n%s", body)
+	}
+	if !strings.Contains(body, "<FilePath>/records/a.mp4</FilePath>") {
+		t.Errorf("missing first item FilePath:\n%s", body)
+	}
+	// Round-trip preserves both items.
+	got, err := NewMANSCDPCodec().DecodeRecordInfoResponse(body)
+	if err != nil {
+		t.Fatalf("DecodeRecordInfoResponse round trip: %v", err)
+	}
+	if len(got.Items) != 2 {
+		t.Errorf("decoded items = %d, want 2", len(got.Items))
+	}
+}
+
 // TestDecodeAlarmNotify_Golden verifies the Alarm notify parser.
 func TestDecodeAlarmNotify_Golden(t *testing.T) {
 	want, err := os.ReadFile(filepath.Join("testdata", "alarm-notify.xml"))

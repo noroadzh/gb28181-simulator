@@ -53,6 +53,12 @@ type WireEvent struct {
 
 	// Timestamp is when the event was captured.
 	Timestamp time.Time
+
+	// NodeID is the owning node's identifier, if the transport was constructed
+	// with one. Empty means the event is not associated with a specific node
+	// (for example, the HTTP admin plane or a transport created before this
+	// field was introduced).
+	NodeID string
 }
 
 // Emitter consumes WireEvents. Implementations must be safe for concurrent

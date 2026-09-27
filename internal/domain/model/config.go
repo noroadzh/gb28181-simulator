@@ -8,9 +8,9 @@ import (
 
 // ConfigCommand is the wire shape of a ConfigDownload command.
 type ConfigCommand struct {
-	CmdType   string
-	SN        uint32
-	DeviceID  string
+	CmdType    string
+	SN         uint32
+	DeviceID   string
 	ConfigType string
 }
 

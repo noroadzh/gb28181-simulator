@@ -54,7 +54,7 @@ func registrationFixture(
 			t.Fatalf("WithRegistration: %v", err)
 		}
 	}
-	svc, err := NewNodeService(cat, lc, adv, func(string) (port.SIPTransport, error) {
+	svc, err := NewNodeService(cat, lc, adv, func(addr string, _ model.NodeID) (port.SIPTransport, error) {
 		return tr, nil
 	}, &fakeClock{now: time.Now()})
 	if err != nil {
@@ -234,7 +234,7 @@ func TestNodeService_WithRegistrarRejectsNil(t *testing.T) {
 	cat := newFakeCatalogue()
 	lc := newFakeLifecycle(cat)
 	svc, err := NewNodeService(cat, lc, cat,
-		func(string) (port.SIPTransport, error) { return &scriptedTransport{}, nil },
+		func(addr string, _ model.NodeID) (port.SIPTransport, error) { return &scriptedTransport{}, nil },
 		&fakeClock{})
 	if err != nil {
 		t.Fatalf("NewNodeService: %v", err)

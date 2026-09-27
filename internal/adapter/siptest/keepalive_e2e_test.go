@@ -23,7 +23,7 @@ import (
 func keepaliveService(t *testing.T, ctx context.Context) (*app.NodeService, func()) {
 	t.Helper()
 	registry := nodereg.New()
-	factory := func(addr string) (port.SIPTransport, error) {
+	factory := func(addr string, _ model.NodeID) (port.SIPTransport, error) {
 		tr, err := siptransport.New("udp://" + addr)
 		if err != nil {
 			return nil, err

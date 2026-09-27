@@ -43,6 +43,7 @@ type Transport struct {
 	bind     string
 	protocol string
 	addr     string
+	nodeID   string
 
 	out    chan sip.Message
 	stop   chan struct{}
@@ -99,6 +100,7 @@ func New(bind string, opts ...Option) (*Transport, error) {
 						Local:     addr,
 						Bytes:     []byte(msg.String()),
 						Timestamp: time.Now(),
+						NodeID:    cfg.nodeID,
 					})
 				default:
 					// Channel full — drop silently per design R5.
@@ -111,6 +113,7 @@ func New(bind string, opts ...Option) (*Transport, error) {
 		bind:     bind,
 		protocol: scheme,
 		addr:     addr,
+		nodeID:   cfg.nodeID,
 		out:      out,
 		stop:     stop,
 	}, nil
@@ -191,6 +194,7 @@ func (t *Transport) Send(msg sip.Message, dst string) error {
 		Remote:    dst,
 		Bytes:     []byte(msg.String()),
 		Timestamp: time.Now(),
+		NodeID:    t.nodeID,
 	})
 	return nil
 }

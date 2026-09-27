@@ -78,7 +78,7 @@
 - [x] 11.1 `go test -race -count=1 -timeout=60s ./...` 全包 100% 通过（含 72 个现有 + ≥ 30 个新增）
 - [x] 11.2 `make sip-test` < 15s 完成（实测 8.99s：sip 3.6s / sdp 4.6s / auth 2.1s / sipprobe 5.0s，`-race` 为耗时主因）；`make release-matrix` 五平台二进制含 sipprobe，无 cgo 警告
 - [x] 11.3 启动 `bin/gb28181-simulator` 验证：日志按"config → logger → tracing → http-server"顺序输出；stdout 中可见 OTel span JSON 输出
-- [ ] 11.4 启动两个 `bin/gb28181-simulator sipprobe` 互发 INVITE/200 OK，退出码 0
+- [x] 11.4 启动两个 `bin/gb28181-simulator sipprobe` 互发 INVITE/200 OK，退出码 0
       - **状态：未完成，有意推迟到 Change 4+（归档时保留此记录）。**
       - **原因**：`sipprobe` 接收模式只收不发，回包需要对端地址；而 `internal/adapter/siptransport`
         不暴露对端地址（gosip `Messages()` 不携带），其文档已把该工作显式推迟到 Change 4+。

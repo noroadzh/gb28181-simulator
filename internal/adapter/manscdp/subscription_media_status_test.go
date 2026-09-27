@@ -3,6 +3,7 @@ package manscdp
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
@@ -113,8 +114,8 @@ func TestDecodeMediaStatus_Golden(t *testing.T) {
 // parseable by DecodeMediaStatus.
 func TestDecodeMediaStatus_RoundTrip(t *testing.T) {
 	ms := model.MediaStatus{
-		DeviceID:  "34020000001320000001",
-		ChannelID: "34020000001320000001",
+		DeviceID:     "34020000001320000001",
+		ChannelID:    "34020000001320000001",
 		RecordStatus: model.RecordStatusRecording,
 		Video: &model.VideoParam{
 			Width:     1920,
@@ -140,6 +141,57 @@ func TestDecodeMediaStatus_RoundTrip(t *testing.T) {
 	}
 	if got.Video == nil || got.Video.Width != 1920 {
 		t.Errorf("video = %+v, want width=1920", got.Video)
+	}
+}
+
+// TestMarshalMediaStatus_WithPosition verifies optional position fields are
+// emitted when present and absent when not (task 2.3).
+func TestMarshalMediaStatus_WithPosition(t *testing.T) {
+	ms := model.MediaStatus{
+		DeviceID:     "34020000001320000001",
+		ChannelID:    "34020000001320000001",
+		RecordStatus: model.RecordStatusIdle,
+		Position: func() *model.Position {
+			p, _ := model.NewPosition(120.155, 30.274, 10.5)
+			return &p
+		}(),
+	}
+	body, err := NewMANSCDPCodec().MarshalMediaStatus(ms)
+	if err != nil {
+		t.Fatalf("MarshalMediaStatus: %v", err)
+	}
+	for _, want := range []string{
+		"<Longitude>120.155</Longitude>",
+		"<Latitude>30.274</Latitude>",
+		"<Speed>10.5</Speed>",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q:\n%s", want, body)
+		}
+	}
+}
+
+// TestMarshalMediaStatus_WithoutPosition verifies no position elements appear
+// when Position is nil (task 2.3).
+func TestMarshalMediaStatus_WithoutPosition(t *testing.T) {
+	ms := model.MediaStatus{
+		DeviceID:     "34020000001320000001",
+		ChannelID:    "34020000001320000001",
+		RecordStatus: model.RecordStatusRecording,
+	}
+	body, err := NewMANSCDPCodec().MarshalMediaStatus(ms)
+	if err != nil {
+		t.Fatalf("MarshalMediaStatus: %v", err)
+	}
+	if strings.Contains(body, "<Longitude>") {
+		t.Errorf("position must be omitted when nil:\n%s", body)
+	}
+	got, err := NewMANSCDPCodec().DecodeMediaStatus(body)
+	if err != nil {
+		t.Fatalf("DecodeMediaStatus round trip: %v", err)
+	}
+	if got.Position != nil {
+		t.Errorf("decoded position must be nil, got %+v", got.Position)
 	}
 }
 

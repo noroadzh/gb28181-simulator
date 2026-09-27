@@ -8,8 +8,8 @@ import (
 // It holds no state: every body is fully described by the value it is given.
 type MANSCDPCodecAdapter struct{}
 
-// NewMANSCDPCodec returns a codec ready to parse notifies and render
-// catalogs.
+// NewMANSCDPCodec returns a codec ready to parse notifies, render
+// catalogs, and handle GB/T 28181-2022 incremental commands.
 func NewMANSCDPCodec() *MANSCDPCodecAdapter { return &MANSCDPCodecAdapter{} }
 
 // Compile-time check that the adapter satisfies the domain port.

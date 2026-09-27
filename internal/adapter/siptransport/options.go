@@ -8,6 +8,7 @@ type Option func(*transportConfig)
 type transportConfig struct {
 	receiveBuffer int
 	msgMapper     sip.MessageMapper // optional: transform inbound messages
+	nodeID        string            // optional: owning node identifier for audit events
 }
 
 func defaultConfig() transportConfig {
@@ -30,5 +31,16 @@ func WithReceiveBuffer(n int) Option {
 func WithMessageMapper(m sip.MessageMapper) Option {
 	return func(c *transportConfig) {
 		c.msgMapper = m
+	}
+}
+
+// WithNodeID tags the transport with an owning node identifier. When set,
+// every audit WireEvent this transport emits carries it, so the capture
+// store (Change 13) can attribute events to the right node when multiple
+// nodes coexist in one process. An empty string keeps the legacy behaviour
+// (events are untagged).
+func WithNodeID(id string) Option {
+	return func(c *transportConfig) {
+		c.nodeID = id
 	}
 }

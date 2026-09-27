@@ -52,7 +52,7 @@ func (s *stubSource) Open(_ context.Context) (io.ReadCloser, error) {
 	return &bytesReadCloser{data: total}, nil
 }
 
-func (s *stubSource) Close() error   { return nil }
+func (s *stubSource) Close() error              { return nil }
 func (s *stubSource) Config() model.MediaConfig { return s.config }
 
 // stubPS prepends a PS system header so the depacketizer can cut frames.
@@ -80,8 +80,8 @@ func newStubRTP(mtu int) *stubRTP { return &stubRTP{mtu: mtu} }
 func (s *stubRTP) Packetize(ps model.PSFrame) ([]model.RTPPacket, error) {
 	s.seq++
 	pkt := model.RTPPacket{
-		SSRC:   0xABCDEF01,
-		Marker: true,
+		SSRC:    0xABCDEF01,
+		Marker:  true,
 		Payload: append([]byte(nil), ps.Payload...),
 	}
 	s.pkts = append(s.pkts, pkt)
@@ -204,12 +204,12 @@ func TestMediaService_PacketizeOutboundSourceOpenFailure(t *testing.T) {
 }
 
 type errSource struct {
-	openErr error
+	openErr  error
 	closeErr error
 }
 
 func (e *errSource) Open(_ context.Context) (io.ReadCloser, error) { return nil, e.openErr }
-func (e *errSource) Close() error                                 { return e.closeErr }
+func (e *errSource) Close() error                                  { return e.closeErr }
 func (e *errSource) Config() model.MediaConfig                     { return model.MediaConfig{} }
 
 func TestMediaService_PacketizeOutboundContextCancel(t *testing.T) {
@@ -246,7 +246,7 @@ type blockingSource struct {
 }
 
 func (b *blockingSource) Open(_ context.Context) (io.ReadCloser, error) { return b.rc, nil }
-func (b *blockingSource) Close() error                                 { return b.rc.Close() }
+func (b *blockingSource) Close() error                                  { return b.rc.Close() }
 func (b *blockingSource) Config() model.MediaConfig                     { return b.cfg }
 
 func TestMediaService_PacketizeOutboundMultipleFrames(t *testing.T) {
