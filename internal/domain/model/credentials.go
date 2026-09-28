@@ -17,16 +17,24 @@ import (
 // side) and SM2PublicKey verifies inbound SecurityInfo (platform side).
 // nil means "not configured" and the credential degrades to plain
 // MD5/SM3 digest.
+//
+// NoAuth opts this credential into a test/intranet mode where the platform
+// accepts a downstream that presents an empty Digest response, bypassing
+// the password comparison. Only set when the platform explicitly configured
+// allow_no_auth; a NoAuth credential against a normally-configured
+// platform is equivalent to an invalid password (403).
 type Credentials struct {
 	username      string
 	realm         string
 	password      string
+	noAuth        bool
 	sm2PrivateKey []byte // raw 32-byte scalar; nil = absent
 	sm2PublicKey  []byte // raw 65-byte uncompressed point; nil = absent
 }
 
 // NewCredentials constructs Credentials. username and realm MUST be valid
-// UTF-8 (RFC 7616 §3.3); password is byte-transparent.
+// UTF-8 (RFC 7616 §3.3); password is byte-transparent. noAuth is always
+// false on construction; use WithNoAuth to set it.
 func NewCredentials(username, realm, password string) (Credentials, error) {
 	if username == "" {
 		return Credentials{}, fmt.Errorf("model: empty username")
@@ -71,6 +79,17 @@ func (c Credentials) PasswordEquals(other string) bool {
 func (c Credentials) String() string {
 	return fmt.Sprintf("Credentials<user=%q realm=%q password=***>", c.username, c.realm)
 }
+
+// WithNoAuth returns a copy of c with the noAuth flag set. Use this
+// when the credential belongs to a platform that has allow_no_auth=true.
+func (c Credentials) WithNoAuth() Credentials {
+	out := c
+	out.noAuth = true
+	return out
+}
+
+// NoAuth reports whether this credential is marked for no-auth mode.
+func (c Credentials) NoAuth() bool { return c.noAuth }
 
 // WithSM2KeyPair returns a copy of c that carries the supplied raw SM2
 // key material. priv is the 32-byte scalar and pub is the 65-byte

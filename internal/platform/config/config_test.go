@@ -72,6 +72,41 @@ func TestConfig_EnvOverride(t *testing.T) {
 	}
 }
 
+// TestConfig_ScenarioDir covers the optional scenario.dir key (Change 15):
+// absent by default, honoured when declared, and overridable via env.
+func TestConfig_ScenarioDir(t *testing.T) {
+	clearEnv(t)
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Scenario.Dir != "" {
+		t.Fatalf("scenario.dir default = %q, want empty", cfg.Scenario.Dir)
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("scenario:\n  dir: /data/scenarios\n"), 0o644); err != nil {
+		t.Fatalf("write yaml: %v", err)
+	}
+	cfg, err = Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Scenario.Dir != "/data/scenarios" {
+		t.Fatalf("scenario.dir = %q, want /data/scenarios", cfg.Scenario.Dir)
+	}
+
+	t.Setenv("GB28181_SIMULATOR_SCENARIO_DIR", "/env/scenarios")
+	cfg, err = Load(path)
+	if err != nil {
+		t.Fatalf("Load with env: %v", err)
+	}
+	if cfg.Scenario.Dir != "/env/scenarios" {
+		t.Fatalf("env scenario.dir = %q, want /env/scenarios", cfg.Scenario.Dir)
+	}
+}
+
 // TestDefaultConfigPath_XDG ensures XDG_CONFIG_HOME is honoured on
 // Linux/macOS and a sensible default is returned when unset.
 func TestDefaultConfigPath_XDG(t *testing.T) {

@@ -76,6 +76,57 @@ func TestBuildAuthorization_AcceptedByVerify(t *testing.T) {
 	}
 }
 
+// BuildEmptyAuthorization produces an Authorization header with response=""
+// for no-auth registrations. The platform-side AuthenticatorAdapter skips
+// the Digest check when cred.NoAuth() is true and response is empty.
+func TestBuildEmptyAuthorization(t *testing.T) {
+	t.Parallel()
+	ch := mustChallenge(t, "realm", "nonce", "MD5", "", "auth")
+
+	header, err := auth.BuildEmptyAuthorization("device1", ch, "REGISTER", "sip:realm")
+	if err != nil {
+		t.Fatalf("BuildEmptyAuthorization: %v", err)
+	}
+	fields, err := auth.ParseAuthorization(header)
+	if err != nil {
+		t.Fatalf("ParseAuthorization: %v", err)
+	}
+	if fields.Username != "device1" {
+		t.Errorf("username = %q, want device1", fields.Username)
+	}
+	if fields.Response != "" {
+		t.Errorf("response = %q, want empty string", fields.Response)
+	}
+	if fields.Qop != "" || fields.Nc != "" || fields.Cnonce != "" {
+		t.Errorf("qop/nc/cnonce should be absent in no-auth mode, got %q/%q/%q",
+			fields.Qop, fields.Nc, fields.Cnonce)
+	}
+}
+
+// Authorizer.Authorization emits BuildEmptyAuthorization when the credential
+// has no password (no-auth mode).
+func TestAuthorizer_Authorization_EmptyPassword(t *testing.T) {
+	t.Parallel()
+	cred, err := model.NewCredentials("device1", "realm", "")
+	if err != nil {
+		t.Fatalf("NewCredentials: %v", err)
+	}
+	ch := mustChallenge(t, "realm", "nonce", "MD5", "", "auth")
+
+	authorizer := auth.NewAuthorizer(nil)
+	header, err := authorizer.Authorization(cred, ch, "REGISTER", "sip:realm")
+	if err != nil {
+		t.Fatalf("Authorization: %v", err)
+	}
+	fields, err := auth.ParseAuthorization(header)
+	if err != nil {
+		t.Fatalf("ParseAuthorization: %v", err)
+	}
+	if fields.Response != "" {
+		t.Errorf("response = %q, want empty for no-auth", fields.Response)
+	}
+}
+
 // A wrong password must be rejected, otherwise the golden test could pass
 // on a response that does not depend on the credentials at all.
 func TestBuildAuthorization_WrongPasswordRejected(t *testing.T) {

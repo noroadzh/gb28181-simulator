@@ -45,7 +45,15 @@ func WithCNonceFunc(f func() (string, error)) AuthorizerOption {
 // Authorization builds a complete Authorization header value for one
 // request. Each call mints a fresh cnonce and counts nc from 1, i.e. one
 // call per registration transaction.
+//
+// When cred carries no password (a no-auth / empty-password credential for
+// test/intranet scenarios) the rendered Authorization uses an empty
+// response= field and omits qop/nc/cnonce so the upstream platform — when
+// it also opts into allow_no_auth — can skip the Digest comparison.
 func (a *Authorizer) Authorization(cred model.Credentials, ch model.Challenge, method, uri string) (string, error) {
+	if cred.Password() == "" {
+		return BuildEmptyAuthorization(cred.Username(), ch, method, uri)
+	}
 	cnonce, err := a.newCNonce()
 	if err != nil {
 		return "", err
@@ -160,6 +168,46 @@ func NewCNonce() (string, error) {
 		return "", fmt.Errorf("auth: read random: %w", err)
 	}
 	return hex.EncodeToString(buf), nil
+}
+
+// BuildEmptyAuthorization renders an Authorization header with an empty
+// response= field, suitable for test/intranet no-auth registrations. The
+// response is intentionally empty so a platform that also has allow_no_auth
+// can accept the peer without a password comparison.
+//
+// Unlike a real Digest exchange, qop/nc/cnonce are omitted because there is
+// nothing to hash and no shared secret to protect. The username is still
+// present so the platform can attribute the session.
+func BuildEmptyAuthorization(username string, ch model.Challenge, method, uri string) (string, error) {
+	if method == "" {
+		return "", fmt.Errorf("auth: empty method")
+	}
+	if uri == "" {
+		return "", fmt.Errorf("auth: empty URI")
+	}
+	alg := ch.Algorithm()
+	if alg == "" {
+		alg = DefaultAlgorithm
+	}
+	switch strings.ToUpper(alg) {
+	case "", "MD5", "MD5-SESS", "SM3", "SM3-SESS":
+		// accepted: any algorithm is fine since we produce no response
+	default:
+		return "", fmt.Errorf("%w: %s", ErrUnknownAlgorithm, alg)
+	}
+
+	fields := []string{
+		`username=` + quote(username),
+		`realm=` + quote(ch.Realm()),
+		`nonce=` + quote(ch.Nonce()),
+		`uri=` + quote(uri),
+		`response=""`,
+		`algorithm=` + alg,
+	}
+	if opaque := ch.Opaque(); opaque != "" {
+		fields = append(fields, `opaque=`+quote(opaque))
+	}
+	return "Digest " + strings.Join(fields, ", "), nil
 }
 
 // FormatNC renders a Digest nonce-count as the fixed-width 8-digit hex

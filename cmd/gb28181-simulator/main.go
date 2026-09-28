@@ -26,6 +26,7 @@ import (
 	mediastatus "github.com/your-org/gb28181-simulator/internal/adapter/media_status"
 	"github.com/your-org/gb28181-simulator/internal/adapter/nodereg"
 	"github.com/your-org/gb28181-simulator/internal/adapter/playback"
+	"github.com/your-org/gb28181-simulator/internal/adapter/scenario"
 	"github.com/your-org/gb28181-simulator/internal/adapter/siptransport"
 	"github.com/your-org/gb28181-simulator/internal/adapter/subscribe"
 	"github.com/your-org/gb28181-simulator/internal/app"
@@ -78,6 +79,7 @@ var (
 	loggerKey      = servicectx.NewKey[*logging.Hub]("logger")
 	tracingKey     = servicectx.NewKey[*tracing.Provider]("tracing")
 	nodeServiceKey = servicectx.NewKey[*app.NodeService]("node-service")
+	scenarioKey    = servicectx.NewKey[port.ScenarioRunner]("scenario-runner")
 	serverKey      = servicectx.NewKey[*httpapi.Server]("server")
 )
 
@@ -122,13 +124,17 @@ func applyPlatformSection(
 	for j, acc := range pc.Accounts {
 		// The store keeps the secret out of sight, so an empty one has
 		// to be caught here: a platform that accepted it would be
-		// accepting everybody.
-		if acc.Password == "" {
+		// accepting everybody — unless the operator opted the platform
+		// into no-auth test/intranet mode via pc.AllowNoAuth.
+		if acc.Password == "" && !pc.AllowNoAuth {
 			return model.NodeProfile{}, fmt.Errorf("accounts[%d]: empty password", j)
 		}
 		cred, err := model.NewCredentials(acc.Username, realm, acc.Password)
 		if err != nil {
 			return model.NodeProfile{}, fmt.Errorf("accounts[%d]: %w", j, err)
+		}
+		if pc.AllowNoAuth {
+			cred = cred.WithNoAuth()
 		}
 		if err := accounts.Add(profile.ID(), cred); err != nil {
 			return model.NodeProfile{}, fmt.Errorf("accounts[%d]: %w", j, err)
@@ -173,6 +179,17 @@ func run() error {
 	// sources and the PS/RTP pipeline. It lives for the process lifetime
 	// and is closed after every node is stopped on shutdown.
 	var mediaService *app.MediaService
+	// faultStore is the shared fault profile store produced by the node
+	// service provider; the scenario engine's inject-fault steps reuse it so
+	// injected faults behave exactly like HTTP-installed ones.
+	var faultStore *app.FaultStoreAdapter
+	// nodeAccounts is the per-process credential store populated from YAML
+	// platform.accounts and wired into the scenario engine so create-node
+	// steps can pre-load a platform's downstream credentials.
+	var nodeAccounts *credstore.Store
+	// scenarioRunner is the Change 15 scenario engine: a store+executor
+	// runner decorated by the app-level ScenarioService (last-run tracking).
+	var scenarioRunner port.ScenarioRunner
 
 	c := servicectx.NewContainer().
 		Provide(configKey, func() (any, error) {
@@ -283,6 +300,7 @@ func run() error {
 			// sees either concrete type.
 			devices := devicereg.New()
 			accounts := credstore.New()
+			nodeAccounts = accounts
 			authenticator, err := sipauth.NewAuthenticatorAdapter(sipauth.NewResponder(nil))
 			if err != nil {
 				return nil, fmt.Errorf("authenticator: %w", err)
@@ -346,14 +364,15 @@ func run() error {
 				if nc.Registration != nil {
 					r := nc.Registration
 					reg, regErr := model.NewRegistration(model.RegistrationParams{
-						Server:    r.Server,
-						ServerID:  r.ServerID,
-						Username:  r.Username,
-						Password:  r.Password,
-						GBVersion: r.GBVersion,
-						Expires:   r.Expires,
-						Timeout:   r.Timeout,
-						Transport: r.Transport,
+						Server:      r.Server,
+						ServerID:    r.ServerID,
+						Username:    r.Username,
+						Password:    r.Password,
+						AllowNoAuth: r.AllowNoAuth,
+						GBVersion:   r.GBVersion,
+						Expires:     r.Expires,
+						Timeout:     r.Timeout,
+						Transport:   r.Transport,
 
 						HeartbeatInterval:    r.HeartbeatInterval,
 						HeartbeatTimeout:     r.HeartbeatTimeout,
@@ -387,7 +406,30 @@ func run() error {
 				logging.L().Info("nodes registered", "count", len(cfg.Nodes))
 			}
 			nodeSvc = svc
+			faultStore = faults
 			return svc, nil
+		}).
+		Provide(scenarioKey, func() (any, error) {
+			store := scenario.NewStore(logging.L())
+			if err := store.LoadEmbedded(); err != nil {
+				return nil, fmt.Errorf("scenario store: %w", err)
+			}
+			if cfg.Scenario.Dir != "" {
+				if err := store.LoadDir(cfg.Scenario.Dir); err != nil {
+					return nil, fmt.Errorf("scenario store: %w", err)
+				}
+				logging.L().Info("scenario dir loaded", "dir", cfg.Scenario.Dir)
+			}
+			exec := scenario.NewExecutor()
+			scenario.RegisterNodeSteps(exec, nodeSvc, nodeAccounts)
+			scenario.RegisterCommandSteps(exec, nodeSvc)
+			scenario.RegisterWaitSteps(exec)
+			scenario.RegisterExpectSteps(exec, nodeSvc)
+			scenario.RegisterInjectFaultSteps(exec, faultStore)
+			runner := scenario.NewRunner(processCtx, store, exec)
+			scenarioRunner = app.NewScenarioService(runner)
+			logging.L().Info("scenario engine ready", "packages", len(store.List()))
+			return scenarioRunner, nil
 		}).
 		Provide(serverKey, func() (any, error) {
 			hub := logging.DefaultHub()
@@ -395,8 +437,13 @@ func run() error {
 				Version: version,
 				Commit:  commit,
 				BuiltAt: builtAt,
-			}, nodeSvc), nil
+			}, nodeSvc, scenarioRunner), nil
 		})
+
+	cancel, err := c.Build()
+	if err != nil {
+		return fmt.Errorf("build container: %w", err)
+	}
 
 	// Capture wiring (design D4): when the `capture:` section enables it,
 	// the process-global audit emitter becomes a bridge into the per-node
@@ -406,11 +453,6 @@ func run() error {
 		capStore = capture.NewWithCapacity(cfg.Capture.Capacity)
 		audit.SetEmitter(capture.AuditBridge(capStore))
 		logging.L().Info("capture enabled", "capacity", cfg.Capture.Capacity)
-	}
-
-	cancel, err := c.Build()
-	if err != nil {
-		return fmt.Errorf("build container: %w", err)
 	}
 
 	if nodeSvc != nil && capStore != nil {

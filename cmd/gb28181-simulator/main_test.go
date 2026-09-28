@@ -110,3 +110,29 @@ func TestApplyPlatformSection_ErrorsStaySecretFree(t *testing.T) {
 		t.Errorf("error leaks a configured password: %v", err)
 	}
 }
+
+// allow_no_auth=true lets a platform accept a downstream that registered
+// without a password; the resulting credential MUST carry the no-auth flag
+// so the AuthenticatorAdapter.Verify shortcut fires.
+func TestApplyPlatformSection_AllowNoAuthEmptyPasswordOK(t *testing.T) {
+	profile, err := model.NewNodeProfile("34020000002000000001", "127.0.0.1:15061", "3402000000", "acme")
+	if err != nil {
+		t.Fatalf("NewNodeProfile: %v", err)
+	}
+	accounts := credstore.New()
+	if _, err := applyPlatformSection(profile, &platformconfig.NodePlatformConfig{
+		AllowNoAuth: true,
+		Accounts: []platformconfig.NodePlatformAccount{
+			{Username: "34020000011310000001", Password: ""},
+		},
+	}, accounts); err != nil {
+		t.Fatalf("allow_no_auth with empty password: %v", err)
+	}
+	cred, ok := accounts.Lookup(profile.ID(), "34020000011310000001")
+	if !ok {
+		t.Fatal("credential not added to store")
+	}
+	if !cred.NoAuth() {
+		t.Fatal("stored credential does not carry the no-auth flag")
+	}
+}

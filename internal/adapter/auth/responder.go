@@ -154,10 +154,12 @@ func ParseAuthorization(value string) (Fields, error) {
 			}
 		}
 	}
-	if out.Username == "" || out.Realm == "" || out.Nonce == "" ||
-		out.URI == "" || out.Response == "" {
+	if out.Username == "" || out.Realm == "" || out.Nonce == "" || out.URI == "" {
 		return Fields{}, fmt.Errorf("%w: missing required parameter", ErrMalformedAuthorization)
 	}
+	// An empty Response is legal for no-auth / test-intranet registrations:
+	// the caller (AuthenticatorAdapter) is responsible for deciding whether
+	// to honour it based on the credential's NoAuth flag.
 	if out.Alg == "" {
 		out.Alg = "MD5"
 	}

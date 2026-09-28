@@ -292,3 +292,56 @@ func TestPortAdapters_ConcurrentAccessSafe(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// TestAuthenticatorAdapter_NoAuthEmptyResponse verifies the documented
+// no-auth contract: when cred.NoAuth() is true and the Authorization header
+// carries response="", the verifier skips the Digest check and returns nil.
+// A non-empty response on a no-auth credential still gets verified normally.
+func TestAuthenticatorAdapter_NoAuthEmptyResponse(t *testing.T) {
+	responder := NewResponder(nil)
+	adapter, err := NewAuthenticatorAdapter(responder)
+	if err != nil {
+		t.Fatalf("NewAuthenticatorAdapter: %v", err)
+	}
+
+	cred, err := model.NewCredentials("alice", "gb28181", "")
+	if err != nil {
+		t.Fatalf("NewCredentials: %v", err)
+	}
+	cred = cred.WithNoAuth()
+
+	// Empty response + no-auth cred → nil.
+	authHeader := `Digest username="alice", realm="gb28181", nonce="n", uri="sip:alice@example.com", response=""`
+	msg, err := model.NewRequest("REGISTER", "sip:alice@example.com",
+		[]model.Header{model.NewHeader("Authorization", authHeader)}, "")
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	if err := adapter.Verify(msg, cred); err != nil {
+		t.Errorf("Verify(no-auth, empty response) = %v, want nil", err)
+	}
+
+	// Non-empty response on a no-auth credential still flows through normal
+	// verification, which fails when the empty-password formula cannot match
+	// the digest the peer sent. This protects against a misconfigured node
+	// that accidentally sends a real Digest silently getting a 200.
+	authHeaderNonEmpty := `Digest username="alice", realm="gb28181", nonce="n", uri="sip:alice@example.com", response="deadbeef"`
+	msg2, err := model.NewRequest("REGISTER", "sip:alice@example.com",
+		[]model.Header{model.NewHeader("Authorization", authHeaderNonEmpty)}, "")
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	if err := adapter.Verify(msg2, cred); err == nil {
+		t.Error("Verify(no-auth, non-empty response) = nil, want error")
+	}
+
+	// And a regular (non-no-auth) credential with empty response must
+	// still be rejected, so no-auth cannot be silently opted-in.
+	regular, err := model.NewCredentials("alice", "gb28181", "password")
+	if err != nil {
+		t.Fatalf("NewCredentials: %v", err)
+	}
+	if err := adapter.Verify(msg, regular); err == nil {
+		t.Error("Verify(regular cred, empty response) = nil, want error")
+	}
+}

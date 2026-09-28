@@ -38,15 +38,38 @@ func NewAuthenticatorAdapter(r *Responder) (*AuthenticatorAdapter, error) {
 // from req (case-insensitive lookup) and delegates to the legacy Responder.
 // Missing or unparseable headers surface as ErrMalformedAuthorization, which
 // maps to port-level "credential parse error".
+//
+// When cred.NoAuth() is true the credential is in no-auth test/intranet mode
+// and the password comparison is skipped when the Authorization carries an
+// empty response (response=""). Any other parseable but non-empty response
+// still fails verification; a missing Authorization header is still treated
+// as malformed.
 func (a *AuthenticatorAdapter) Verify(req model.Message, cred model.Credentials) error {
 	h, ok := req.Header("Authorization")
 	if !ok {
 		return fmt.Errorf("%w: %w", port.ErrMalformedCredentials, ErrMalformedAuthorization)
 	}
 	stub := reqStub{method: req.Method(), auth: h.Value()}
-	// VerifyWithCredentials runs the Digest check and, when the header
-	// carries a security-info directive, the GB 35114 SM2 mutual-auth
-	// signature check against cred's public key.
+
+	// No-auth shortcut: skip Digest verification when the credential has
+	// explicitly opted in and the Authorization carries an empty response.
+	// This lets test/intranet nodes register without a password.
+	if cred.NoAuth() {
+		fields, err := ParseAuthorization(h.Value())
+		if err != nil {
+			// A parse failure is still a parse failure even in no-auth
+			// mode — the peer sent garbage.
+			return fmt.Errorf("%w: %w", port.ErrMalformedCredentials, err)
+		}
+		if fields.Response == "" {
+			// Empty response accepted in no-auth mode.
+			return nil
+		}
+		// Non-empty response: fall through to normal verification so a
+		// misconfigured node that accidentally sends a real Digest still
+		// gets 403 rather than 200.
+	}
+
 	err := a.responder.VerifyWithCredentials(stub, cred)
 	if err == nil {
 		return nil

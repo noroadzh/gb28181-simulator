@@ -21,12 +21,13 @@ import (
 // Config is the top-level configuration tree. Other internal packages should
 // accept this struct as a value so future fields are added centrally.
 type Config struct {
-	HTTP    HTTPConfig    `mapstructure:"http"`
-	Log     LogConfig     `mapstructure:"log"`
-	Storage StorageConfig `mapstructure:"storage"`
-	Tracing TracingConfig `mapstructure:"tracing"`
-	Nodes   []NodeConfig  `mapstructure:"nodes"`
-	Capture CaptureConfig `mapstructure:"capture"`
+	HTTP     HTTPConfig     `mapstructure:"http"`
+	Log      LogConfig      `mapstructure:"log"`
+	Storage  StorageConfig  `mapstructure:"storage"`
+	Tracing  TracingConfig  `mapstructure:"tracing"`
+	Nodes    []NodeConfig   `mapstructure:"nodes"`
+	Capture  CaptureConfig  `mapstructure:"capture"`
+	Scenario ScenarioConfig `mapstructure:"scenario"`
 }
 
 // NodeConfig is one entry of the optional `nodes:` list. Every field except
@@ -64,11 +65,16 @@ type NodePlatformConfig struct {
 	// Realm is a pointer so that "declared but blank" — a configuration
 	// mistake worth reporting — is distinguishable from "not declared",
 	// which simply means "use the node's home domain".
-	Realm    *string               `mapstructure:"realm"`
-	Accounts []NodePlatformAccount `mapstructure:"accounts"`
-	Min      uint32                `mapstructure:"min_expires"`
-	Default  uint32                `mapstructure:"default_expires"`
-	Max      uint32                `mapstructure:"max_expires"`
+	Realm *string `mapstructure:"realm"`
+	// AllowNoAuth opts this platform into accepting downstreams that
+	// register without a Digest password. Only suitable for trusted test
+	// or intranet deployments: any unauthenticated downstream can join
+	// and the platform skips the password compare on its side.
+	AllowNoAuth bool `mapstructure:"allow_no_auth"`
+	Accounts    []NodePlatformAccount `mapstructure:"accounts"`
+	Min         uint32                `mapstructure:"min_expires"`
+	Default     uint32                `mapstructure:"default_expires"`
+	Max         uint32                `mapstructure:"max_expires"`
 }
 
 // NodePlatformAccount is one account a platform accepts: a downstream's
@@ -95,6 +101,10 @@ type NodeRegistrationConfig struct {
 	Expires   uint32        `mapstructure:"expires"`
 	Timeout   time.Duration `mapstructure:"timeout"`
 	Transport string        `mapstructure:"transport"`
+	// AllowNoAuth allows a node to register with an empty password. This
+	// is only safe for test or fully-trusted environments: the upstream
+	// must also have allow_no_auth enabled or it will reject the node.
+	AllowNoAuth bool `mapstructure:"allow_no_auth"`
 
 	// How the node holds the registration open once it is online. All
 	// three are optional and fall back to the GB/T 28181 practice of a
@@ -131,6 +141,7 @@ func (c Config) ValidateNodes() error {
 				Expires:   r.Expires,
 				Timeout:   r.Timeout,
 				Transport: r.Transport,
+				AllowNoAuth: r.AllowNoAuth,
 
 				HeartbeatInterval:    r.HeartbeatInterval,
 				HeartbeatTimeout:     r.HeartbeatTimeout,
@@ -157,9 +168,10 @@ func validateNodePlatform(index int, p *NodePlatformConfig) error {
 		if strings.TrimSpace(acc.Username) == "" {
 			return fmt.Errorf("config: nodes[%d].platform.accounts[%d].username: empty username", index, j)
 		}
-		if acc.Password == "" {
+		if acc.Password == "" && !p.AllowNoAuth {
 			// Never echo the value: say which field is wrong, not what
-			// it holds.
+			// it holds. Skip the check when the operator has explicitly
+			// opted into the no-auth test/intranet mode.
 			return fmt.Errorf("config: nodes[%d].platform.accounts[%d].password: empty password", index, j)
 		}
 		if seen[acc.Username] {
@@ -222,6 +234,15 @@ type CaptureConfig struct {
 	// Capacity is the per-node ring size. 0 or negative falls back to the
 	// adapter default (2048).
 	Capacity int `mapstructure:"capacity"`
+}
+
+// ScenarioConfig configures the YAML scenario engine (Change 15). Dir is
+// optional: when empty the engine serves only the embedded example
+// packages; when set, every *.yaml package in the directory is loaded at
+// startup and merges over the built-ins by name (disk wins). Invalid disk
+// packages are skipped with a startup warning, never fatal.
+type ScenarioConfig struct {
+	Dir string `mapstructure:"dir"`
 }
 
 // Defaults returns a Config populated with safe defaults. Used when no file

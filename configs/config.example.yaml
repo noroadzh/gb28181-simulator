@@ -53,6 +53,12 @@ nodes:
       server_id: "34020000002000000001"  # optional; used in the Request-URI
       # username: "34020000011310000001" # optional; defaults to the node id
       password: "change-me"              # never logged (see log.redact_keys)
+      # allow_no_auth: true              # 设为 true 时 password 可为空，发送空 response
+    # 无密码模式示例（内网/测试）：
+    # registration:
+    #   server: "127.0.0.1:15061"
+    #   password: ""                    # 空密码
+    #   allow_no_auth: true             # 启用无密码模式
       expires: 3600                      # optional; seconds, default 3600
       transport: udp                     # optional; udp (default) or tcp
       timeout: 5s                        # optional; default 5s
@@ -84,6 +90,11 @@ nodes:
       min_expires: 60                    # optional; default 60
       default_expires: 3600              # optional; default 3600
       max_expires: 86400                 # optional; default 86400
+    # 无密码模式示例（内网/测试）：允许 password 为空，跳过 Digest 校验
+    # allow_no_auth: true
+    # accounts:
+    #   - username: "34020000011310000001"
+    #     password: ""
   # A platform-small is the link in the middle of a cascade: it declares both
   # halves, and each half is optional on its own. `platform:` is how it serves
   # the downstreams below it, exactly as a platform-large does;
