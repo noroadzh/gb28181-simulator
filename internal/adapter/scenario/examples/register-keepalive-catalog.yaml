@@ -1,0 +1,47 @@
+name: register-keepalive-catalog
+description: 注册-心跳-目录演练：创建设备与平台、启动、等待注册收敛并断言在线
+steps:
+  - type: create-node
+    description: 创建设备节点
+    timeout: 10
+    params:
+      id: "34020000001320000001"
+      addr: 127.0.0.1:15061
+      domain: "3402000000"
+      profile: device
+      registration:
+        server: 127.0.0.1:15060
+        server-id: "34020000002000000001"
+        password: "12345678"
+        expires: 3600
+  - type: create-node
+    description: 创建上级平台（UAS）并声明接受的设备账号
+    timeout: 10
+    params:
+      id: "34020000002000000001"
+      addr: 127.0.0.1:15060
+      domain: "3402000000"
+      profile: platform-large
+      platform:
+        accounts:
+          - username: "34020000001320000001"
+            password: "12345678"
+  - type: start-node
+    description: 启动上级平台监听
+    params:
+      id: "34020000002000000001"
+  - type: start-node
+    description: 启动设备节点并注册
+    params:
+      id: "34020000001320000001"
+  - type: wait
+    description: 等待注册与心跳收敛
+    timeout: 15
+    params:
+      seconds: 10
+  - type: expect
+    description: 断言设备已注册在线
+    params:
+      target: node.34020000001320000001.status
+      op: eq
+      value: online

@@ -1,0 +1,45 @@
+name: alarm-capture
+description: 报警-抓包演练：注册后触发一次报警并断言事件可见
+steps:
+  - type: create-node
+    description: 创建设备节点
+    timeout: 10
+    params:
+      id: "34020000001320000002"
+      addr: 127.0.0.1:5062
+      domain: "3402000000"
+      profile: device
+  - type: create-node
+    description: 创建上级平台（UAS）
+    timeout: 10
+    params:
+      id: "34020000002000000002"
+      addr: 127.0.0.1:5060
+      domain: "3402000000"
+      profile: platform-large
+  - type: start-node
+    description: 启动上级平台监听
+    params:
+      id: "34020000002000000002"
+  - type: start-node
+    description: 启动设备节点并注册
+    params:
+      id: "34020000001320000002"
+  - type: wait
+    description: 等待注册与心跳收敛
+    timeout: 5
+    params:
+      seconds: 5
+  - type: send-command
+    description: 触发设备报警
+    timeout: 10
+    params:
+      node: "34020000001320000002"
+      action: alarm
+  - type: expect
+    description: 断言报警事件已记录
+    timeout: 10
+    params:
+      target: node.34020000001320000002.alarms
+      op: contains
+      value: ""

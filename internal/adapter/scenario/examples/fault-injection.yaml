@@ -1,0 +1,58 @@
+name: fault-injection
+description: 故障注入演练：注册后注入错误应答故障、断言受影响并清除恢复
+steps:
+  - type: create-node
+    description: 创建设备节点
+    timeout: 10
+    params:
+      id: "34020000001320000003"
+      addr: 127.0.0.1:5063
+      domain: "3402000000"
+      profile: device
+  - type: create-node
+    description: 创建上级平台（UAS）
+    timeout: 10
+    params:
+      id: "34020000002000000003"
+      addr: 127.0.0.1:5060
+      domain: "3402000000"
+      profile: platform-large
+  - type: start-node
+    description: 启动上级平台监听
+    params:
+      id: "34020000002000000003"
+  - type: start-node
+    description: 启动设备节点并注册
+    params:
+      id: "34020000001320000003"
+  - type: wait
+    description: 等待注册与心跳收敛
+    timeout: 5
+    params:
+      seconds: 5
+  - type: inject-fault
+    description: 注入错误应答故障
+    timeout: 10
+    params:
+      node: "34020000001320000003"
+      profile: error-response
+  - type: expect
+    description: 断言设备处于故障或异常状态
+    timeout: 10
+    params:
+      target: node.34020000001320000003.status
+      op: contains
+      value: error
+  - type: inject-fault
+    description: 清除故障
+    timeout: 10
+    params:
+      node: "34020000001320000003"
+      clear: true
+  - type: expect
+    description: 断言设备恢复在线
+    timeout: 10
+    params:
+      target: node.34020000001320000003.status
+      op: eq
+      value: online
