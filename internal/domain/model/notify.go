@@ -28,6 +28,8 @@ const (
 	CmdTypeRecordInfo = "RecordInfo"
 	// CmdTypeAlarm is the alarm notify/ack command.
 	CmdTypeAlarm = "Alarm"
+	// CmdTypeMobilePosition is the mobile position notify command.
+	CmdTypeMobilePosition = "MobilePosition"
 	// CmdTypeConfigDownload is the config download command/ack.
 	CmdTypeConfigDownload = "ConfigDownload"
 	// CmdTypeDeviceControl is the device control (PTZ) command.

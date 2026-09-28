@@ -144,3 +144,81 @@ func (a AlarmSnapshot) EventTime() string { return a.eventTime }
 func (a AlarmSnapshot) String() string {
 	return fmt.Sprintf("AlarmSnapshot<id=%s device=%s priority=%d>", a.id, a.deviceID, a.priority)
 }
+
+// MobilePositionNotify is the wire shape of a MobilePosition notify: the
+// last-known geographic position of a mobile device, pushed to subscribers.
+type MobilePositionNotify struct {
+	cmdType   string
+	sn        uint32
+	deviceID  string
+	longitude float64
+	latitude  float64
+	speed     float64
+	time      string
+}
+
+// MobilePositionNotifyParams is the flat input for NewMobilePositionNotify.
+type MobilePositionNotifyParams struct {
+	SN        uint32
+	DeviceID  string
+	Longitude float64
+	Latitude  float64
+	Speed     float64
+	Time      string
+}
+
+// NewMobilePositionNotify builds a MobilePosition notify. The device id is
+// required; the coordinates are validated against the same WGS-84 ranges a
+// Position uses, so a body that could never be plotted is refused here
+// rather than after it crossed the wire.
+func NewMobilePositionNotify(p MobilePositionNotifyParams) (MobilePositionNotify, error) {
+	deviceID := strings.TrimSpace(p.DeviceID)
+	if deviceID == "" {
+		return MobilePositionNotify{}, fmt.Errorf("model: mobile position notify without a device id")
+	}
+	if p.Longitude < -180 || p.Longitude > 180 {
+		return MobilePositionNotify{}, fmt.Errorf("model: longitude %v out of [-180,180]", p.Longitude)
+	}
+	if p.Latitude < -90 || p.Latitude > 90 {
+		return MobilePositionNotify{}, fmt.Errorf("model: latitude %v out of [-90,90]", p.Latitude)
+	}
+	if p.Speed < 0 {
+		return MobilePositionNotify{}, fmt.Errorf("model: speed %v must be >= 0", p.Speed)
+	}
+	return MobilePositionNotify{
+		cmdType:   CmdTypeMobilePosition,
+		sn:        p.SN,
+		deviceID:  deviceID,
+		longitude: p.Longitude,
+		latitude:  p.Latitude,
+		speed:     p.Speed,
+		time:      strings.TrimSpace(p.Time),
+	}, nil
+}
+
+// CmdType returns the MANSCDP command type.
+func (m MobilePositionNotify) CmdType() string { return m.cmdType }
+
+// SN returns the notify sequence number.
+func (m MobilePositionNotify) SN() uint32 { return m.sn }
+
+// DeviceID returns the device id the position belongs to.
+func (m MobilePositionNotify) DeviceID() string { return m.deviceID }
+
+// Longitude returns the WGS-84 longitude in decimal degrees.
+func (m MobilePositionNotify) Longitude() float64 { return m.longitude }
+
+// Latitude returns the WGS-84 latitude in decimal degrees.
+func (m MobilePositionNotify) Latitude() float64 { return m.latitude }
+
+// Speed returns the movement speed in m/s.
+func (m MobilePositionNotify) Speed() float64 { return m.speed }
+
+// Time returns the position sample time (YYYY-MM-DDTHH:MM:SS).
+func (m MobilePositionNotify) Time() string { return m.time }
+
+// String renders a log-safe one-line summary.
+func (m MobilePositionNotify) String() string {
+	return fmt.Sprintf("MobilePositionNotify<device_id=%s lon=%v lat=%v speed=%v>",
+		m.deviceID, m.longitude, m.latitude, m.speed)
+}

@@ -66,6 +66,10 @@ type RegistrationParams struct {
 	HeartbeatTimeout     time.Duration
 	HeartbeatMaxFailures uint32
 	OptionsEnabled       bool
+	// AllowNoAuth opts this registration out of the password requirement,
+	// useful for test or intranet scenarios where the upstream also has
+	// its no-auth flag set.
+	AllowNoAuth bool
 }
 
 // NewRegistration validates params and returns the immutable Registration.
@@ -80,7 +84,7 @@ func NewRegistration(p RegistrationParams) (Registration, error) {
 	if _, _, err := net.SplitHostPort(server); err != nil {
 		return Registration{}, fmt.Errorf("model: registration server %q: %w", server, err)
 	}
-	if p.Password == "" {
+	if p.Password == "" && !p.AllowNoAuth {
 		return Registration{}, fmt.Errorf("model: registration for %s has no password", server)
 	}
 	if p.ServerID != "" {

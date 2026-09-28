@@ -33,6 +33,12 @@ type SIPTransport interface {
 	// ctx errors and translate them to their own retry/backoff policy.
 	Receive(ctx context.Context) (model.Message, string, error)
 
+	// LocalAddr reports the address the transport is bound to, in the form
+	// "host:port".  Outbound constructors (NOTIFY, MESSAGE from the platform
+	// side, etc.) need it to fill the Via header without having to maintain a
+	// parallel address field on the platform.
+	LocalAddr() string
+
 	// Close releases all underlying resources (sockets, goroutines).
 	// Idempotent; calling it twice MUST NOT panic.
 	Close() error

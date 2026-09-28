@@ -48,6 +48,21 @@ type ESReader interface {
 	Read(ctx context.Context) (model.ESFrame, error)
 }
 
+// ESFrameReader is an optional interface an Open'ed MediaSource reader may
+// implement when it can produce complete ES frames with container-derived
+// PTS (e.g. an mp4 demuxer). The method is named ReadFrame — not Read — so
+// it can coexist with io.ReadCloser on the same concrete type; MediaService
+// type-asserts Open's io.ReadCloser result to this interface and prefers it
+// over wrapping the byte stream in a StreamESReader, which would have to
+// synthesise PTS from FPS. The interface lives here — not in an adapter
+// package — so the app layer can assert without importing adapter code.
+type ESFrameReader interface {
+	// ReadFrame returns the next frame with its container PTS (90 kHz
+	// domain). End of a one-shot container is io.EOF; a looping source
+	// never ends.
+	ReadFrame(ctx context.Context) (model.ESFrame, error)
+}
+
 // ESWriteCloser extends ESReader with a write side for the reassembler path
 // (RTPDeizer → PSDepacketizer → file or callback).
 type ESWriteCloser interface {

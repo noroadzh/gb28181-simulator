@@ -45,7 +45,8 @@ func (f *fakeTransport) Receive(ctx context.Context) (model.Message, string, err
 	return m, fakePeer, nil
 }
 
-func (f *fakeTransport) Close() error { f.closed = true; return nil }
+func (f *fakeTransport) Close() error      { f.closed = true; return nil }
+func (f *fakeTransport) LocalAddr() string { return "127.0.0.1:5060" }
 
 // Compile-time check that fakeTransport satisfies SIPTransport.
 var _ SIPTransport = (*fakeTransport)(nil)

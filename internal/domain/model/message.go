@@ -128,6 +128,18 @@ func (m Message) Header(name string) (Header, bool) {
 // Body returns the verbatim message body.
 func (m Message) Body() string { return m.body }
 
+// CallID returns the value of the Call-ID header, or "" when the header is
+// missing. Provided as a convenience for callers that already have the
+// message in hand and would otherwise write the same two-line Header lookup
+// in every handler.
+func (m Message) CallID() string {
+	h, ok := m.Header("Call-ID")
+	if !ok {
+		return ""
+	}
+	return h.value
+}
+
 // IsRequest reports whether the message is a request (Method != "").
 func (m Message) IsRequest() bool { return m.method != "" }
 

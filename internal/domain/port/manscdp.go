@@ -44,6 +44,21 @@ type MANSCDPCodec interface {
 	// MarshalAlarmAck renders an Alarm acknowledgement.
 	MarshalAlarmAck(ack model.AlarmAck) (string, error)
 
+	// MarshalCatalogNotify renders a catalog subscription notification body,
+	// declaration included and terminated by a newline. The result is
+	// placed verbatim as a NOTIFY message body.
+	MarshalCatalogNotify(catalog model.Catalog) (string, error)
+
+	// MarshalAlarmNotify renders an Alarm notify body, declaration included
+	// and terminated by a newline. The result is placed verbatim as a
+	// NOTIFY message body.
+	MarshalAlarmNotify(n model.AlarmNotify) (string, error)
+
+	// MarshalMobilePositionNotify renders a MobilePosition notify body,
+	// declaration included and terminated by a newline. The result is
+	// placed verbatim as a NOTIFY message body.
+	MarshalMobilePositionNotify(mp model.MobilePositionNotify) (string, error)
+
 	// DecodePTZControl parses a DeviceControl (PTZ) command.
 	DecodePTZControl(body string) (model.PTZControl, error)
 
