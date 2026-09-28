@@ -16,7 +16,7 @@ LD_FLAGS = -s -w \
 
 BIN_DIR = bin
 
-.PHONY: web build run test lint fmt clean all release-matrix sip-test sip-smoke sipprobe-build service-build
+.PHONY: web build run test lint fmt clean all release-matrix sip-test sip-smoke sipprobe-build service-build smoke
 
 all: web build
 
@@ -60,6 +60,12 @@ lint:
 
 clean:
 	rm -rf $(BIN_DIR) web/node_modules internal/interface/webui/embed/dist/assets
+
+# Change: fix-problems-and-smoke-deploy-docs, task 2.2.
+# One-command smoke baseline: tests + vet + build + cross-compile + web build + e2e.
+# Writes docs/smoke-results.json; exits non-zero on first failed step.
+smoke:
+	bash scripts/smoke.sh
 
 # Cross-platform matrix used by CI; convenience for local reproduction.
 # Builds both cmd/gb28181-simulator and cmd/sipprobe per platform (Change 2 §7.4).

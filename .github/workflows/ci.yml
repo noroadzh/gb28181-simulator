@@ -95,3 +95,37 @@ jobs:
           if-no-files-found: error
 env:
   RUN_DATE: ${{ github.event.repository.updated_at }}
+
+  # Change: fix-problems-and-smoke-deploy-docs, task 4.1.
+  # One-command smoke baseline for the gb28181-simulator. Produces the
+  # docs/smoke-results.json artifact uploaded below and gates the release
+  # pipeline on a green run.
+  smoke:
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Run make smoke
+        run: bash scripts/smoke.sh
+      - name: Upload smoke report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-report
+          path: docs/smoke-results.json
+          if-no-files-found: warn
+      - name: Upload cross-platform binaries
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-binaries
+          path: build/
+          if-no-files-found: warn

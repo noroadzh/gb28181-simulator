@@ -1,0 +1,34 @@
+# .vscodeignore — VS Code / CodeBuddy workspace filtering.
+#
+# Purpose (Change: fix-problems-and-smoke-deploy-docs, task 1.1):
+# Keep the IDE "Problems" panel free of diagnostics that originate OUTSIDE
+# this repository. When contributors open stray Go files (e.g. /tmp scratch
+# files or modules from other projects), the Go language server enumerates
+# them into the Problems list, producing noise unrelated to this repo.
+# The globs below tell the workspace file-watcher to skip those paths so
+# only files that live under this repository are analyzed.
+#
+# Scope: this file only affects the IDE indexing surface. It does not change
+# `go build`, `go vet`, or the git working tree.
+
+# --- outside-of-repo scratch files opened by accident -------------------------
+/tmp/**
+/tmp/*.go
+/var/folders/**
+/private/tmp/**
+
+# --- other Go modules that share the developer's home directory --------------
+# e.g. ~/cate/{cascade_test.go,model.go} — a separate module opened next to
+# this workspace; not part of gb28181-simulator.
+ cate/**
+ cate/*.go
+/cate/**
+/cate/*.go
+
+# --- build & generated artifacts (never surface diagnostics for these) ------
+bin/**
+build/**
+web/node_modules/**
+web/dist/**
+docs/smoke-results.json
+docs/smoke-archive/**

@@ -1,0 +1,95 @@
+# gb28181-simulator Docker Compose — multi-node topology
+#
+# Change: fix-problems-and-smoke-deploy-docs, task 6.2.
+# Defines a 2-node minimal topology on a single host:
+#   - gbsim-platform : platform-large (receives registrations, INVITE upstream)
+#   - gbsim-device   : device (registers into gbsim-platform)
+# Both share a private network and persist config + logs via named volumes.
+#
+# Run:
+#   docker compose up -d
+#   docker compose ps
+#   docker compose logs -f gbsim-platform
+
+name: gb28181-simulator
+
+services:
+  # ─────────────── platform-large node ───────────────
+  gbsim-platform:
+    build:
+      context: .
+      args:
+        VERSION: compose-dev
+        COMMIT: compose-dev
+        BUILT_AT: compose-dev
+    image: gb28181-simulator:compose-dev
+    container_name: gbsim-platform
+    hostname: gbsim-platform
+    restart: unless-stopped
+    environment:
+      # Override individual config keys via GB28181_SIMULATOR_ env vars.
+      # The full list lives in internal/platform/config.
+      GB28181_SIMULATOR_NODE_ID: "34020000002000000001"
+      GB28181_SIMULATOR_NODE_ROLE: "platform-large"
+      GB28181_SIMULATOR_SIP_LISTEN: "0.0.0.0:5060"
+      GB28181_SIMULATOR_HTTP_LISTEN: "0.0.0.0:8080"
+    ports:
+      - "5060:5060/udp"   # SIP signalling
+      - "5060:5060/tcp"   # SIP over TCP (GB/T 28181 Annex D)
+      - "8080:8080/tcp"   # HTTP management + Web UI
+    volumes:
+      - platform-config:/etc/gb28181-simulator:ro
+      - platform-data:/var/lib/gb28181-simulator
+    networks:
+      - gbsim-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  # ─────────────── device node ───────────────
+  gbsim-device:
+    build:
+      context: .
+    image: gb28181-simulator:compose-dev
+    container_name: gbsim-device
+    hostname: gbsim-device
+    restart: unless-stopped
+    environment:
+      GB28181_SIMULATOR_NODE_ID: "34020000001310000001"
+      GB28181_SIMULATOR_NODE_ROLE: "device"
+      GB28181_SIMULATOR_SIP_LISTEN: "0.0.0.0:5060"
+      GB28181_SIMULATOR_HTTP_LISTEN: "0.0.0.0:8080"
+      # Where this device should register.
+      GB28181_SIMULATOR_SIP_UPSTREAM: "gbsim-platform:5060"
+    ports:
+      - "5061:5060/udp"   # host-side: device SIP mapped to 5061 to avoid clash
+      - "5061:5060/tcp"
+      - "8081:8080/tcp"   # host-side HTTP mapped to 8081
+    volumes:
+      - device-config:/etc/gb28181-simulator:ro
+      - device-data:/var/lib/gb28181-simulator
+    networks:
+      - gbsim-net
+    depends_on:
+      gbsim-platform:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+networks:
+  gbsim-net:
+    driver: bridge
+    name: gbsim-net
+
+volumes:
+  platform-config:
+  platform-data:
+  device-config:
+  device-data:

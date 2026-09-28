@@ -173,10 +173,17 @@ make sipprobe-build # 构建 bin/sipprobe
 make service-build  # 为宿主平台构建所有服务二进制
 make sip-test       # 快速反馈：仅 SIP / SDP / Digest（约 3-4 秒）
 make release-matrix # 5 平台二进制 + sha256，CGO_ENABLED=0
+make smoke          # 冒烟基线：单元测试 + 5 平台编译 + 前端构建 + e2e 探针
 ./scripts/smoke-sip.sh   # 双进程 probe 交互，显式端口控制
 ```
 
 `bin/gb28181-simulator sipprobe ...` 同样暴露诊断探针，因此单个二进制既能当模拟器也能当探针。
+
+### 测试与部署文档
+
+- [冒烟测试](docs/smoke-test.md) — 测试矩阵、本地/CI 执行、结果解读、失败排查
+- [Linux 单机部署](docs/deploy-linux.md) — systemd 安装、升级与回滚
+- [Docker Compose 部署](docs/deploy-docker-compose.md) — 多节点容器化部署
 
 仪表盘源码位于 `web/`；生产构建产物写入 `internal/interface/webui/embed/dist/`，并通过 `//go:embed` 内嵌进 Go 二进制。
 

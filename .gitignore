@@ -3,6 +3,11 @@ bin/
 dist/
 web/dist/
 out/
+build/
+
+# Smoke test outputs (Change: fix-problems-and-smoke-deploy-docs, task 2.3)
+docs/smoke-results.json
+docs/smoke-archive/
 
 # Go test/coverage
 *.test

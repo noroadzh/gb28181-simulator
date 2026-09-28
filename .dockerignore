@@ -1,0 +1,45 @@
+# .dockerignore — minimize Docker build context.
+#
+# Change: fix-problems-and-smoke-deploy-docs, task 6.1.
+# Anything here is excluded from the image build context, which speeds up
+# `docker build` and prevents local build artifacts from leaking into layers.
+
+# Build artifacts and caches
+bin/
+build/
+out/
+dist/
+coverage.out
+coverage.html
+
+# Frontend artifacts (rebuilt inside the builder stage)
+web/node_modules/
+web/dist/
+
+# Documentation and OpenSpec planning
+docs/
+openspec/
+*.md
+!README.md
+
+# Git and editor state
+.git/
+.gitignore
+.idea/
+.vscode/
+.vscodeignore
+
+# Local data
+*.log
+*.db
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
+# Smoke outputs
+docs/smoke-results.json
+docs/smoke-archive/
+
+# CodeBuddy project data
+.codebuddy/
