@@ -155,6 +155,8 @@ func (p *platformTransport) Receive(ctx context.Context) (model.Message, string,
 
 func (p *platformTransport) Close() error { return nil }
 
+func (p *platformTransport) LocalAddr() string { return "127.0.0.1:16000" }
+
 func (p *platformTransport) messages() []model.Message {
 	p.mu.Lock()
 	defer p.mu.Unlock()

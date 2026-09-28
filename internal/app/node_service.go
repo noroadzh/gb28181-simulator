@@ -653,6 +653,11 @@ func (s *NodeService) TriggerAlarm(ctx context.Context, id model.NodeID, in Alar
 	if wants && s.keepaliveCodec != nil {
 		_ = s.sendAlarmNotify(ctx, node, reg, snap)
 	}
+	// A served platform with alarm subscribers learns the alarm immediately;
+	// without subscribers this is a no-op (mirrors SetPosition).
+	if s.acceptor != nil {
+		s.acceptor.NotifyAlarm(ctx, id, snap)
+	}
 	s.log.Info("alarm snapshot recorded",
 		"node_id", id.String(),
 		"alarm_id", snap.ID(),
@@ -721,6 +726,11 @@ func (s *NodeService) SetPosition(ctx context.Context, id model.NodeID, pos mode
 	s.log.Info("position stored",
 		"node_id", id.String(),
 		"longitude", pos.Longitude(), "latitude", pos.Latitude(), "speed", pos.Speed())
+	// A served platform with mobileposition subscribers learns the new fix
+	// immediately; without subscribers this is a no-op.
+	if s.acceptor != nil {
+		s.acceptor.NotifyPositionChanged(ctx, id, pos)
+	}
 	return nil
 }
 

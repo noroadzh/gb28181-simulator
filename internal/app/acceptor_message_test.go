@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -20,14 +21,15 @@ import (
 // is what the assertions read. The body it renders is a readable stand-in —
 // the real bytes are the codec's own golden tests' business.
 type fakeMANSCDP struct {
-	mu          sync.Mutex
-	notify      model.Notify
-	decodeErr   error
-	bodies      []string
-	catalogs    []model.Catalog
-	marshalErr  error
-	recordQuery model.RecordInfoQuery
-	presetLists []model.PresetListResponse
+	mu              sync.Mutex
+	notify          model.Notify
+	decodeErr       error
+	bodies          []string
+	catalogs        []model.Catalog
+	mobilePositions []model.MobilePositionNotify
+	marshalErr      error
+	recordQuery     model.RecordInfoQuery
+	presetLists     []model.PresetListResponse
 }
 
 func newFakeMANSCDP() *fakeMANSCDP { return &fakeMANSCDP{} }
@@ -36,7 +38,43 @@ func (f *fakeMANSCDP) DecodeNotify(body string) (model.Notify, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.bodies = append(f.bodies, body)
-	return f.notify, f.decodeErr
+	// If the test pre-set a canned notify (via setNotify), return it.
+	// Otherwise, parse the body so tests that send raw XML don't break.
+	if f.notify.SN() != 0 || f.notify.DeviceID() != "" {
+		return f.notify, f.decodeErr
+	}
+	return parseNotifyFromXML(body)
+}
+
+// parseNotifyFromXML extracts CmdType, SN, and DeviceID from a MANSCDP XML
+// body without depending on the real codec. This lets tests that send raw XML
+// (e.g. the MediaStatus INFO test) exercise the handler without pre-seeding
+// setNotify.
+func parseNotifyFromXML(body string) (model.Notify, error) {
+	// Quick extraction using substring matching; sufficient for test fixtures.
+	getTag := func(xml, tag string) string {
+		start := strings.Index(xml, "<"+tag+">")
+		if start < 0 {
+			return ""
+		}
+		start += len("<" + tag + ">")
+		end := strings.Index(xml[start:], "</"+tag+">")
+		if end < 0 {
+			return ""
+		}
+		return xml[start : start+end]
+	}
+	cmdType := getTag(body, "CmdType")
+	snStr := getTag(body, "SN")
+	deviceID := getTag(body, "DeviceID")
+	status := getTag(body, "Status")
+
+	sn := uint32(0)
+	if snStr != "" {
+		n, _ := strconv.ParseUint(snStr, 10, 32)
+		sn = uint32(n)
+	}
+	return model.NewNotify(cmdType, deviceID, sn, status)
 }
 
 func (f *fakeMANSCDP) MarshalCatalog(catalog model.Catalog) (string, error) {
@@ -113,6 +151,35 @@ func (f *fakeMANSCDP) DecodeAlarmNotify(body string) (model.AlarmNotify, error) 
 
 func (f *fakeMANSCDP) MarshalAlarmAck(ack model.AlarmAck) (string, error) {
 	return "alarm-ack", nil
+}
+
+func (f *fakeMANSCDP) MarshalCatalogNotify(catalog model.Catalog) (string, error) {
+	return f.MarshalCatalog(catalog)
+}
+
+func (f *fakeMANSCDP) MarshalAlarmNotify(n model.AlarmNotify) (string, error) {
+	return "alarm-notify:" + n.DeviceID(), nil
+}
+
+func (f *fakeMANSCDP) MarshalMobilePositionNotify(mp model.MobilePositionNotify) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.mobilePositions = append(f.mobilePositions, mp)
+	if f.marshalErr != nil {
+		return "", f.marshalErr
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "mobile-position device=%s lon=%v lat=%v speed=%v",
+		mp.DeviceID(), mp.Longitude(), mp.Latitude(), mp.Speed())
+	return b.String(), nil
+}
+
+func (f *fakeMANSCDP) renderedMobilePositions() []model.MobilePositionNotify {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]model.MobilePositionNotify, len(f.mobilePositions))
+	copy(out, f.mobilePositions)
+	return out
 }
 
 func (f *fakeMANSCDP) DecodePTZControl(body string) (model.PTZControl, error) {

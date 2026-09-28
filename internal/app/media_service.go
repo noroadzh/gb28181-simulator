@@ -86,7 +86,28 @@ func (m *MediaService) OpenSource(ctx context.Context, cfg model.MediaConfig) (p
 		return nil, nil, fmt.Errorf("app: open source: %w", err)
 	}
 
-	return port.NewStreamESReader(rc, cfg), src, nil
+	return readerFor(rc, cfg), src, nil
+}
+
+// readerFor prefers a reader the source itself produced with container PTS
+// (an mp4 demuxer) over wrapping the raw byte stream in a StreamESReader,
+// which would have to synthesise PTS from FPS. The demuxer exposes
+// ReadFrame (to coexist with io.Reader on the same type); this bridges it
+// to the ESReader facade the pipeline consumes.
+func readerFor(rc io.ReadCloser, cfg model.MediaConfig) port.ESReader {
+	if fr, ok := rc.(port.ESFrameReader); ok {
+		return frameReaderES{fr: fr}
+	}
+	return port.NewStreamESReader(rc, cfg)
+}
+
+// frameReaderES adapts port.ESFrameReader to port.ESReader.
+type frameReaderES struct {
+	fr port.ESFrameReader
+}
+
+func (a frameReaderES) Read(ctx context.Context) (model.ESFrame, error) {
+	return a.fr.ReadFrame(ctx)
 }
 
 // InboundPipeline binds an RTPDeizer + PSDepacketizer + ESWriteCloser
@@ -197,7 +218,7 @@ func (m *MediaService) PacketizeOutbound(ctx context.Context, cfg model.MediaCon
 	}
 
 	p := &outboundPipeline{
-		reader: port.NewStreamESReader(rc, cfg),
+		reader: readerFor(rc, cfg),
 		ps:     psPktz,
 		rtp:    rtpPktz,
 		src:    src,

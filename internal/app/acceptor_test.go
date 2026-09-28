@@ -54,6 +54,8 @@ func (t *acceptorTransport) Close() error {
 	return nil
 }
 
+func (t *acceptorTransport) LocalAddr() string { return "127.0.0.1:15060" }
+
 func (t *acceptorTransport) delivered() []model.Message {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -63,21 +65,37 @@ func (t *acceptorTransport) delivered() []model.Message {
 }
 
 // deliver pushes a request in and waits for the acceptor to answer it.
+// Requests sent by the acceptor itself (NOTIFY and friends) are skipped so
+// the message handed back is always the response to the request under test.
 func (t *acceptorTransport) deliver(tb testing.TB, req model.Message) model.Message {
 	tb.Helper()
 	// Wait for a *new* answer: a previous one is still in the log, and
 	// returning it would make every assertion pass for the wrong reason.
-	before := t.answers()
+	before := len(t.responses())
 	t.inbound <- req
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if got := t.delivered(); len(got) > before {
+		if got := t.responses(); len(got) > before {
 			return got[len(got)-1]
 		}
 		time.Sleep(time.Millisecond)
 	}
 	tb.Fatal("timed out waiting for an answer")
 	return model.Message{}
+}
+
+// responses returns only the sent messages that are responses, i.e. those
+// without a method. A SIP request the platform originates (NOTIFY) carries
+// its method; a reply does not.
+func (t *acceptorTransport) responses() []model.Message {
+	all := t.delivered()
+	out := make([]model.Message, 0, len(all))
+	for _, m := range all {
+		if m.Method() == "" {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 func (t *acceptorTransport) answers() int { return len(t.delivered()) }

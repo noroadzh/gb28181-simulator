@@ -219,3 +219,79 @@ func TestFaultGate_UnsupportedMethod(t *testing.T) {
 		t.Fatalf("unsupported_method counter = %v, want 1", counters)
 	}
 }
+
+// TestFaultGate_Default405 asserts that a method with no fault profile gets a
+// 405 Method Not Allowed with an Allow header (task 6.1).
+func TestFaultGate_Default405(t *testing.T) {
+	auth := &fakeAuthenticator{}
+	fs, tr, _ := faultGateFixture(t, auth, model.FaultProfile{}) // no profile
+
+	req, err := model.NewRequest(
+		"FOO",
+		"sip:3402000000@3402000000",
+		[]model.Header{
+			model.NewHeader("From", "<sip:34020000011320000006@3402000000>;tag=y"),
+			model.NewHeader("To", "<sip:34020000002000000001@3402000000>"),
+			model.NewHeader("Call-ID", "call-foo"),
+			model.NewHeader("CSeq", "1 FOO"),
+			model.NewHeader("Via", "SIP/2.0/UDP 127.0.0.1:15060;branch=z9hG4bK-y"),
+		},
+		"",
+	)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+
+	resp := send(t, tr, req)
+	if resp.StatusCode() != 405 {
+		t.Fatalf("status = %d, want 405", resp.StatusCode())
+	}
+	allow := gateResponseHeader(t, resp, "Allow")
+	for _, m := range []string{"REGISTER", "MESSAGE", "INVITE", "ACK", "BYE", "OPTIONS", "SUBSCRIBE", "INFO"} {
+		if !strings.Contains(allow, m) {
+			t.Errorf("Allow header %q is missing %q", allow, m)
+		}
+	}
+	if !strings.Contains(allow, "INFO") {
+		t.Error("Allow header is missing INFO")
+	}
+	// No fault counter since the default path does not count as a fault.
+	if n := len(fs.FaultCounters(model.NodeID{})); n != 0 {
+		t.Errorf("fault counters = %v, want empty for default 405", fs.FaultCounters(model.NodeID{}))
+	}
+}
+
+// TestFaultGate_CannedOverridesUnsupportedMethod asserts that a canned response
+// for a specific method wins over the UnsupportedMethod status (task 6.1).
+func TestFaultGate_CannedOverridesUnsupportedMethod(t *testing.T) {
+	auth := &fakeAuthenticator{}
+	fs, tr, _ := faultGateFixture(t, auth, model.FaultProfile{
+		UnsupportedMethod: 501,
+		Canned:            map[string]int{"FOOBAR": 403},
+	})
+
+	req, err := model.NewRequest(
+		"FOOBAR",
+		"sip:3402000000@3402000000",
+		[]model.Header{
+			model.NewHeader("From", "<sip:34020000011320000007@3402000000>;tag=z"),
+			model.NewHeader("To", "<sip:34020000002000000001@3402000000>"),
+			model.NewHeader("Call-ID", "call-foobar-canned"),
+			model.NewHeader("CSeq", "1 FOOBAR"),
+			model.NewHeader("Via", "SIP/2.0/UDP 127.0.0.1:15060;branch=z9hG4bK-z"),
+		},
+		"",
+	)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+
+	resp := send(t, tr, req)
+	if resp.StatusCode() != 403 {
+		t.Fatalf("status = %d, want 403 (canned overrides UnsupportedMethod)", resp.StatusCode())
+	}
+	counters := fs.FaultCounters(mustPlatformNode(t))
+	if counters[model.FaultCannedResponse] != 1 {
+		t.Fatalf("canned_response counter = %v, want 1", counters)
+	}
+}

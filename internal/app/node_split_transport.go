@@ -271,7 +271,8 @@ func (s *splitTransport) UnregisterHandler(callID string) {
 // Close does not close the shared socket: the half did not bind it, and the
 // other half may still be using it. Ending the splitter is Close on the
 // splitTransport itself.
-func (h splitHalf) Close() error { return nil }
+func (h splitHalf) Close() error      { return nil }
+func (h splitHalf) LocalAddr() string { return h.split.tr.LocalAddr() }
 
 // RegisterTransaction is a convenience that registers a handler on the
 // underlying split transport for this half.
