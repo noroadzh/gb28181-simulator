@@ -83,6 +83,13 @@ func (c *MANSCDPCodecAdapter) MarshalCatalogNotify(catalog model.Catalog) (strin
 	return body, nil
 }
 
+// MarshalAlarmNotify renders an Alarm notify body, declaration included
+// and terminated by a newline. The result is placed verbatim as a NOTIFY
+// message body.
+func (c *MANSCDPCodecAdapter) MarshalAlarmNotify(n model.AlarmNotify) (string, error) {
+	return (*KeepaliveCodecAdapter)(c).MarshalAlarmNotify(n)
+}
+
 // xmlEscape replaces the five characters that must be escaped in XML.
 func xmlEscape(s string) string {
 	s = strings.ReplaceAll(s, "&", "&amp;")

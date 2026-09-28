@@ -20,8 +20,9 @@ type PortAdapter struct{}
 // NewPortAdapter builds the adapter.
 func NewPortAdapter() *PortAdapter { return &PortAdapter{} }
 
-// Subscribe requests a device to start sending catalog change notifications.
-func (*PortAdapter) Subscribe(ctx context.Context, deviceID, channelID string) (string, error) {
+// Subscribe requests a device to start sending event notifications for the
+// given event package.
+func (*PortAdapter) Subscribe(ctx context.Context, deviceID, channelID, event string) (string, error) {
 	return "", port.ErrSubscribeUnsupported
 }
 

@@ -2,6 +2,8 @@ package siptest_test
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -16,6 +18,29 @@ import (
 	"github.com/your-org/gb28181-simulator/internal/domain/port"
 	"github.com/your-org/gb28181-simulator/internal/platform/clock"
 )
+
+// testLogger returns a slog that writes through t.Log so the test output
+// captures acceptor warn/info lines during diagnostics.  Production tests
+// keep using discardLogger so noise does not leak. Debug is enabled because
+// NOTIFY and SUBSCRIBE paths log at debug.
+func testLogger(t *testing.T) *slog.Logger {
+	return slog.New(slog.NewTextHandler(&tWriter{t}, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
+}
+
+type tWriter struct{ t *testing.T }
+
+func (w *tWriter) Write(p []byte) (int, error) {
+	w.t.Helper()
+	w.t.Log(string(p))
+	return len(p), nil
+}
+
+// discardLogger remains the default for stable tests.
+func discardLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
 
 // platformService wires the real pieces of both identities over real
 // sockets: a device that registers and a platform that accepts it. Closing
@@ -70,7 +95,7 @@ func platformService(t *testing.T, ctx context.Context, accounts *credstore.Stor
 		t.Fatalf("challenger: %v", err)
 	}
 	acceptor, err := app.NewAcceptor(ctx, clock.Real(), challenger, authenticator,
-		accounts, devices, manscdp.NewMANSCDPCodec(), clock.RealTicker(), discardLogger())
+		accounts, devices, manscdp.NewMANSCDPCodec(), clock.RealTicker(), testLogger(t))
 	if err != nil {
 		t.Fatalf("NewAcceptor: %v", err)
 	}

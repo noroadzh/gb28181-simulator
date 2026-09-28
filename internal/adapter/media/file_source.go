@@ -19,13 +19,25 @@ func NewFileSource(config model.MediaConfig) *FileSource {
 	return &FileSource{config: config}
 }
 
-// Open opens the configured file for reading.
+// Open opens the configured file for reading. Container-sniffing happens
+// here: a file whose bytes 4..8 read "ftyp" is an mp4 and comes back as an
+// MP4Demuxer reader (Annex-B / ADTS frames with container PTS); everything
+// else is treated as a raw elementary stream, byte-identical to before.
 func (f *FileSource) Open(ctx context.Context) (io.ReadCloser, error) {
 	file, err := os.Open(f.config.Path)
 	if err != nil {
 		return nil, err
 	}
 	f.file = file
+	head := make([]byte, 8)
+	if n, _ := file.ReadAt(head, 0); n >= 8 && string(head[4:8]) == "ftyp" {
+		demuxer, err := NewMP4Demuxer(file)
+		if err != nil {
+			file.Close()
+			return nil, err
+		}
+		return &mp4ReadCloser{d: demuxer}, nil
+	}
 	return file, nil
 }
 

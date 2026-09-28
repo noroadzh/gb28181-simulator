@@ -51,6 +51,8 @@ func (f *fakeTransport) Close() error {
 	return nil
 }
 
+func (f *fakeTransport) LocalAddr() string { return f.addr }
+
 // fakeFactory binds addresses and can be told to refuse specific ones,
 // which is how a port collision is simulated.
 type fakeFactory struct {

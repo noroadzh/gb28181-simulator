@@ -19,8 +19,10 @@ type PortAdapter struct{}
 // NewPortAdapter builds the adapter.
 func NewPortAdapter() *PortAdapter { return &PortAdapter{} }
 
-// Play starts a playback session.
-func (*PortAdapter) Play(ctx context.Context, deviceID, channelID, startTime, endTime string) (string, error) {
+// Play starts a playback session. scale is the playback rate (1.0 normal,
+// 0 paused, negative reverse); the stub refuses every request, including
+// ones with an illegal rate (NaN / ±Inf).
+func (*PortAdapter) Play(ctx context.Context, deviceID, channelID, startTime, endTime string, scale float64) (string, error) {
 	return "", port.ErrPlaybackUnsupported
 }
 
@@ -32,4 +34,10 @@ func (*PortAdapter) Stop(ctx context.Context, sessionID string) error {
 // Query returns the current playback state.
 func (*PortAdapter) Query(ctx context.Context, sessionID string) (port.PlaybackState, error) {
 	return port.PlaybackState{}, port.ErrPlaybackUnsupported
+}
+
+// SetScale changes the playback rate of an existing session. The stub
+// refuses — there is no session to operate on.
+func (*PortAdapter) SetScale(ctx context.Context, sessionID string, scale float64) error {
+	return port.ErrPlaybackUnsupported
 }

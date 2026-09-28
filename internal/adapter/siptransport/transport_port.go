@@ -79,6 +79,14 @@ func (p *PortAdapter) Receive(ctx context.Context) (model.Message, string, error
 }
 
 // Close shuts the underlying transport down. Idempotent.
+// LocalAddr reports the transport's bound address.
+func (p *PortAdapter) LocalAddr() string {
+	if p == nil || p.inner == nil {
+		return ""
+	}
+	return p.inner.LocalAddr()
+}
+
 func (p *PortAdapter) Close() error {
 	if p == nil || p.inner == nil {
 		return nil

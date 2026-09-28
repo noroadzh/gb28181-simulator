@@ -3,8 +3,6 @@ package siptest_test
 import (
 	"context"
 	"encoding/hex"
-	"io"
-	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -30,12 +28,6 @@ const (
 	e2ePasswd  = "gb28181-secret"
 	e2eServer  = "34020000002000000001"
 )
-
-// discardLogger keeps the e2e output readable; the registration logs are
-// exercised by the app package's own tests.
-func discardLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
-}
 
 // freeAddr reserves a loopback UDP address and gives it straight back, so
 // a test can bind it deliberately.
