@@ -6,6 +6,7 @@ go 1.25.0
 // version pinned in .github/workflows/ci.yml to guarantee reproducibility.
 
 require (
+	github.com/abema/go-mp4 v1.7.3
 	github.com/emmansun/gmsm v0.44.1
 	github.com/ghettovoice/gosip v0.0.0-20260919124345-798b72cc95a2
 	github.com/google/gopacket v1.1.19
@@ -13,6 +14,7 @@ require (
 	github.com/labstack/echo/v4 v4.15.4
 	github.com/pion/sdp v1.3.0
 	github.com/spf13/viper v1.21.0
+	github.com/stretchr/testify v1.11.1
 	go.opentelemetry.io/otel v1.26.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.26.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.26.0
@@ -25,6 +27,7 @@ require (
 
 require (
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
+	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-logr/logr v1.4.1 // indirect
@@ -42,6 +45,7 @@ require (
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/sagikazarmark/locafero v0.11.0 // indirect
 	github.com/satori/go.uuid v1.2.1-0.20181028125025-b2ce2384e17b // indirect

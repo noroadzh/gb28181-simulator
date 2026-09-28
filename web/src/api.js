@@ -40,6 +40,19 @@ export const api = {
   clearFault (id) {
     return fetch(`${BASE}/v1/nodes/${encodeURIComponent(id)}/faults`, { method: 'DELETE' }).then(ok)
   },
+  listScenarios () {
+    return fetch(`${BASE}/v1/scenarios`).then(ok)
+  },
+  runScenario (name) {
+    return fetch(`${BASE}/v1/scenarios/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    }).then(ok)
+  },
+  getLastRun () {
+    return fetch(`${BASE}/v1/scenarios/last-run`).then(ok)
+  },
   queryCapture (id, limit = 50) {
     const u = new URL(`${BASE}/v1/nodes/${encodeURIComponent(id)}/capture`, location.href)
     u.searchParams.set('limit', String(limit))
