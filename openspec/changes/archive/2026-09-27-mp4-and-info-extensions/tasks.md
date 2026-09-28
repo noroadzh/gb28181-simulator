@@ -1,0 +1,58 @@
+# 任务
+
+## 1. 依赖与 mp4 基础设施
+
+- [x] 1.1 在 `go.mod` 加入 `github.com/abema/go-mp4`（纯 Go，无 CGO）。验证：`CGO_ENABLED=0 go build ./...` 退出码 0，`go.sum` 已更新
+- [x] 1.2 在 `internal/domain/port/media.go` 新增可选接口 `ESFrameReader`（`Read(ctx) (model.ESFrame, error)`，签名与 `ESReader` 相同），并补注释说明其用途与实现者。验证：`go build ./...` 通过；不改变既有 `ESReader` 行为
+
+## 2. MP4Demuxer
+
+- [x] 2.1 新建 `internal/adapter/media/mp4_demuxer.go`：实现 box 解析（ftyp/moov/trak/stbl/stsd/stts/stsc/stsz/stco/esds），提取视频轨 sample entry（`avc1`/`hvc1`）与音频轨（`mp4a`）。不实现 demux 主循环。验证：单测构造最小 box 结构并断言能正确解析出 track 信息；`go test ./internal/adapter/media/ -count=1 -run MP4Box` 通过
+- [x] 2.2 实现 sample 遍历与 Annex-B 转换：按 `stts/stsc/stsz/stco` 逐 sample 读原始字节；视频 NALU 从 4 字节长度前缀转为 `00 00 00 01` 起始码；AAC 从 esds 读 ASC 并生成 7 字节 ADTS 头。验证：golden test `TestMP4Demux_Golden`（testdata/minimal.mp4 或硬编码字节）：视频首字节 `0x00 0x00 0x00 0x01`、AAC 带 ADTS 头、PTS 为 90 kHz 预期值
+- [x] 2.3 实现 EOF 循环与错误处理：读到最后一个 sample 后重新从头开始；遇到不支持的编码（VP9、HE-AAC v2 等）返回清晰错误而非 panic。验证：单测覆盖循环语义与错误分支
+- [x] 2.4 `mp4_demuxer.go` 实现 `port.ESFrameReader`；同步实现 `io.ReadCloser`（供兼容性）。验证：类型断言编译期检查 `var _ port.ESFrameReader = (*MP4Demuxer)(nil)`
+
+## 3. FileSource 魔数嗅探
+
+- [x] 3.1 修改 `internal/adapter/media/file_source.go` 的 `Open`：读文件前 12 字节，offset 4 为 `ftyp` 时返回 `MP4Demuxer`；否则照旧返回底层文件 `io.ReadCloser`。验证：既有 `TestFileSource` 不受影响；新增测试打开一个伪 mp4 文件（硬编码 ftyp 字节）并断言返回的是 `*MP4Demuxer`
+- [x] 3.2 修改 `internal/app/media_service.go` 的 `OpenSource`：在 wrap `StreamESReader` 前对 reader 做 `ESFrameReader` 类型断言；命中则直接作为出站 ES 帧流使用。验证：单测覆盖 mp4（走 demuxer）与非 mp4（走 StreamESReader）两个分支；`go test ./internal/app/ -count=1 -run Media` 通过
+
+## 4. SUBSCRIBE 事件扩展
+
+- [x] 4.1 修改 `internal/domain/port/subscribe.go`：`Subscribe(ctx, deviceID, channelID, event string)`；`noopSubscribePort` 与 `internal/adapter/subscribe/stub.go` 同步更新签名。验证：`CGO_ENABLED=0 go build ./...` 通过
+- [x] 4.2 修改 `internal/app/acceptor.go` 的 `handleSubscribe`：事件白名单 `{catalog, alarm, mobileposition}`（大小写不敏感）；`catalogSub` 增加事件字段。验证：单测覆盖三个事件 200、未知事件 489、`Expires=0` 清除
+- [x] 4.3 泛化 `sendCatalogNotify` 为 `sendNotify(ctx, p, callID, peer, fromValue, event, body)`；`notifyCatalogChange` / 报警触发 / 位置变更调用点分别传入对应 event 并按订阅者 event 过滤。验证：单测覆盖 catalog 订阅者收到 catalog NOTIFY、alarm 订阅者收到 alarm NOTIFY，二者互不串扰
+
+## 5. alarm / mobileposition NOTIFY 链路
+
+- [x] 5.1 在 `internal/domain/model/dynamic.go` 新增 `MobilePositionNotify` 值对象（DeviceID/SN/Longitude/Latitude/Speed/Time），在 `internal/adapter/manscdp/` 新增 `MarshalMobilePositionNotify`（含 golden test：`<Notify><CmdType>MobilePosition</CmdType>...` 的字节级断言）。验证：`go test ./internal/adapter/manscdp/ -count=1 -run MobilePosition` 通过
+- [x] 5.2 在 `handleSubscribe` 实现初始 NOTIFY：alarm → 空体或最小 body；mobileposition → 携带节点 Profile `Position`（若已配置）。验证：e2e 测试（siptest，真实 socket 双端）：订阅 alarm → 收到空体 NOTIFY；订阅 mobileposition 且位置已配置 → 收到含坐标的 NOTIFY
+- [x] 5.3 报警触发推送：在 `handleAlarm`（MESSAGE 路径）后向所有 alarm 订阅者 NOTIFY；无订阅者时静默 + debug 日志。验证：e2e 测试触发 runtime API 报警后，alarm 订阅者收到 `CmdType=Alarm` 的 NOTIFY
+- [x] 5.4 位置更新推送：在 runtime API `SetPosition` 后向所有 mobileposition 订阅者 NOTIFY。验证：e2e 测试更新位置后，mobileposition 订阅者收到 `CmdType=MobilePosition` 的 NOTIFY 且坐标匹配
+
+## 6. 405 默认行为
+
+- [x] 6.1 在 `internal/app/acceptor.go` 的方法分发 default 分支：`faultUnsupported` 钩子优先（不命中时）改为回 `405 Method Not Allowed`，带 `Allow` 头（`REGISTER, MESSAGE, INVITE, ACK, BYE, OPTIONS, SUBSCRIBE, INFO`）。验证：单测覆盖无 fault 配置 → 405 + Allow；fault 配置 `UnsupportedMethod: 501` → 501；fault canned `FOO: 403` → 403
+- [x] 6.2 更新 INVITE/OPTIONS 响应的 `Allow` 头，把 `INFO` 加入统一集合（复用同一 slice 常量）。验证：单测断言 INVITE 200 OK 与 OPTIONS 200 OK 的 `Allow` 头包含 `INFO`
+- [x] 6.3 更新 `openspec/specs/exception-injection/spec.md`（在 verify-change 后的 sync 阶段执行；本任务为占位）。验证：validate --strict 通过
+- [x] 6.4 同步更新受影响测试：`internal/app` 的 `FaultGate` 相关单测、`internal/adapter/siptest` 的 `Exception` 端到端测试中"默认静默丢弃"的断言改为"默认回 405"。验证：`CGO_ENABLED=0 go test -race -count=1 ./...` 退出码 0
+
+## 7. INFO 方法与 MANSRTSP
+
+- [x] 7.1 新建 `internal/adapter/mansrtsp/` 包：实现 body 解析器（请求行 `PLAY`/`PAUSE`、`Scale`、`Range: npt=`、`CSeq`），返回结构化命令；非法 body 返回错误。验证：golden test `TestMANSRTSP_Parse_Golden` 字节级断言 `PLAY\r\nScale: 2.0\r\nRange: npt=3600-\r\n\r\n` → 字段；`PAUSE` 无附加头 → 默认值
+- [x] 7.2 扩展 `internal/domain/port/playback.go`：`Play` 新增 `scale float64` 参数；`PlaybackState` 新增 `Scale` 字段；stub adapter 同步更新。验证：`go build ./...` 通过；单测覆盖非法 scale（NaN/±Inf）返回 `ErrPlaybackUnsupported`
+- [x] 7.3 在 `internal/app/acceptor.go` 新增 `case "INFO"`：按 `Content-Type` 路由（MANSRTSP → playback port；MANSCDP+XML MediaStatus → 复用 `handleMediaStatus`；其他 → 200 OK + debug）。验证：单测覆盖三分支，包括未知 body 的宽容应答
+- [x] 7.4 修复 `handlePlaybackControl`（MESSAGE 路径）：在 playback port 存在时调用 `PlaybackPort.Play(scale=1.0)`，不再只回 200 OK。验证：单测断言 MESSAGE PlaybackControl 到达后 port 被调用（用 fake port 记录调用）
+- [x] 7.5 e2e 测试（siptest）：发送 INFO + MANSRTSP `PLAY Scale: 2.0 Range: npt=10-`，断言收到 200 OK 且 fake playback port 收到 `scale=2.0`；发送 INFO + MANSCDP MediaStatus，断言 media status port 被调用。验证：`CGO_ENABLED=0 go test -count=1 ./internal/adapter/siptest/ -run Info` 通过
+
+## 8. 回归与集成
+
+- [x] 8.1 运行全量套件。验证：`CGO_ENABLED=0 go test -race -count=1 ./...` 退出码 0
+- [x] 8.2 跨平台编译。验证：`CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build ./...`、`GOOS=darwin GOARCH=amd64`、`GOOS=windows GOARCH=amd64` 三条命令退出码均为 0
+- [x] 8.3 mp4 端到端（可选，若 fixture 可构造）：`FileSource` 打开 `testdata/minimal.mp4` → `MediaService.OpenSource` → `PS packetizer` → `RTP packetizer`，断言 RTP 时间戳递增且首包 SSRC 匹配。验证：`go test ./internal/app/ -count=1 -run MediaPipeline` 通过
+
+## 9. 验证与归档
+
+- [x] 9.1 运行 `openspec validate mp4-and-info-extensions --strict`。验证：validator 退出码 0 且无错误
+- [x] 9.2 运行 verify-change 校验产物，确认所有任务已完成。验证：验证输出中无未完成任务
+- [x] 9.3 归档该变更到 `openspec/changes/archive/2026-09-27-mp4-and-info-extensions/`，并同步 spec 到 `openspec/specs/`（media-sources、core-sip-stack、dynamic-catalog-alarm-and-playback、exception-injection 四个 capability）。验证：`openspec list` 不再显示该变更
