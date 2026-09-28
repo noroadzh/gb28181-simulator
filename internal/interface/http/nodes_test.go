@@ -332,7 +332,7 @@ func (f *fakeNodeView) SetChannelStatus(_ context.Context, id model.NodeID, chan
 
 func newNodesServer(t *testing.T, view httpapi.NodeView) *httptest.Server {
 	t.Helper()
-	s := httpapi.NewServer(platformconfig.Config{}, logging.NewHub(4), httpapi.Version{Version: "x"}, view)
+	s := httpapi.NewServer(platformconfig.Config{}, logging.NewHub(4), httpapi.Version{Version: "x"}, view, nil)
 	return httptest.NewServer(s.Echo())
 }
 

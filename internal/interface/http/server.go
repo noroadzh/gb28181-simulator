@@ -29,14 +29,15 @@ type Version struct {
 
 // Server is the composition root for all HTTP and WebSocket endpoints.
 type Server struct {
-	cfg   platformconfig.Config
-	hub   *logging.Hub
-	ver   Version
-	nodes NodeView
-	echo  *echo.Echo
-	http  *http.Server
-	log   *slog.Logger
-	lnErr error
+	cfg       platformconfig.Config
+	hub       *logging.Hub
+	ver       Version
+	nodes     NodeView
+	scenarios ScenarioRunner
+	echo      *echo.Echo
+	http      *http.Server
+	log       *slog.Logger
+	lnErr     error
 }
 
 var upgrader = websocket.Upgrader{
@@ -48,8 +49,10 @@ var upgrader = websocket.Upgrader{
 
 // NewServer returns a configured but not-yet-started Echo server. nodes may
 // be nil, in which case the /v1/nodes endpoints report an empty inventory
-// (the process was started without any configured node).
-func NewServer(cfg platformconfig.Config, hub *logging.Hub, ver Version, nodes NodeView) *Server {
+// (the process was started without any configured node). scenarios may be
+// nil, in which case the /v1/scenarios endpoints report 501 and preserve the
+// prior Change 14 placeholder behavior.
+func NewServer(cfg platformconfig.Config, hub *logging.Hub, ver Version, nodes NodeView, scenarios ScenarioRunner) *Server {
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
@@ -64,12 +67,13 @@ func NewServer(cfg platformconfig.Config, hub *logging.Hub, ver Version, nodes N
 	}))
 
 	s := &Server{
-		cfg:   cfg,
-		hub:   hub,
-		ver:   ver,
-		nodes: nodes,
-		echo:  e,
-		log:   slog.Default(),
+		cfg:       cfg,
+		hub:       hub,
+		ver:       ver,
+		nodes:     nodes,
+		scenarios: scenarios,
+		echo:      e,
+		log:       slog.Default(),
 	}
 	s.registerRoutes(e)
 	return s
@@ -108,9 +112,13 @@ func (s *Server) registerRoutes(e *echo.Echo) {
 	e.GET("/v1/nodes/:id/fault", s.handleGetFault)
 	e.DELETE("/v1/nodes/:id/fault", s.handleClearFault)
 
-	// Scenario placeholder (Change 14): the runner itself arrives with
-	// Change 15; until then the endpoint answers 501 with a pointer.
+	// Scenario engine endpoints (Change 15): list packages, run one
+	// synchronously, and read the most recent run report. With no runner
+	// wired (scenarios == nil) the handlers answer 501 like the Change 14
+	// placeholder did.
+	e.GET("/v1/scenarios", s.handleScenarioList)
 	e.POST("/v1/scenarios/run", s.handleScenarioRun)
+	e.GET("/v1/scenarios/last-run", s.handleScenarioLastRun)
 
 	// Capture endpoints (Change 13): per-node wire capture as JSON and as
 	// a downloadable pcap document. Queries never evict the buffer.
@@ -150,6 +158,12 @@ func (s *Server) handleVersion(c echo.Context) error {
 // Echo returns the underlying Echo instance for testing.
 func (s *Server) Echo() *echo.Echo {
 	return s.echo
+}
+
+// Hub returns the log hub so e2e tests can publish to the same hub the
+// WebSocket handler subscribes to (avoids DefaultHub() singletons in tests).
+func (s *Server) Hub() *logging.Hub {
+	return s.hub
 }
 
 // Run starts blocking HTTP serving on the configured address. It returns

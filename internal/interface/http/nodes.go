@@ -15,6 +15,17 @@ import (
 	"github.com/your-org/gb28181-simulator/internal/domain/port"
 )
 
+// nodeExists is a nil-safe helper that returns false when s.nodes is nil,
+// preventing nil pointer panics in handlers that are registered unconditionally
+// but may be exercised before the application wires up the node registry.
+func (s *Server) nodeExists(ctx context.Context, id model.NodeID) bool {
+	if s.nodes == nil {
+		return false
+	}
+	_, ok := s.nodes.Get(ctx, id)
+	return ok
+}
+
 // PositionInput is the payload for PUT /nodes/{id}/actions/position.
 // Longitude/latitude are WGS-84 decimal degrees, speed is m/s.
 type PositionInput struct {
@@ -437,7 +448,7 @@ func (s *Server) handleInstallFault(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, errorBody{Error: err.Error()})
 	}
 	ctx := c.Request().Context()
-	if _, ok := s.nodes.Get(ctx, id); !ok {
+	if !s.nodeExists(ctx, id) {
 		return c.JSON(http.StatusNotFound, errorBody{Error: "unknown node " + id.String()})
 	}
 	var p model.FaultProfile
@@ -461,7 +472,7 @@ func (s *Server) handleGetFault(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, errorBody{Error: err.Error()})
 	}
 	ctx := c.Request().Context()
-	if _, ok := s.nodes.Get(ctx, id); !ok {
+	if !s.nodeExists(ctx, id) {
 		return c.JSON(http.StatusNotFound, errorBody{Error: "unknown node " + id.String()})
 	}
 	profile, counters, ok := s.nodes.GetFault(ctx, id)
@@ -483,7 +494,7 @@ func (s *Server) handleClearFault(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, errorBody{Error: err.Error()})
 	}
 	ctx := c.Request().Context()
-	if _, ok := s.nodes.Get(ctx, id); !ok {
+	if !s.nodeExists(ctx, id) {
 		return c.JSON(http.StatusNotFound, errorBody{Error: "unknown node " + id.String()})
 	}
 	if err := s.nodes.ClearFault(ctx, id); err != nil {
@@ -512,7 +523,7 @@ func (s *Server) handleQueryCapture(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, errorBody{Error: err.Error()})
 	}
 	ctx := c.Request().Context()
-	if _, ok := s.nodes.Get(ctx, id); !ok {
+	if !s.nodeExists(ctx, id) {
 		return c.JSON(http.StatusNotFound, errorBody{Error: "unknown node " + id.String()})
 	}
 	limit := 0
@@ -553,7 +564,7 @@ func (s *Server) handleCapturePCAP(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, errorBody{Error: err.Error()})
 	}
 	ctx := c.Request().Context()
-	if _, ok := s.nodes.Get(ctx, id); !ok {
+	if !s.nodeExists(ctx, id) {
 		return c.JSON(http.StatusNotFound, errorBody{Error: "unknown node " + id.String()})
 	}
 	data, err := s.nodes.CapturePCAP(ctx, id)

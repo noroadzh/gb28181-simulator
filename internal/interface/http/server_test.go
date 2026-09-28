@@ -22,7 +22,7 @@ import (
 
 func TestNewServer_HealthAndVersion(t *testing.T) {
 	hub := logging.NewHub(4)
-	s := httpapi.NewServer(platformconfig.Config{HTTP: platformconfig.HTTPConfig{Host: "127.0.0.1", Port: 18080}}, hub, httpapi.Version{Version: "0.1.0-dev", Commit: "deadbeef"}, nil)
+	s := httpapi.NewServer(platformconfig.Config{HTTP: platformconfig.HTTPConfig{Host: "127.0.0.1", Port: 18080}}, hub, httpapi.Version{Version: "0.1.0-dev", Commit: "deadbeef"}, nil, nil)
 
 	ts := httptest.NewServer(s.Echo())
 	defer ts.Close()
@@ -65,7 +65,7 @@ func TestNewServer_HealthAndVersion(t *testing.T) {
 // TestNewServer_LegacyHealthz verifies the /healthz endpoint (legacy smoke test)
 func TestNewServer_LegacyHealthz(t *testing.T) {
 	hub := logging.NewHub(4)
-	s := httpapi.NewServer(platformconfig.Config{}, hub, httpapi.Version{Version: "x"}, nil)
+	s := httpapi.NewServer(platformconfig.Config{}, hub, httpapi.Version{Version: "x"}, nil, nil)
 
 	ts := httptest.NewServer(s.Echo())
 	defer ts.Close()
@@ -83,7 +83,7 @@ func TestNewServer_LegacyHealthz(t *testing.T) {
 // TestNewServer_LegacyMetrics verifies the /metrics endpoint (legacy smoke test)
 func TestNewServer_LegacyMetrics(t *testing.T) {
 	hub := logging.NewHub(4)
-	s := httpapi.NewServer(platformconfig.Config{}, hub, httpapi.Version{Version: "x"}, nil)
+	s := httpapi.NewServer(platformconfig.Config{}, hub, httpapi.Version{Version: "x"}, nil, nil)
 
 	ts := httptest.NewServer(s.Echo())
 	defer ts.Close()
@@ -103,7 +103,7 @@ func TestNewServer_LegacyMetrics(t *testing.T) {
 // fallback serves index.html for unknown routes, and that a known asset
 // returns the hashed file.
 func TestSpaHandler_ServesEmbeddedIndex(t *testing.T) {
-	s := httpapi.NewServer(platformconfig.Config{}, logging.NewHub(4), httpapi.Version{Version: "x"}, nil)
+	s := httpapi.NewServer(platformconfig.Config{}, logging.NewHub(4), httpapi.Version{Version: "x"}, nil, nil)
 	ts := httptest.NewServer(s.Echo())
 	defer ts.Close()
 
@@ -140,7 +140,7 @@ func TestWSHandler_LoggerPublishesToSubscriber(t *testing.T) {
 	}
 
 	hub := logging.DefaultHub()
-	s := httpapi.NewServer(platformconfig.Config{}, hub, httpapi.Version{Version: "x"}, nil)
+	s := httpapi.NewServer(platformconfig.Config{}, hub, httpapi.Version{Version: "x"}, nil, nil)
 	ts := httptest.NewServer(s.Echo())
 	defer ts.Close()
 
@@ -192,7 +192,7 @@ func TestWSHandler_LoggerPublishesToSubscriber(t *testing.T) {
 
 func TestServer_Shutdown(t *testing.T) {
 	hub := logging.NewHub(4)
-	s := httpapi.NewServer(platformconfig.Config{HTTP: platformconfig.HTTPConfig{Host: "127.0.0.1", Port: 0}}, hub, httpapi.Version{Version: "x"}, nil)
+	s := httpapi.NewServer(platformconfig.Config{HTTP: platformconfig.HTTPConfig{Host: "127.0.0.1", Port: 0}}, hub, httpapi.Version{Version: "x"}, nil, nil)
 	ts := httptest.NewServer(s.Echo())
 	defer ts.Close()
 	if err := s.Shutdown(context.Background()); err != nil {
@@ -202,7 +202,7 @@ func TestServer_Shutdown(t *testing.T) {
 
 func TestWSHandler_EchoShutdown(t *testing.T) {
 	hub := logging.NewHub(4)
-	s := httpapi.NewServer(platformconfig.Config{HTTP: platformconfig.HTTPConfig{Host: "127.0.0.1", Port: 0}}, hub, httpapi.Version{Version: "x"}, nil)
+	s := httpapi.NewServer(platformconfig.Config{HTTP: platformconfig.HTTPConfig{Host: "127.0.0.1", Port: 0}}, hub, httpapi.Version{Version: "x"}, nil, nil)
 	ts := httptest.NewServer(s.Echo())
 	defer ts.Close()
 
