@@ -98,7 +98,7 @@ nodes:
       transport: udp
       heartbeat_interval: 60s
       heartbeat_timeout: 5s
-
+```
 **无密码模式 device**（当上级 platform 也启用 `allow_no_auth: true` 时）：
 
 ```yaml
@@ -126,7 +126,6 @@ nodes:
       transport: udp
       heartbeat_interval: 60s
       heartbeat_timeout: 5s
-```
       heartbeat_max_failures: 3
 ```
 
