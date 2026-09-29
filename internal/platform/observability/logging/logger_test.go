@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -114,6 +115,44 @@ func TestMultiHandler_LevelFiltering(t *testing.T) {
 	}
 }
 
+// TestModuleLevelFiltering verifies that per-module level overrides take
+// precedence over the handler's default level, using the longest-prefix rule.
+func TestModuleLevelFiltering(t *testing.T) {
+	var buf bytes.Buffer
+	h := NewMultiHandlerWithModules(
+		slog.LevelInfo, // default: info
+		map[string]Level{
+			"internal/app":     LevelDebug,
+			"internal/app/sip": LevelTrace,
+		},
+		nil, false, nil, &nopCloser{&buf},
+	)
+	logger := slog.New(h)
+
+	// No component → default info. debug must be dropped.
+	logger.Debug("plain-debug")
+	// component=internal/app → debug. debug passes, trace does not.
+	logger.With("component", "internal/app").Debug("app-debug")
+	logger.With("component", "internal/app").Info("app-info")
+	// component=internal/app/sip → trace (longest prefix wins over
+	// internal/app's debug). trace passes.
+	logger.With("component", "internal/app/sip").Log(context.Background(), slogLevelTrace, "sip-trace")
+
+	out := buf.String()
+	if strings.Contains(out, "plain-debug") {
+		t.Fatalf("module-less debug must be filtered at default info: %s", out)
+	}
+	if !strings.Contains(out, "app-debug") {
+		t.Fatalf("internal/app debug must pass: %s", out)
+	}
+	if !strings.Contains(out, "app-info") {
+		t.Fatalf("internal/app info must pass: %s", out)
+	}
+	if !strings.Contains(out, "sip-trace") {
+		t.Fatalf("internal/app/sip trace must pass via longest-prefix match: %s", out)
+	}
+}
+
 func TestHub_FanoutDropsSlowSubscribers(t *testing.T) {
 	hub := NewHub(2)
 	fast := hub.Subscribe()
@@ -183,3 +222,62 @@ func decodeRecord(b []byte) (map[string]any, error) {
 }
 
 var _ = decodeRecord
+
+// TestUpdateLevels_Concurrent hammers the handler with parallel writers
+// and concurrent UpdateLevels calls to exercise the rwmu around
+// defaultLevel / moduleLevels. Race detector (go test -race) catches any
+// missed synchronisation.
+func TestUpdateLevels_Concurrent(t *testing.T) {
+	dir := t.TempDir()
+	if err := Init(Options{Level: LevelInfo, File: filepath.Join(dir, "upd.log")}); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	t.Cleanup(func() { _ = Shutdown(context.Background()); Reset() })
+
+	const (
+		writers = 4
+		updates = 50
+	)
+	var wg sync.WaitGroup
+	wg.Add(writers + updates)
+	for i := 0; i < writers; i++ {
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < 200; j++ {
+				L().Info("writer", slog.Int("id", id), slog.Int("seq", j))
+			}
+		}(i)
+	}
+	for i := 0; i < updates; i++ {
+		go func(i int) {
+			defer wg.Done()
+			level := LevelInfo
+			if i%2 == 0 {
+				level = LevelDebug
+			}
+			if err := UpdateLevels(level, map[string]Level{
+				"internal/app": level,
+			}); err != nil {
+				t.Errorf("UpdateLevels: %v", err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	if got := CurrentLevels().Default; got != LevelDebug && got != LevelInfo {
+		t.Fatalf("CurrentLevels.Default = %q, want Debug or Info", got)
+	}
+}
+
+// TestCurrentLevels_NoInit asserts that CurrentLevels is safe to call
+// before Init, returning LevelUnset. The HTTP PATCH handler depends on
+// this so a misbehaving caller cannot panic the server.
+func TestCurrentLevels_NoInit(t *testing.T) {
+	Reset()
+	got := CurrentLevels()
+	if got.Default != LevelUnset {
+		t.Fatalf("Default = %q, want LevelUnset", got.Default)
+	}
+	if got.Modules != nil {
+		t.Fatalf("Modules = %v, want nil", got.Modules)
+	}
+}

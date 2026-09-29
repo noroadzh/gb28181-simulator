@@ -48,8 +48,25 @@ func (l Level) ToSlog() slog.Level {
 	}
 }
 
+// LevelFromSlog converts a slog.Level back to its user-facing Level.
+func LevelFromSlog(s slog.Level) Level {
+	switch {
+	case s <= slogLevelTrace:
+		return LevelTrace
+	case s < slog.LevelInfo:
+		return LevelDebug
+	case s < slog.LevelWarn:
+		return LevelInfo
+	case s < slog.LevelError:
+		return LevelWarn
+	default:
+		return LevelError
+	}
+}
+
 // ParseLevel parses arbitrary string input into a Level. Empty / unknown
-// values fall back to info (matches slog default).
+// values fall back to info (matches slog default). Use IsValidLevel to
+// distinguish "user wrote info" from "user wrote something bogus".
 func ParseLevel(s string) Level {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case string(LevelTrace):
@@ -64,6 +81,35 @@ func ParseLevel(s string) Level {
 		return LevelError
 	default:
 		return LevelInfo
+	}
+}
+
+// IsValidLevel reports whether s parses to one of the five known levels.
+// An empty string is considered invalid; callers should treat empty as
+// "unset" and leave the corresponding value untouched.
+func IsValidLevel(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case string(LevelTrace), string(LevelDebug), string(LevelInfo), string(LevelWarn), string(LevelError):
+		return true
+	default:
+		return false
+	}
+}
+
+// LevelUnset is a sentinel returned by CurrentLevels when the user never
+// supplied a default level (e.g. handler called before Init).
+var LevelUnset = Level("")
+
+// String renders the canonical, lowercase name of the level. It is the
+// inverse of ParseLevel: callers that round-trip a Level through a string
+// (e.g. JSON responses) get the exact same five-token vocabulary users
+// configured in YAML.
+func (l Level) String() string {
+	switch l {
+	case LevelTrace, LevelDebug, LevelInfo, LevelWarn, LevelError:
+		return string(l)
+	default:
+		return string(LevelInfo)
 	}
 }
 

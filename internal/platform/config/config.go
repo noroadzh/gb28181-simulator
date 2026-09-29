@@ -210,10 +210,11 @@ func (h HTTPConfig) Addr() string {
 
 // LogConfig configures the logger package.
 type LogConfig struct {
-	Level      Level    `mapstructure:"level"`
-	File       string   `mapstructure:"file"`
-	AddSource  bool     `mapstructure:"add_source"`
-	RedactKeys []string `mapstructure:"redact_keys"`
+	Level      Level              `mapstructure:"level"`
+	File       string             `mapstructure:"file"`
+	AddSource  bool               `mapstructure:"add_source"`
+	RedactKeys []string           `mapstructure:"redact_keys"`
+	Modules    map[string]Level   `mapstructure:"modules"`
 }
 
 // Level is the user-facing log severity for the YAML layer. We re-use

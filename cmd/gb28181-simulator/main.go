@@ -208,15 +208,21 @@ func run() error {
 			return cfg, nil
 		}).
 		Provide(loggerKey, func() (any, error) {
+			modules := map[string]logging.Level{}
+			for path, lvl := range cfg.Log.Modules {
+				modules[path] = logging.ParseLevel(string(lvl))
+			}
 			if err := logging.Init(logging.Options{
 				Level:      logging.ParseLevel(string(cfg.Log.Level)),
 				File:       cfg.Log.File,
 				AddSource:  cfg.Log.AddSource,
 				RedactKeys: cfg.Log.RedactKeys,
+				Modules:    modules,
 			}); err != nil {
 				return nil, fmt.Errorf("logger init: %w", err)
 			}
-			logging.L().Info("logger initialized", "level", string(cfg.Log.Level))
+			logging.L().Info("logger initialized", "level", string(cfg.Log.Level),
+				"module_overrides", len(modules))
 			return logging.DefaultHub(), nil
 		}).
 		Provide(tracingKey, func() (any, error) {
@@ -252,7 +258,7 @@ func run() error {
 			// registry keeps in sync on every node join and leave. Both the
 			// registry (cycle check at registration) and the acceptor
 			// (outbound header injection) see the same handler.
-			cascadeHandler := cascade.New(nil)
+			cascadeHandler := cascade.New(nil, logging.L())
 			registry.WithCascadeHandler(cascadeHandler)
 			lifecycle := nodereg.NewLifecycle(registry, bindTransport)
 			svc, err := app.NewNodeService(registry, lifecycle, registry, bindTransport, clock.Real())
@@ -322,7 +328,7 @@ func run() error {
 
 			// Fault injection: one store shared by the acceptor (request
 			// gate) and the node service (HTTP fault API).
-			faults := app.NewFaultStore(registry)
+			faults := app.NewFaultStore(registry, logging.L())
 			acceptor.WithFaults(faults)
 			svc.WithFaults(faults)
 
@@ -450,7 +456,7 @@ func run() error {
 	// ring buffer store. With capture disabled the emitter stays the no-op
 	// it was initialised to, so behaviour is byte-identical.
 	if cfg.Capture.Enabled {
-		capStore = capture.NewWithCapacity(cfg.Capture.Capacity)
+		capStore = capture.NewWithCapacity(cfg.Capture.Capacity, logging.L())
 		audit.SetEmitter(capture.AuditBridge(capStore))
 		logging.L().Info("capture enabled", "capacity", cfg.Capture.Capacity)
 	}

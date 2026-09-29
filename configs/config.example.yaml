@@ -14,6 +14,17 @@ log:
   redact_keys:
     - password
     - authorization
+  # modules:              # optional per-module level overrides (longest prefix wins)
+  #   # production (level: info) — leave commented to inherit info
+  #   # "internal/app/sip_acceptor": warn
+  #   # "internal/adapter/cascade": warn
+  #   # "internal/adapter/capture": warn
+  #   # staging (level: debug) — set selectively for the noisy subsystems only
+  #   # "internal/app": debug
+  #   # "internal/adapter/cascade": debug
+  #   # "internal/adapter/capture": debug
+  #   # test (level: trace) — set a single subsystem to trace to keep the log readable
+  #   # "internal/app/sip_acceptor": trace
 
 storage:
   path: ""                # default: $XDG_STATE_HOME/.../data.db

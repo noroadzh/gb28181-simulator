@@ -2,6 +2,7 @@ package logging
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -45,7 +46,7 @@ func Init(opts Options) error {
 			return err
 		}
 	}
-	globalHandler = NewMultiHandler(opts.Level.ToSlog(), redact, opts.AddSource, globalHub, writer)
+	globalHandler = NewMultiHandlerWithModules(opts.Level.ToSlog(), opts.Modules, redact, opts.AddSource, globalHub, writer)
 	logger := slog.New(globalHandler)
 	slog.SetDefault(logger)
 	globalLogger.Store(logger)
@@ -70,6 +71,49 @@ func L() *slog.Logger {
 		return lg
 	}
 	return slog.Default()
+}
+
+// UpdateLevels replaces the handler's default level and module-level overrides
+// atomically. It is safe to call concurrently. Existing hub subscribers are
+// unaffected; file output picks up the new level on the next write.
+func UpdateLevels(defaultLevel Level, modules map[string]Level) error {
+	globalMu.Lock()
+	defer globalMu.Unlock()
+	if globalHandler == nil {
+		return fmt.Errorf("UpdateLevels: logger not initialised")
+	}
+	globalHandler.rwmu.Lock()
+	globalHandler.defaultLevel = defaultLevel
+	globalHandler.moduleLevels = cloneModules(modules)
+	globalHandler.rwmu.Unlock()
+	return nil
+}
+
+// Levels is a snapshot of the handler's effective configuration. Returned
+// by CurrentLevels so the HTTP PATCH handler can echo what landed in the
+// running process.
+type Levels struct {
+	Default Level
+	Modules map[string]Level
+}
+
+// CurrentLevels returns the handler's current default + module overrides.
+// If the logger has not been initialised the result carries LevelUnset and
+// a nil module map so callers can distinguish "no logger" from "logger
+// running with defaults".
+func CurrentLevels() Levels {
+	globalMu.Lock()
+	defer globalMu.Unlock()
+	if globalHandler == nil {
+		return Levels{Default: LevelUnset}
+	}
+	globalHandler.rwmu.RLock()
+	defer globalHandler.rwmu.RUnlock()
+	mods := make(map[string]Level, len(globalHandler.moduleLevels))
+	for k, v := range globalHandler.moduleLevels {
+		mods[k] = v
+	}
+	return Levels{Default: globalHandler.defaultLevel, Modules: mods}
 }
 
 // Shutdown drains pending file writes and closes the underlying file handle.

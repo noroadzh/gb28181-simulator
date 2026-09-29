@@ -27,61 +27,150 @@ type Options struct {
 	RedactKeys []string
 	// HubBufferSize tunes the per-subscriber buffer; defaults to 256.
 	HubBufferSize int
+	// Modules is an optional module-path → level override map. Records whose
+	// component/subsystem attributes match the longest configured prefix use
+	// that level; unmatched records fall back to Level. Empty by default.
+	Modules map[string]Level
 }
 
 // MultiHandler is a slog.Handler that fans out to a file sink and the global
 // Hub. Encoding is JSON for both sinks so the on-disk format and the
 // WebSocket payload stay byte-identical.
 type MultiHandler struct {
-	level      slog.Level
-	addSource  bool
-	redactKeys map[string]struct{}
-	hub        *Hub
-	writer     io.WriteCloser
-	mu         sync.Mutex
+	defaultLevel Level
+	moduleLevels map[string]Level
+	addSource   bool
+	redactKeys  map[string]struct{}
+	hub         *Hub
+	writer      io.WriteCloser
+
+	// rwmu protects moduleLevels / defaultLevel. Reads (the Enabled fast path)
+	// take a read lock; UpdateLevels / Init takes the write lock.
+	rwmu sync.RWMutex
 }
 
 // NewMultiHandler builds a handler with the given level, redact keys and
 // sinks. Either writer or hub may be nil to disable that sink (common during
 // tests).
 func NewMultiHandler(level slog.Level, redactKeys []string, addSource bool, hub *Hub, writer io.WriteCloser) *MultiHandler {
+	return NewMultiHandlerWithModules(level, nil, redactKeys, addSource, hub, writer)
+}
+
+// NewMultiHandlerWithModules is like NewMultiHandler but also accepts a
+// per-module level override map. Module keys are module paths (e.g.
+// "internal/app" or "internal/app/sip"); the longest matching prefix on the
+// record's component/subsystem attributes wins.
+func NewMultiHandlerWithModules(level slog.Level, modules map[string]Level, redactKeys []string, addSource bool, hub *Hub, writer io.WriteCloser) *MultiHandler {
 	redactSet := make(map[string]struct{}, len(redactKeys))
 	for _, k := range redactKeys {
 		redactSet[strings.ToLower(k)] = struct{}{}
 	}
+	cloned := cloneModules(modules)
 	return &MultiHandler{
-		level:      level,
-		addSource:  addSource,
-		redactKeys: redactSet,
-		hub:        hub,
-		writer:     writer,
+		defaultLevel: LevelFromSlog(level),
+		moduleLevels: cloned,
+		addSource:     addSource,
+		redactKeys:   redactSet,
+		hub:          hub,
+		writer:       writer,
 	}
 }
 
-// Enabled reports whether the handler will record at the supplied level.
-func (h *MultiHandler) Enabled(_ context.Context, l slog.Level) bool {
-	return l >= h.level
+func cloneModules(in map[string]Level) map[string]Level {
+	if len(in) == 0 {
+		return map[string]Level{}
+	}
+	out := make(map[string]Level, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+// Enabled reports whether the handler may produce a record at the supplied
+// level. We deliberately return true unconditionally here and do the actual
+// level gate inside Handle: per-module overrides depend on the record's
+// component attribute, which is not available until Handle runs.
+func (h *MultiHandler) Enabled(_ context.Context, _ slog.Level) bool { return true }
+
+// EffectiveLevel returns the level a record with the supplied attributes
+// would face. It is used by tests + by UpdateLevels callers that need to
+// reason about visibility. The lookup walks component first, then subsystem.
+func (h *MultiHandler) EffectiveLevel(attrs []slog.Attr) slog.Level {
+	h.rwmu.RLock()
+	defer h.rwmu.RUnlock()
+	best := ""
+	for _, a := range attrs {
+		if a.Key != "component" && a.Key != "subsystem" {
+			continue
+		}
+		v := a.Value.String()
+		if v == "" {
+			continue
+		}
+		if prefix, ok := longestPrefix(h.moduleLevels, v); ok {
+			if len(prefix) > len(best) {
+				best = prefix
+			}
+		}
+	}
+	if best == "" {
+		return h.defaultLevel.ToSlog()
+	}
+	return h.moduleLevels[best].ToSlog()
+}
+
+func longestPrefix(m map[string]Level, v string) (string, bool) {
+	best := ""
+	for k := range m {
+		if k == v || strings.HasPrefix(v, k+".") || strings.HasPrefix(v, k+":") {
+			if len(k) > len(best) {
+				best = k
+			}
+		}
+	}
+	return best, best != ""
 }
 
 // Handle is the central choke point for emitting a record. We render the
 // record once to a JSON buffer (with redaction), then push the bytes to
 // every sink.
 func (h *MultiHandler) Handle(ctx context.Context, r slog.Record) error {
+	// Per-record level gate. Enabled() uses only the default level so that
+	// records carrying their own component attribute can drop below it when
+	// module overrides are set. We read the level decision once here and
+	// short-circuit cheaply.
+	attrs := collectAttrs(r)
+	if r.Level < h.EffectiveLevel(attrs) {
+		return nil
+	}
 	payload, err := h.render(ctx, r)
 	if err != nil {
 		return err
 	}
 	if h.writer != nil {
-		h.mu.Lock()
+		h.rwmu.Lock()
 		if _, werr := h.writer.Write(append(payload, '\n')); werr != nil {
 			fmt.Fprintf(os.Stderr, "logger: file sink write failed: %v\n", werr)
 		}
-		h.mu.Unlock()
+		h.rwmu.Unlock()
 	}
 	if h.hub != nil {
 		h.hub.Publish(payload)
 	}
 	return nil
+}
+
+// collectAttrs gathers the record's explicit attrs plus its WithGroup / With
+// ancestry into a flat slice. slog does not expose the ancestry directly, so
+// we read the record's Attrs callback.
+func collectAttrs(r slog.Record) []slog.Attr {
+	out := make([]slog.Attr, 0, 8)
+	r.Attrs(func(a slog.Attr) bool {
+		out = append(out, a)
+		return true
+	})
+	return out
 }
 
 // render builds the JSON-encoded representation of the record with redacted
@@ -104,10 +193,14 @@ func (h *MultiHandler) render(ctx context.Context, r slog.Record) ([]byte, error
 	})
 	// Emit via a fresh JSON handler bound to scratch. We avoid `h.inner`'s
 	// internal buffer because it is shared across goroutines.
-	tmp := slog.NewJSONHandler(scratch, &slog.HandlerOptions{
-		Level:     h.level,
-		AddSource: h.addSource,
-	})
+	// The inner JSON handler runs at slogLevelTrace so the per-record gating
+// above (which already dropped records below the threshold) is the only gate.
+// Avoid letting the JSON handler re-filter at the default level, which
+// would silently drop module-override trace/debug records.
+tmp := slog.NewJSONHandler(scratch, &slog.HandlerOptions{
+	Level:     slogLevelTrace,
+	AddSource: h.addSource,
+})
 	if err := tmp.Handle(ctx, redacted); err != nil {
 		return nil, err
 	}
@@ -157,10 +250,56 @@ func scrubJSON(in []byte, keys map[string]struct{}) []byte {
 	return in
 }
 
-// WithAttrs / WithGroup return the same handler. The package consumers do not
-// use these today; keeping identity is simpler than maintaining attr ancestry.
-func (h *MultiHandler) WithAttrs(_ []slog.Attr) slog.Handler { return h }
-func (h *MultiHandler) WithGroup(_ string) slog.Handler      { return h }
+// WithAttrs returns a derived handler that carries the extra attributes. The
+// attributes must survive into Handle so module-level filtering can read the
+// `component` / `subsystem` keys that call sites attach with With.
+//
+// A single shared pointer cannot hold per-logger attributes, so we return a
+// shallow copy that shares the sinks and the level state through the parent
+// pointer. Only the immutable attr slice differs.
+func (h *MultiHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	if len(attrs) == 0 {
+		return h
+	}
+	derived := &derivedHandler{parent: h, attrs: append([]slog.Attr(nil), attrs...)}
+	return derived
+}
+
+func (h *MultiHandler) WithGroup(_ string) slog.Handler { return h }
+
+// derivedHandler is the handler slog uses for `logger.With(...)`. It carries
+// the accumulated attributes and delegates everything else to the parent so
+// that level changes and sink teardown stay visible to derived loggers.
+type derivedHandler struct {
+	parent *MultiHandler
+	attrs  []slog.Attr
+}
+
+func (d *derivedHandler) Enabled(ctx context.Context, l slog.Level) bool {
+	return d.parent.Enabled(ctx, l)
+}
+
+func (d *derivedHandler) Handle(ctx context.Context, r slog.Record) error {
+	// Splice the accumulated With-attrs in front of the record's own attrs so
+	// both module matching and JSON rendering see the full set.
+	cloned := r.Clone()
+	for _, a := range d.attrs {
+		cloned.AddAttrs(a)
+	}
+	return d.parent.Handle(ctx, cloned)
+}
+
+func (d *derivedHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	if len(attrs) == 0 {
+		return d
+	}
+	merged := make([]slog.Attr, 0, len(d.attrs)+len(attrs))
+	merged = append(merged, d.attrs...)
+	merged = append(merged, attrs...)
+	return &derivedHandler{parent: d.parent, attrs: merged}
+}
+
+func (d *derivedHandler) WithGroup(string) slog.Handler { return d }
 
 // Close releases the underlying file sink if any.
 func (h *MultiHandler) Close() error {
