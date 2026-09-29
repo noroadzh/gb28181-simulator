@@ -33,8 +33,10 @@ node_modules/
 .npm/
 
 # CodeBuddy project data
-.codebuddy/*
-!.codebuddy/agents/
+.codebuddy/
+
+# OpenSpec workspace (local-only)
+openspec/
 
 # Built binary
 /gb28181-simulator
