@@ -29,7 +29,7 @@ func faultNodeID(id string) model.NodeID {
 func TestFaultStore_InstallUnknownNodeRejected(t *testing.T) {
 	t.Parallel()
 	reg := &fakeNodeRegistry{nodes: map[model.NodeID]bool{}}
-	s := NewFaultStore(reg)
+	s := NewFaultStore(reg, nil)
 	err := s.Install(context.Background(), faultNodeID("34020000001320000001"), model.FaultProfile{})
 	if !errors.Is(err, model.ErrUnknownNode) {
 		t.Fatalf("Install(unknown) = %v, want ErrUnknownNode", err)
@@ -40,7 +40,7 @@ func TestFaultStore_InstallInvalidProfileRejected(t *testing.T) {
 	t.Parallel()
 	id := faultNodeID("34020000001320000001")
 	reg := &fakeNodeRegistry{nodes: map[model.NodeID]bool{id: true}}
-	s := NewFaultStore(reg)
+	s := NewFaultStore(reg, nil)
 	err := s.Install(context.Background(), id, model.FaultProfile{Canned: map[string]int{"invite": 200}})
 	if err == nil {
 		t.Fatal("Install(invalid profile) = nil, want validation error")
@@ -54,7 +54,7 @@ func TestFaultStore_InstallGetClear(t *testing.T) {
 	t.Parallel()
 	id := faultNodeID("34020000001320000001")
 	reg := &fakeNodeRegistry{nodes: map[model.NodeID]bool{id: true}}
-	s := NewFaultStore(reg)
+	s := NewFaultStore(reg, nil)
 	ctx := context.Background()
 
 	// default: no profile
@@ -94,7 +94,7 @@ func TestFaultStore_InstallResetsCounters(t *testing.T) {
 	t.Parallel()
 	id := faultNodeID("34020000001320000001")
 	reg := &fakeNodeRegistry{nodes: map[model.NodeID]bool{id: true}}
-	s := NewFaultStore(reg)
+	s := NewFaultStore(reg, nil)
 	ctx := context.Background()
 
 	if err := s.Install(ctx, id, model.FaultProfile{Canned: map[string]int{"REGISTER": 403}}); err != nil {
@@ -116,7 +116,7 @@ func TestFaultStore_InstallResetsCounters(t *testing.T) {
 func TestFaultStore_RecordAndCounters(t *testing.T) {
 	t.Parallel()
 	id := faultNodeID("34020000001320000001")
-	s := NewFaultStore(&fakeNodeRegistry{nodes: map[model.NodeID]bool{id: true}})
+	s := NewFaultStore(&fakeNodeRegistry{nodes: map[model.NodeID]bool{id: true}}, nil)
 	s.Record(id, model.FaultDrop)
 	s.Record(id, model.FaultDrop)
 	s.Record(id, model.FaultBlackhole)

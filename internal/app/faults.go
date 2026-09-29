@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
@@ -30,16 +31,24 @@ type FaultStoreAdapter struct {
 	// is a typo, not a feature, so Install rejects it.
 	registry nodeGetter
 
+	log *slog.Logger
+
 	mu       sync.RWMutex
 	profiles map[model.NodeID]model.FaultProfile
 	counters map[model.NodeID]map[model.FaultAction]uint64
 }
 
 // NewFaultStore builds an empty fault store bound to a node-existence
-// checker. Pass the app's node registry in production.
-func NewFaultStore(registry nodeGetter) *FaultStoreAdapter {
+// checker. Pass the app's node registry in production. The logger is
+// decorated with the "fault_store" subsystem tag so MultiHandler can apply
+// per-module overrides without forcing every caller to thread attrs.
+func NewFaultStore(registry nodeGetter, log *slog.Logger) *FaultStoreAdapter {
+	if log == nil {
+		log = slog.Default()
+	}
 	return &FaultStoreAdapter{
 		registry: registry,
+		log:      log.With("component", "internal/app", "subsystem", "fault_store"),
 		profiles: make(map[model.NodeID]model.FaultProfile),
 		counters: make(map[model.NodeID]map[model.FaultAction]uint64),
 	}
@@ -50,15 +59,23 @@ func NewFaultStore(registry nodeGetter) *FaultStoreAdapter {
 // counters because the old profile's numbers belong to the old behaviour.
 func (s *FaultStoreAdapter) Install(ctx context.Context, nodeID model.NodeID, profile model.FaultProfile) error {
 	if err := profile.Validate(); err != nil {
+		s.log.Debug("fault install rejected: invalid profile",
+			"node_id", nodeID,
+			"err", err)
 		return fmt.Errorf("app: install fault on %s: %w", nodeID, err)
 	}
 	if _, ok := s.registry.Get(ctx, nodeID); !ok {
+		s.log.Debug("fault install rejected: unknown node",
+			"node_id", nodeID)
 		return fmt.Errorf("app: install fault on %s: %w", nodeID, model.ErrUnknownNode)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.profiles[nodeID] = profile
 	delete(s.counters, nodeID)
+	s.log.Debug("fault installed",
+		"node_id", nodeID,
+		"profile", profile)
 	return nil
 }
 
@@ -69,6 +86,7 @@ func (s *FaultStoreAdapter) Clear(_ context.Context, nodeID model.NodeID) error 
 	defer s.mu.Unlock()
 	delete(s.profiles, nodeID)
 	delete(s.counters, nodeID)
+	s.log.Debug("fault cleared", "node_id", nodeID)
 	return nil
 }
 
@@ -86,6 +104,8 @@ func (s *FaultStoreAdapter) Get(_ context.Context, nodeID model.NodeID) (model.F
 
 // Record bumps the per-node counter for an action that actually fired. The
 // acceptor gate calls this on every canned/delay/drop/blackhole outcome.
+// The hot-loop counter is not logged per call; callers emit aggregate
+// snapshots via the API when they need to inspect it.
 func (s *FaultStoreAdapter) Record(nodeID model.NodeID, action model.FaultAction) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

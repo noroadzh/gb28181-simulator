@@ -106,7 +106,7 @@ func TestRegistry_Register_RejectsSelfChild(t *testing.T) {
 // so the same Forward degrades to a direct send.
 func TestRegistry_CascadeTopologyHotSwap(t *testing.T) {
 	ctx := context.Background()
-	h := cascade.New(nil)
+	h := cascade.New(nil, nil)
 	reg := nodereg.New()
 	reg.WithCascadeHandler(h)
 

@@ -253,7 +253,7 @@ func NewAcceptor(
 		devices:       devices,
 		manscdp:       manscdp,
 		newTicker:     newTicker,
-		log:           log,
+		log:           log.With("component", "internal/app", "subsystem", "sip_acceptor"),
 		serving:       make(map[string]*platform),
 		pipelines:     make(map[string]*InboundPipeline),
 	}, nil
@@ -837,6 +837,8 @@ func (a *Acceptor) handleInvite(
 	req model.Message,
 	_ string,
 ) (model.Message, error) {
+	a.log.Debug("INVITE received",
+		"node_id", p.id.String(), "call_id", headerValue(req, "Call-ID"))
 	callID := headerValue(req, "Call-ID")
 	if callID == "" {
 		return buildResponse(400, "Bad Request", req, nil, "")
@@ -906,6 +908,8 @@ func (a *Acceptor) handleAck(
 	req model.Message,
 	_ string,
 ) {
+	a.log.Debug("ACK received",
+		"node_id", p.id.String(), "call_id", headerValue(req, "Call-ID"))
 	callID := headerValue(req, "Call-ID")
 	if callID == "" || a.dialogs == nil {
 		return
@@ -928,6 +932,8 @@ func (a *Acceptor) handleBye(
 	req model.Message,
 	_ string,
 ) (model.Message, error) {
+	a.log.Debug("BYE received",
+		"node_id", p.id.String(), "call_id", headerValue(req, "Call-ID"))
 	callID := headerValue(req, "Call-ID")
 	if callID != "" && a.dialogs != nil {
 		a.dialogs.Terminate(callID)
@@ -1556,6 +1562,8 @@ func (a *Acceptor) handleMediaStatus(
 			"node_id", p.id.String(), "error", err.Error())
 		return model.Message{}, false
 	}
+	a.log.Debug("media-status received", "node_id", p.id.String(),
+		"device_id", notify.DeviceID(), "sn", notify.SN(), "status", notify.Status())
 	return resp, true
 }
 
@@ -1571,7 +1579,10 @@ func (a *Acceptor) handlePlaybackControl(
 		// PlaybackControl detail is carried in the MANSCDP body; the notify
 		// gives us the device id, sn and a status hint. Real command fields
 		// are extracted by the adapter when needed.
-		a.log.Debug("playback control notify (port absent)",
+		a.log.Debug("playback control received",
+			"node_id", p.id.String(), "device_id", notify.DeviceID(), "sn", notify.SN())
+	} else {
+		a.log.Warn("playback control notify dropped: playback port not configured",
 			"node_id", p.id.String(), "device_id", notify.DeviceID())
 	}
 	resp, err := buildResponse(200, "OK", req, nil, "")
@@ -1632,6 +1643,8 @@ func (a *Acceptor) handleDeviceInfo(
 			"node_id", p.id.String(), "error", err.Error())
 		return model.Message{}, false
 	}
+	a.log.Debug("device-info query answered", "node_id", p.id.String(),
+		"device_id", notify.DeviceID(), "sn", notify.SN(), "items", len(info.Items))
 	return resp, true
 }
 
@@ -1701,6 +1714,8 @@ func (a *Acceptor) handleRecordInfo(
 			"node_id", p.id.String(), "error", err.Error())
 		return model.Message{}, false
 	}
+	a.log.Debug("record-info query answered", "node_id", p.id.String(),
+		"device_id", notify.DeviceID(), "sn", notify.SN(), "count", len(items))
 	return resp, true
 }
 
@@ -1791,6 +1806,8 @@ func (a *Acceptor) handleHomePosition(
 		if err != nil {
 			return model.Message{}, false
 		}
+		a.log.Debug("home-position query answered", "node_id", p.id.String(),
+			"device_id", notify.DeviceID(), "sn", notify.SN())
 		return resp, true
 	}
 	// Otherwise treat it as a set command.

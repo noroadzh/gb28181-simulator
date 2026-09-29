@@ -576,7 +576,7 @@ func TestKeeper_FaultGateBlackholesKeepalive(t *testing.T) {
 	keeper, tick, cat, lc, id := keeperFixture(t, tr, clock, reg, 3600)
 	defer keeper.Stop(id)
 
-	faults := NewFaultStore(cat)
+	faults := NewFaultStore(cat, nil)
 	if err := faults.Install(context.Background(), id, model.FaultProfile{
 		Blackhole: []string{"MESSAGE"},
 	}); err != nil {

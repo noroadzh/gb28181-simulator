@@ -114,7 +114,7 @@ func (s *NodeService) WithLogger(l *slog.Logger) (*NodeService, error) {
 	if l == nil {
 		return nil, fmt.Errorf("app: NodeService requires a non-nil logger")
 	}
-	s.log = l
+	s.log = l.With("component", "internal/app", "subsystem", "node_service")
 	return s, nil
 }
 

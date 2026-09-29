@@ -94,7 +94,7 @@ func NewRegistrar(authorizer port.Authorizer, clock port.Clock, log *slog.Logger
 	return &Registrar{
 		authorizer: authorizer,
 		clock:      clock,
-		log:        log,
+		log:        log.With("component", "internal/app", "subsystem", "device_registrar"),
 		newCallID:  randomCallID,
 	}, nil
 }

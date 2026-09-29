@@ -75,7 +75,7 @@ func exceptionService(t *testing.T, ctx context.Context, accounts *credstore.Sto
 	if _, err := svc.WithAcceptor(acceptor); err != nil {
 		t.Fatalf("WithAcceptor: %v", err)
 	}
-	faults := app.NewFaultStore(registry)
+	faults := app.NewFaultStore(registry, nil)
 	acceptor.WithFaults(faults)
 	if _, err := svc.WithFaults(faults); err != nil {
 		t.Fatalf("WithFaults: %v", err)
@@ -99,7 +99,7 @@ func TestExceptionAndCaptureE2E(t *testing.T) {
 	defer stop()
 	_ = acceptor
 
-	store := capture.New()
+	store := capture.New(nil)
 	audit.SetEmitter(capture.AuditBridge(store))
 	defer audit.SetEmitter(nil)
 

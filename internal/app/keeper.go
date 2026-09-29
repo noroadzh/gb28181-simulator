@@ -180,7 +180,7 @@ func NewKeeper(
 		codec:     codec,
 		clock:     clock,
 		newTicker: newTicker,
-		log:       log,
+		log:       log.With("component", "internal/app", "subsystem", "keepalive_keeper"),
 		running:   make(map[string]*session),
 	}, nil
 }

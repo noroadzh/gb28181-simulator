@@ -31,7 +31,7 @@ func faultGateFixture(
 	}
 
 	reg := &fakeNodeRegistry{nodes: map[model.NodeID]bool{platformID: true}}
-	fs := NewFaultStore(reg)
+	fs := NewFaultStore(reg, nil)
 	if !profile.IsZero() {
 		if err := fs.Install(context.Background(), platformID, profile); err != nil {
 			t.Fatalf("Install: %v", err)
