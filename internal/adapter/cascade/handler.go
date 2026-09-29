@@ -8,6 +8,7 @@ package cascade
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 
@@ -66,13 +67,23 @@ func (t *TopologyMap) Children(node string) []string { return t.children[node] }
 type Handler struct {
 	mu   sync.RWMutex
 	topo Topology
+
+	log *slog.Logger
 }
 
 // New returns a Handler operating on topo. A nil topo is accepted (every
 // lookup falls back to "no parent, no children"), which lets a caller wire
-// the handler before the topology is known.
-func New(topo Topology) *Handler {
-	return &Handler{topo: topo}
+// the handler before the topology is known. The logger is decorated with
+// the cascade subsystem tag so MultiHandler can apply per-module overrides
+// without forcing every caller to thread attrs.
+func New(topo Topology, log *slog.Logger) *Handler {
+	if log == nil {
+		log = slog.Default()
+	}
+	return &Handler{
+		topo: topo,
+		log:  log.With("component", "internal/adapter/cascade", "subsystem", "cascade_handler"),
+	}
 }
 
 // WithTopology returns the handler after replacing its topology view. This
@@ -113,11 +124,19 @@ func (h *Handler) Forward(fromNodeID model.NodeID, msg model.Message, dstDeviceI
 
 	route, err := model.RouteFromHeaders(msg.Headers())
 	if err != nil {
+		h.log.Debug("cascade: parse route headers failed",
+			"node_id", self,
+			"dst", dstDeviceID,
+			"err", err)
 		return "", nil, false, fmt.Errorf("cascade: parse headers on %s: %w", msg, err)
 	}
 	route.FromDeviceID = self
 
 	if route.ContainsRoute(self) {
+		h.log.Debug("cascade: loop detected",
+			"node_id", self,
+			"dst", dstDeviceID,
+			"route", model.FormatRoutePath(route.RoutePath))
 		return "", nil, false, fmt.Errorf(
 			"cascade: loop detected: node %s is already on route %s",
 			self, model.FormatRoutePath(route.RoutePath))
@@ -163,9 +182,17 @@ func (h *Handler) Forward(fromNodeID model.NodeID, msg model.Message, dstDeviceI
 
 	if next == "" {
 		// No cascade knowledge applies: send unchanged, no headers.
+		h.log.Debug("cascade: no hop matched; forwarding unchanged",
+			"node_id", self,
+			"dst", dstDeviceID)
 		return dstDeviceID, nil, false, nil
 	}
 
+	h.log.Debug("cascade: next hop selected",
+		"node_id", self,
+		"dst", dstDeviceID,
+		"next", next,
+		"route", model.FormatRoutePath(routeAfterPop.AppendRoute(self).RoutePath))
 	return next, routeAfterPop.AppendRoute(self).Headers(), false, nil
 }
 

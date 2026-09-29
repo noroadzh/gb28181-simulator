@@ -70,7 +70,7 @@ func mustMessage(t *testing.T) model.Message {
 // sees one fewer hop in X-RoutePath.
 func TestThreeNodeMultiHop(t *testing.T) {
 	ctx := context.Background()
-	h := cascade.New(nil)
+	h := cascade.New(nil, nil)
 	reg := nodereg.New()
 	reg.WithCascadeHandler(h)
 

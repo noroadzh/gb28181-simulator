@@ -105,7 +105,7 @@ func TestHandler_Forward_Child(t *testing.T) {
 	smallWithChildren, _ := pSmall.WithCascadeChildren([]string{device})
 
 	m := NewTopologyMap([]model.NodeProfile{pLarge, smallWithChildren, pDevice})
-	h := New(m)
+	h := New(m, nil)
 
 	msg := newMsg(t, nil)
 	next, hdrs, _, err := h.Forward(mustNodeID(t, small), msg, device)
@@ -140,7 +140,7 @@ func TestHandler_Forward_Upstream(t *testing.T) {
 	pDevice, _ := model.NewNodeProfile(device, "10.0.0.3:5060", large, "device")
 
 	m := NewTopologyMap([]model.NodeProfile{pLarge, pSmallWithParent, pDevice})
-	h := New(m)
+	h := New(m, nil)
 
 	msg := newMsg(t, nil)
 	next, hdrs, _, err := h.Forward(mustNodeID(t, small), msg, remote)
@@ -159,7 +159,7 @@ func TestHandler_Forward_Upstream(t *testing.T) {
 // handler is constructed with a nil Topology, Forward returns dstDeviceID
 // unchanged with no headers.
 func TestHandler_Forward_NilTopology(t *testing.T) {
-	h := New(nil)
+	h := New(nil, nil)
 	msg := newMsg(t, nil)
 	next, hdrs, _, err := h.Forward(mustNodeID(t, "34020000012160000001"), msg, "34020000011310000001")
 	if err != nil {
@@ -187,7 +187,7 @@ func TestHandler_Forward_LoopDetected(t *testing.T) {
 	pDevice, _ := model.NewNodeProfile(device, "10.0.0.3:5060", large, "device")
 
 	m := NewTopologyMap([]model.NodeProfile{pLarge, smallWithParent, pDevice})
-	h := New(m)
+	h := New(m, nil)
 
 	msg := newMsg(t, []model.Header{
 		model.NewHeader(model.HeaderRoutePath, small+","+large),
@@ -215,7 +215,7 @@ func TestHandler_Forward_HeaderPropagation(t *testing.T) {
 	pDevice, _ := model.NewNodeProfile(device, "10.0.0.3:5060", large, "device")
 
 	m := NewTopologyMap([]model.NodeProfile{pLarge, pSmallWithChildren, pDevice})
-	h := New(m)
+	h := New(m, nil)
 
 	msg := newMsg(t, []model.Header{
 		model.NewHeader(model.HeaderPreferredPath, "34020000002220000002,34020000003330000003"),
@@ -260,7 +260,7 @@ func TestHandler_Forward_PreferredPathRouting(t *testing.T) {
 	pDevice, _ := model.NewNodeProfile(device, "10.0.0.3:5060", large, "device")
 
 	topo := NewTopologyMap([]model.NodeProfile{pLarge, smallWithParent, pDevice})
-	h := New(topo)
+	h := New(topo, nil)
 
 	// PreferredPath first entry is the parent of 'small'; it is a direct
 	// neighbour so Forward must route there and consume the entry.
@@ -307,7 +307,7 @@ func TestHandler_WithTopology(t *testing.T) {
 	pDevice, _ := model.NewNodeProfile(device, "10.0.0.3:5060", large, "device")
 	smallWithChildren, _ := pSmall.WithCascadeChildren([]string{device})
 
-	h := New(nil)
+	h := New(nil, nil)
 	_, _, _, err := h.Forward(mustNodeID(t, small), newMsg(t, nil), device)
 	if err != nil {
 		// With nil topo, Forward falls back to no-op (not error); confirm it does.

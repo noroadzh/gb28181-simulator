@@ -23,7 +23,7 @@ func newStore(t *testing.T, cap int) port.CaptureStore {
 	if cap <= 0 {
 		cap = 8
 	}
-	return NewWithCapacity(cap)
+	return NewWithCapacity(cap, nil)
 }
 
 // evt is a test helper that builds a port.CaptureEvent with the given

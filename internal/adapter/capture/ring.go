@@ -5,6 +5,7 @@ package capture
 import (
 	"bytes"
 	"encoding/binary"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -16,21 +17,40 @@ import (
 )
 
 // New returns a ready-to-use CaptureStore.
-func New() port.CaptureStore { return &store{defaultCap: 2048} }
+func New(log *slog.Logger) port.CaptureStore {
+	return &store{defaultCap: 2048, log: withTag(log)}
+}
 
 // NewWithCapacity is a test seam: override the ring capacity (small values
 // are useful for eviction tests).
-func NewWithCapacity(cap int) port.CaptureStore {
+func NewWithCapacity(cap int, log *slog.Logger) port.CaptureStore {
 	if cap <= 0 {
 		cap = 2048
 	}
-	return &store{defaultCap: cap}
+	return &store{defaultCap: cap, log: withTag(log)}
 }
 
 type store struct {
 	defaultCap int
 	mu         sync.RWMutex
 	nodes      map[string]*ring
+	// log is only used on cold paths (Subscribe, PCAP synthesis). The
+	// Append fan-out loop stays silent by contract: the ring dropping an
+	// event is the documented behaviour, not an error worth a log record.
+	// Logging there would allocate per dropped event and flood the ring.
+	// log is set in the constructors and never mutated afterwards, so the
+	// unsynchronised read in the cold paths is safe.
+	log *slog.Logger
+}
+
+// withTag returns log decorated with the capture subsystem tag, or the
+// default logger when log is nil. A nil fallback keeps every test that
+// passes nil working without an extra nil check at each call site.
+func withTag(log *slog.Logger) *slog.Logger {
+	if log == nil {
+		log = slog.Default()
+	}
+	return log.With("component", "internal/adapter/capture", "subsystem", "capture_store")
 }
 
 type ring struct {
@@ -149,9 +169,16 @@ func (s *store) Subscribe(nodeID string) (<-chan port.CaptureEvent, func()) {
 	}
 	ch := make(chan port.CaptureEvent, buf)
 	r.mu.Lock()
+	subscriberCount := len(r.subBufs) + 1
 	r.subBufs[ch] = buf
 	canceled := false
 	r.mu.Unlock()
+	if subscriberCount > 1 {
+		s.log.Debug("capture subscriber added",
+			"node_id", nodeID,
+			"subscriber_count", subscriberCount,
+			"buffer_size", buf)
+	}
 	cancel := func() {
 		r.mu.Lock()
 		defer r.mu.Unlock()
@@ -170,13 +197,27 @@ func (s *store) PCAP(nodeID string) ([]byte, error) {
 	r, ok := s.nodes[nodeID]
 	s.mu.RUnlock()
 	if !ok || r == nil {
+		s.log.Debug("capture pcap requested for unknown node",
+			"node_id", nodeID)
 		return nil, nil
 	}
 	r.mu.Lock()
 	n := r.count
 	r.mu.Unlock()
 	events := s.Query(nodeID, n)
-	return encodePCAP(events)
+	data, err := encodePCAP(events)
+	if err != nil {
+		s.log.Debug("capture pcap encoding failed",
+			"node_id", nodeID,
+			"event_count", n,
+			"err", err)
+		return nil, err
+	}
+	s.log.Debug("capture pcap synthesised",
+		"node_id", nodeID,
+		"event_count", n,
+		"bytes", len(data))
+	return data, nil
 }
 
 func encodePCAP(events []port.CaptureEvent) ([]byte, error) {
