@@ -85,6 +85,11 @@ func (s *Server) registerRoutes(e *echo.Echo) {
 	e.GET("/v1/version", s.handleVersion)
 	e.GET("/v1/logs/stream", WSHandler(s.hub))
 
+	// Runtime log configuration (Change: enhance-logging-coverage). Updates
+	// the in-memory default + module levels without persisting to disk; a
+	// process restart reverts to file.conf.
+	e.PATCH("/v1/config/log", s.handlePatchLogConfig)
+
 	// Node inventory and per-node control (Change 4). These are registered
 	// unconditionally: with no nodes they simply report an empty list.
 	e.GET("/v1/nodes", s.handleNodeList)
