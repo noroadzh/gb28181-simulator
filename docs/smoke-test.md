@@ -26,7 +26,7 @@
 - 全部单元测试（带 `-race`）通过
 - 跨 5 个平台（Linux amd64/arm64、macOS amd64/arm64、Windows amd64）成功产出二进制
 - 前端 `npm ci + npm run build` 成功且产物落 `web/dist/`
-- 二进制（或同等 HTTP server）能响应 `/healthz`、`/v1/version`、`/v1/nodes/<id>/faults`、`/v1/logs/stream` 四个端点
+- 二进制（或同等 HTTP server）能响应 `/healthz`、`/v1/version`、`/v1/nodes/<id>/faults`、`/v1/logs/stream`、`PATCH /v1/config/log` 五个端点
 
 ---
 
@@ -246,3 +246,44 @@ cp docs/smoke-results.json docs/smoke-archive/smoke-${TS}.json
 | `.github/workflows/ci.yml` (`smoke` job) | CI 集成 |
 | `docs/smoke-results.json` | 当前运行结果（gitignore） |
 | `docs/smoke-archive/` | 历史报告归档（gitignore） |
+
+---
+
+## 7. 运行时日志级别热更新（PATCH /v1/config/log）
+
+端点支持运维无需重启进程即可调整全局默认级别与按 `component/subsystem` 划分的模块级别（最长前缀匹配）。改动仅作用于内存；重启后会回退到 `log.level` 与 `log.modules` 配置值。
+
+### 7.1 curl 示例
+
+```bash
+# 把全局默认降到 debug，并把 SIP 接入层提到 trace
+curl -X PATCH http://127.0.0.1:18080/v1/config/log \
+  -H 'Content-Type: application/json' \
+  -d '{"level":"debug","modules":{"internal/app/sip_acceptor":"trace"}}'
+
+# 响应示例：回显落地的有效级别
+# {"level":"debug","modules":{"internal/app/sip_acceptor":"trace"}}
+
+# 只调节某一个模块（默认级别不动）
+curl -X PATCH http://127.0.0.1:18080/v1/config/log \
+  -H 'Content-Type: application/json' \
+  -d '{"modules":{"internal/adapter/cascade":"warn"}}'
+```
+
+### 7.2 冒烟用例
+
+| 场景 | 请求体 | 期望状态码 | 期望响应 |
+|---|---|---|---|
+| 正常：只调默认级别 | `{"level":"debug"}` | 200 | `{"level":"debug","modules":{...}}` |
+| 正常：只调模块级别 | `{"modules":{"internal/app":"trace"}}` | 200 | `level="info"`（默认不变） |
+| 正常：同时调两级 | `{"level":"warn","modules":{"internal/adapter/cascade":"debug"}}` | 200 | 两者都回显 |
+| 异常：空 body | `{}` | 400 | `{"error":"request must include ... "}` |
+| 异常：未知级别 | `{"level":"verbose"}` | 400 | `{"error":"invalid level ..."}` |
+| 异常：模块级别未知 | `{"modules":{"internal/app":"notice"}}` | 400 | `{"error":"invalid level for module ..."}` |
+| 异常：JSON 损坏 | `not json` | 400 | `{"error":"invalid request body: ..."}` |
+
+### 7.3 验收要点
+
+1. PATCH 成功后，`/v1/logs/stream` WebSocket 立刻按新阈值过滤；不再需要重启。
+2. 进程重启后，回退到 `configs/config.example.yaml` 中声明的 `log.modules`。
+3. 测试覆盖见 `internal/interface/http/log_config_test.go`（10 个用例：level-only / modules-only / 同时调 / 空 body / 未知级别 / 未知模块级别 / 损坏 JSON / 空模块字符串 / 并发 PATCH / image 内大小写规范化）。

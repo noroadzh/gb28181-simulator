@@ -19,7 +19,10 @@
 | 12 | `gb35114-security` | GB 35114 安全扩展 | ✅ 已归档 | SM2 互认证、SM3 Digest |
 | 13 | `exception-and-capture` | 异常流 + 抓包 | ✅ 已归档 | 故障注入、pcap 导出（2026-09-27） |
 | 14 | `web-management-ui` | Web 管理界面 | ✅ 已归档 | 节点/抓包/故障/场景页 + 501 占位（2026-09-27） |
-| 15 | `scenario-engine` | YAML 场景引擎 | ⬜ 待实施 | 下一阶段 |
+| 15 | `scenario-engine` | YAML 场景引擎（2026-09-27） | ✅ 已归档 | YAML-driven 场景脚本引擎 + 报告产出 |
+| 16 | `manscdp-logging-coverage` | MANSCDP+ 业务面日志覆盖 | ✅ 已归档 | acceptor 7 处成功路径补 Debug 日志（codec 包按惯例保持无日志）（2026-09-29） |
+| 17 | `media-aggregator-integration` | 媒体热循环聚合接入 | ⬜ 待实施 | `ps_packetizer.go` / `rtpizer.go` 调用 `error_aggregator` |
+| 18 | `logging-user-docs` | 日志配置用户文档 | ⬜ 待实施 | `docs/logging.md`：env 变量、`log.modules` 语法、PATCH 接口契约 |
 
 ## 依赖关系
 
@@ -51,5 +54,6 @@
 - 原始路线图中 #3 为 `core-manscdp-and-ps`，后被 `enterprise-skeleton` 占位，本文件保留原始编号顺序。
 - 部分 change 内部拆分为多个子 change 归档（如 #5、#6、#7、#8）。
 - #10 原名 `dynamic-catalog-and-query`，实际由 `dynamic-sim-features` change 实现（动态目录/报警、录像与回放、移动位置、运行时触发 API）。
-- 当前已完成 14 个编号（#1–#14），对应 17 个归档 change；#14 `web-management-ui` 已归档（2026-09-27）。
-- 待实施 1 个编号（#15 `scenario-engine`）。
+- 当前已完成 15 个编号（#1–#15），对应 23 个归档 change 目录（`ls openspec/changes/archive/ | wc -l = 23`，2026-09-29 同步）。
+- 待实施 3 个编号（#16–#18：manscdp-logging-coverage、media-aggregator-integration、logging-user-docs），均来自 `2026-09-29-enhance-logging-coverage` 的 Deferred 项。
+- 路线图同步契约见 capability `docs-roadmap-sync`；每次归档必须在同提交更新本文件。
