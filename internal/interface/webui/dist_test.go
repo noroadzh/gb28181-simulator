@@ -44,7 +44,7 @@ func TestSpaHandlerServesIndex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get /: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != 200 {
 		t.Fatalf("root status = %d", resp.StatusCode)
 	}
@@ -62,7 +62,7 @@ func TestSpaHandlerServesIndex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get css: %v", err)
 	}
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 	if resp2.StatusCode != 200 {
 		t.Fatalf("css status = %d", resp2.StatusCode)
 	}
@@ -75,7 +75,7 @@ func TestSpaHandlerServesIndex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get spa: %v", err)
 	}
-	defer resp3.Body.Close()
+	defer func() { _ = resp3.Body.Close() }()
 	if resp3.StatusCode != 200 {
 		t.Fatalf("spa fallback status = %d", resp3.StatusCode)
 	}

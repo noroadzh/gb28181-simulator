@@ -65,14 +65,11 @@ func (c Credentials) Realm() string { return c.realm }
 // do not marshal to JSON, do not include in error messages.
 func (c Credentials) Password() string { return c.password }
 
-// Equals performs a constant-time equality check on the Password field
+// PasswordEquals performs a constant-time equality check on the Password field
 // only (username and realm are public). Returns true iff len matches and
 // every byte of the password is identical to other.
 func (c Credentials) PasswordEquals(other string) bool {
-	if subtle.ConstantTimeCompare([]byte(c.password), []byte(other)) != 1 {
-		return false
-	}
-	return true
+	return subtle.ConstantTimeCompare([]byte(c.password), []byte(other)) == 1
 }
 
 // String redacts the password; safe for log lines.

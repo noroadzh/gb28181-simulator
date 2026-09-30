@@ -1184,7 +1184,7 @@ func TestAcceptor_AnswersPresetQueryFromProfile(t *testing.T) {
 		{PresetIndex: 1, Name: "Entrance"},
 		{PresetIndex: 2, Name: "Parking"},
 	})
-	reg.MutateProfile(context.Background(), h.nodeID, func(np model.NodeProfile) (model.NodeProfile, error) {
+	_, _ = reg.MutateProfile(context.Background(), h.nodeID, func(np model.NodeProfile) (model.NodeProfile, error) {
 		return next, nil
 	})
 	// Register one device so the platform is "serving".

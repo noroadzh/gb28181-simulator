@@ -31,7 +31,7 @@ func TestNewServer_HealthAndVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("health get: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("health status = %d", resp.StatusCode)
 	}
@@ -47,7 +47,7 @@ func TestNewServer_HealthAndVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("version get: %v", err)
 	}
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 	if resp2.StatusCode != http.StatusOK {
 		t.Fatalf("version status = %d", resp2.StatusCode)
 	}
@@ -74,7 +74,7 @@ func TestNewServer_LegacyHealthz(t *testing.T) {
 	if err != nil {
 		t.Fatalf("healthz get: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("healthz status = %d", resp.StatusCode)
 	}
@@ -92,7 +92,7 @@ func TestNewServer_LegacyMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("metrics get: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("metrics status = %d", resp.StatusCode)
 	}
@@ -113,7 +113,7 @@ func TestSpaHandler_ServesEmbeddedIndex(t *testing.T) {
 			t.Fatalf("get %s: %v", p, err)
 		}
 		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("%s status = %d", p, resp.StatusCode)
 		}
@@ -154,13 +154,16 @@ func TestWSHandler_LoggerPublishesToSubscriber(t *testing.T) {
 	go func() {
 		defer close(done)
 		url := "ws" + strings.TrimPrefix(ts.URL, "http") + "/v1/logs/stream"
-		c, _, err := websocket.DefaultDialer.Dial(url, nil)
+		c, resp, err := websocket.DefaultDialer.Dial(url, nil)
 		if err != nil {
 			t.Logf("dial: %v", err)
 			return
 		}
-		defer c.Close()
-		c.SetReadDeadline(time.Now().Add(3 * time.Second))
+		if resp != nil && resp.Body != nil {
+			defer func() { _ = resp.Body.Close() }()
+		}
+		defer func() { _ = c.Close() }()
+		_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))
 		// Write nothing; just subscribe and read.
 		for {
 			_, msg, err := c.ReadMessage()
@@ -211,11 +214,14 @@ func TestWSHandler_EchoShutdown(t *testing.T) {
 	go func() {
 		defer close(done)
 		url := "ws" + strings.TrimPrefix(ts.URL, "http") + "/v1/logs/stream"
-		c, _, err := websocket.DefaultDialer.Dial(url, nil)
+		c, resp, err := websocket.DefaultDialer.Dial(url, nil)
 		if err != nil {
 			return
 		}
-		defer c.Close()
+		if resp != nil && resp.Body != nil {
+			defer func() { _ = resp.Body.Close() }()
+		}
+		defer func() { _ = c.Close() }()
 		for i := 0; i < 1; i++ {
 			if _, _, err := c.ReadMessage(); err != nil {
 				return

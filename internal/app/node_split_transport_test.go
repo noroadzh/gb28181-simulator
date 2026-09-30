@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
 )
 
 // splitSource is a socket whose messages are queued up front, so a test can
@@ -182,7 +181,7 @@ func TestSplitHalfCloseLeavesTheSocket(t *testing.T) {
 	split := newSplitTransport(context.Background(), src)
 	defer func() { _ = split.Close() }()
 
-	var serving port.SIPTransport = split.Serving()
+	serving := split.Serving()
 	if err := serving.Close(); err != nil {
 		t.Errorf("closing a half = %v, want it to leave the socket alone", err)
 	}

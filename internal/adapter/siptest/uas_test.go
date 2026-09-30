@@ -63,14 +63,14 @@ func TestUAS_ChallengesThenAccepts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewUAS: %v", err)
 	}
-	defer uas.Close()
+	defer func() { _ = uas.Close() }()
 	go func() { _ = uas.Serve(ctx) }()
 
 	client, err := siptransport.New("udp://" + freeAddr(t))
 	if err != nil {
 		t.Fatalf("client transport: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	port := siptransport.NewPortAdapter(client)
 
 	requestURI := "sip:" + e2eServer + "@" + e2eDomain
@@ -155,14 +155,14 @@ func TestUAS_RejectsWrongPassword(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewUAS: %v", err)
 	}
-	defer uas.Close()
+	defer func() { _ = uas.Close() }()
 	go func() { _ = uas.Serve(ctx) }()
 
 	client, err := siptransport.New("udp://" + freeAddr(t))
 	if err != nil {
 		t.Fatalf("client transport: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	port := siptransport.NewPortAdapter(client)
 
 	requestURI := "sip:" + e2eServer + "@" + e2eDomain
@@ -276,7 +276,7 @@ func TestDeviceRegistrationOverUDP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewUAS: %v", err)
 	}
-	defer uas.Close()
+	defer func() { _ = uas.Close() }()
 	go func() { _ = uas.Serve(ctx) }()
 
 	reg, err := model.NewRegistration(model.RegistrationParams{
@@ -361,12 +361,12 @@ func TestTwoDevicesRegisterIndependently(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewUAS A: %v", err)
 	}
-	defer uasA.Close()
+	defer func() { _ = uasA.Close() }()
 	uasB, err := siptest.NewUAS("udp", freeAddr(t), e2eDomain, e2ePasswd)
 	if err != nil {
 		t.Fatalf("NewUAS B: %v", err)
 	}
-	defer uasB.Close()
+	defer func() { _ = uasB.Close() }()
 	go func() { _ = uasA.Serve(ctx) }()
 	go func() { _ = uasB.Serve(ctx) }()
 
@@ -552,14 +552,14 @@ func TestUAS_SM2Registration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewUAS: %v", err)
 	}
-	defer uas.Close()
+	defer func() { _ = uas.Close() }()
 	go func() { _ = uas.Serve(ctx) }()
 
 	client, err := siptransport.New("udp://" + freeAddr(t))
 	if err != nil {
 		t.Fatalf("client transport: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	port := siptransport.NewPortAdapter(client)
 
 	requestURI := "sip:" + e2eServer + "@" + e2eDomain

@@ -25,7 +25,7 @@ func TestBootstrap_Idempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Bootstrap second call: %v", err)
 	}
-	defer EnsureClosed(db2)
+	defer func() { _ = EnsureClosed(db2) }()
 	// Verify the meta table has exactly one row.
 	var n int
 	if err := db2.QueryRow(`SELECT COUNT(*) FROM schema_meta`).Scan(&n); err != nil {

@@ -38,7 +38,6 @@ func registrationFixture(
 	t *testing.T,
 	id string,
 	tr *scriptedTransport,
-	reg *model.Registration,
 ) (*NodeService, *fakeCatalogue, *fakeLifecycle) {
 	t.Helper()
 	cat := newFakeCatalogue()
@@ -46,14 +45,6 @@ func registrationFixture(
 	lc.transport = tr
 	adv := cat
 
-	profile := testProfile(t, id, "127.0.0.1:15060")
-	if reg != nil {
-		var err error
-		profile, err = profile.WithRegistration(*reg)
-		if err != nil {
-			t.Fatalf("WithRegistration: %v", err)
-		}
-	}
 	svc, err := NewNodeService(cat, lc, adv, func(addr string, _ model.NodeID) (port.SIPTransport, error) {
 		return tr, nil
 	}, &fakeClock{now: time.Now()})
@@ -68,7 +59,7 @@ func registrationFixture(
 func TestNodeService_StartWithoutRegistrationStaysRegistering(t *testing.T) {
 	t.Parallel()
 	tr := &scriptedTransport{}
-	svc, cat, lc := registrationFixture(t, testDevice, tr, nil)
+	svc, cat, lc := registrationFixture(t, testDevice, tr)
 
 	id := mustParse(t, testDevice)
 	if _, err := svc.Create(context.Background(),
@@ -97,7 +88,7 @@ func TestNodeService_StartRegistersDevice(t *testing.T) {
 		{msg: response(t, 200, callIDHeader(testCallID)), peer: testServer},
 	}}
 	reg := testRegistration(t, 3600, 2*time.Second)
-	svc, cat, _ := registrationFixture(t, testDevice, tr, &reg)
+	svc, cat, _ := registrationFixture(t, testDevice, tr)
 	r := newTestRegistrar(t, &stubAuthorizer{}, &fakeClock{now: time.Now()})
 	r.newCallID = func() string { return testCallID }
 	if _, err := svc.WithRegistrar(r); err != nil {
@@ -134,7 +125,7 @@ func TestNodeService_StartRegistrationFailureFaults(t *testing.T) {
 	t.Parallel()
 	tr := &scriptedTransport{} // no answer at all → timeout
 	reg := testRegistration(t, 3600, 50*time.Millisecond)
-	svc, cat, lc := registrationFixture(t, testDevice, tr, &reg)
+	svc, cat, lc := registrationFixture(t, testDevice, tr)
 	r := newTestRegistrar(t, &stubAuthorizer{}, &fakeClock{now: time.Now()})
 	r.newCallID = func() string { return testCallID }
 	if _, err := svc.WithRegistrar(r); err != nil {
@@ -177,7 +168,7 @@ func TestNodeService_StartNonDeviceDoesNotRegister(t *testing.T) {
 	t.Parallel()
 	tr := &scriptedTransport{}
 	reg := testRegistration(t, 3600, time.Second)
-	svc, cat, _ := registrationFixture(t, testPlatformLarge, tr, &reg)
+	svc, cat, _ := registrationFixture(t, testPlatformLarge, tr)
 	r := newTestRegistrar(t, &stubAuthorizer{}, &fakeClock{now: time.Now()})
 	if _, err := svc.WithRegistrar(r); err != nil {
 		t.Fatalf("WithRegistrar: %v", err)
@@ -208,7 +199,7 @@ func TestNodeService_RegistrationWithoutRegistrarFails(t *testing.T) {
 	t.Parallel()
 	tr := &scriptedTransport{}
 	reg := testRegistration(t, 3600, time.Second)
-	svc, cat, lc := registrationFixture(t, testDevice, tr, &reg)
+	svc, cat, lc := registrationFixture(t, testDevice, tr)
 
 	id := mustParse(t, testDevice)
 	profile, err := testProfile(t, testDevice, "127.0.0.1:15060").WithRegistration(reg)
@@ -249,7 +240,7 @@ func TestNodeService_FaultedNodeCanRestart(t *testing.T) {
 	t.Parallel()
 	tr := &scriptedTransport{}
 	reg := testRegistration(t, 3600, 50*time.Millisecond)
-	svc, cat, _ := registrationFixture(t, testDevice, tr, &reg)
+	svc, cat, _ := registrationFixture(t, testDevice, tr)
 	r := newTestRegistrar(t, &stubAuthorizer{}, &fakeClock{now: time.Now()})
 	if _, err := svc.WithRegistrar(r); err != nil {
 		t.Fatalf("WithRegistrar: %v", err)

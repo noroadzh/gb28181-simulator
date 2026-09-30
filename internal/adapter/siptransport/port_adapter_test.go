@@ -56,12 +56,12 @@ func TestPortAdapter_SendUsesExplicitDestination(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New sender: %v", err)
 	}
-	defer sender.Close()
+	defer func() { _ = sender.Close() }()
 	receiver, err := siptransport.New("udp://" + freeUDPAddr(t))
 	if err != nil {
 		t.Fatalf("New receiver: %v", err)
 	}
-	defer receiver.Close()
+	defer func() { _ = receiver.Close() }()
 
 	adapterS := siptransport.NewPortAdapter(sender)
 	adapterR := siptransport.NewPortAdapter(receiver)

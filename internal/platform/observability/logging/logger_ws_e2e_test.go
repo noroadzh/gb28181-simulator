@@ -9,7 +9,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
 
-	"github.com/your-org/gb28181-simulator/internal/interface/http"
+	httpapi "github.com/your-org/gb28181-simulator/internal/interface/http"
 	platformconfig "github.com/your-org/gb28181-simulator/internal/platform/config"
 	"github.com/your-org/gb28181-simulator/internal/platform/observability/logging"
 )
@@ -44,7 +44,7 @@ func TestE2E_HubPushedToWebSocketWithRedaction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Wait until the subscription is registered before publishing.
 	deadline := time.Now().Add(time.Second)
@@ -60,7 +60,7 @@ func TestE2E_HubPushedToWebSocketWithRedaction(t *testing.T) {
 		"password", "should-never-leak",
 	)
 
-	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	_, raw, err := conn.ReadMessage()
 	if err != nil {
 		t.Fatalf("read: %v", err)

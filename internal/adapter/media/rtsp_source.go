@@ -39,7 +39,7 @@ func (r *RTSPSource) Open(ctx context.Context) (io.ReadCloser, error) {
 	cseq := 1
 
 	if _, err := r.request(conn, reader, "OPTIONS", "*", cseq, nil); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, fmt.Errorf("rtsp OPTIONS: %w", err)
 	}
 	cseq++
@@ -48,7 +48,7 @@ func (r *RTSPSource) Open(ctx context.Context) (io.ReadCloser, error) {
 		"Accept": "application/sdp",
 	})
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, fmt.Errorf("rtsp DESCRIBE: %w", err)
 	}
 	_ = sdp
@@ -59,14 +59,14 @@ func (r *RTSPSource) Open(ctx context.Context) (io.ReadCloser, error) {
 		"Transport": "RTP/AVP/TCP;unicast;interleaved=0-1",
 	})
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, fmt.Errorf("rtsp SETUP: %w", err)
 	}
 	cseq++
 
 	sid := extractSession(session)
 	if sid == "" {
-		conn.Close()
+		_ = conn.Close()
 		return nil, fmt.Errorf("rtsp: missing Session header in SETUP response")
 	}
 
@@ -74,7 +74,7 @@ func (r *RTSPSource) Open(ctx context.Context) (io.ReadCloser, error) {
 		"Session": sid,
 		"Range":   "npt=0-",
 	}); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, fmt.Errorf("rtsp PLAY: %w", err)
 	}
 
@@ -88,8 +88,8 @@ func (r *RTSPSource) Open(ctx context.Context) (io.ReadCloser, error) {
 }
 
 func (r *RTSPSource) readRTP(conn net.Conn, w *io.PipeWriter, sid string) {
-	defer w.Close()
-	defer conn.Close()
+	defer func() { _ = w.Close() }()
+	defer func() { _ = conn.Close() }()
 
 	reader := bufio.NewReader(conn)
 	for {
@@ -105,8 +105,11 @@ func (r *RTSPSource) readRTP(conn net.Conn, w *io.PipeWriter, sid string) {
 			return
 		}
 		if b != '$' {
-			// Not interleaved RTP; skip the line.
-			reader.UnreadByte()
+			// Not interleaved RTP; skip the line. UnreadByte can only
+			// fail if the byte was already consumed, in which case the
+			// ReadString below still makes forward progress and the
+			// following loop iteration resyncs on the next '$'.
+			_ = reader.UnreadByte()
 			line, _ := reader.ReadString('\n')
 			_ = line
 			continue

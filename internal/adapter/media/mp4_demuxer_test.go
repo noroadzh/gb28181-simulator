@@ -29,11 +29,6 @@ func u32(v uint32) []byte {
 	binary.BigEndian.PutUint32(b, v)
 	return b
 }
-func u64(v uint64) []byte {
-	b := make([]byte, 8)
-	binary.BigEndian.PutUint64(b, v)
-	return b
-}
 
 // box wraps payloads in a size+type header.
 func box(typ string, payloads ...[]byte) []byte {
@@ -183,7 +178,7 @@ func writeTempMP4(t *testing.T) *os.File {
 	if err != nil {
 		t.Fatalf("open fixture: %v", err)
 	}
-	t.Cleanup(func() { f.Close() })
+	t.Cleanup(func() { _ = f.Close() })
 	return f
 }
 
@@ -264,7 +259,7 @@ func TestMP4Demux_Golden_ReadCloserPath(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 	rc := &mp4ReadCloser{d: d}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 
 	cycle := bytes.Join([][]byte{goldenVideo1, goldenAudio, goldenVideo2}, nil)
 	buf := make([]byte, len(cycle))
@@ -286,7 +281,7 @@ func TestMP4Demux_RejectsGarbage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if _, err := NewMP4Demuxer(f); err == nil {
 		t.Fatal("garbage accepted, want error")
 	}

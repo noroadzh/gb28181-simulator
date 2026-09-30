@@ -9,7 +9,6 @@ package webui
 
 import (
 	"embed"
-	"errors"
 	"io/fs"
 	"net/http"
 	"path"
@@ -58,18 +57,6 @@ func SpaHandler() echo.HandlerFunc {
 		// Cold start without a build.
 		return c.HTML(http.StatusOK, `<!doctype html><meta charset="utf-8"><title>gb28181-simulator</title><body><h1>Web UI not built</h1><p>Run <code>make web</code> then rebuild.</p></body>`)
 	}
-}
-
-func subFSReadFile(sub fs.FS, name string) ([]byte, error) {
-	data, err := fs.ReadFile(sub, name)
-	if err != nil {
-		// fs.Sub requires files under the prefix. Fall back to top-level if dist/ empty.
-		if errors.Is(err, fs.ErrNotExist) {
-			return fs.ReadFile(distFS, path.Join("dist", name))
-		}
-		return nil, err
-	}
-	return data, nil
 }
 
 func mimeByExt(ext string) string {

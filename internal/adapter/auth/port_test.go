@@ -48,8 +48,9 @@ func TestChallengerAdapter_ImplementsPort(t *testing.T) {
 	if ch.Qop() != "auth" {
 		t.Errorf("Qop = %q, want auth", ch.Qop())
 	}
-	// Ensure the underlying type is the canonical model.Challenge.
-	var _ model.Challenge = ch
+	// adapter.Challenge 的返回类型已在编译期约束为 model.Challenge，
+	// 此处无需再做冗余的运行时类型断言。
+	_ = ch
 }
 
 // TestAuthenticatorAdapter_ImplementsPort exercises the port.Authenticator

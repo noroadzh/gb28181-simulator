@@ -144,18 +144,6 @@ func (d *PSDepacketizer) Close() error {
 	return nil
 }
 
-// findStartCode scans b for the start code value (00 00 01 xx) and returns
-// the index of the first byte of the start code, or -1 if not found.
-func findStartCode(b []byte, code uint32) int {
-	_ = b[len(b)-1] // bounds check hint
-	for i := 0; i <= len(b)-4; i++ {
-		if uint32(b[i])<<24|uint32(b[i+1])<<16|uint32(b[i+2])<<8|uint32(b[i+3]) == code {
-			return i
-		}
-	}
-	return -1
-}
-
 // decodePTS decodes a 5-byte MPEG-2 PTS into a uint64 (90 kHz domain).
 //
 // Format (40 bits):

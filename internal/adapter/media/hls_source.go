@@ -75,7 +75,7 @@ func (h *HLSSource) fetchSegments(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -86,7 +86,7 @@ func (h *HLSSource) fetchSegments(ctx context.Context) ([]string, error) {
 }
 
 func (h *HLSSource) stream(ctx context.Context, segments []string, w *io.PipeWriter) {
-	defer w.Close()
+	defer func() { _ = w.Close() }()
 
 	for _, seg := range segments {
 		select {
@@ -111,7 +111,7 @@ func (h *HLSSource) stream(ctx context.Context, segments []string, w *io.PipeWri
 			continue
 		}
 		data, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if err != nil {
 			continue
 		}

@@ -37,7 +37,6 @@ type Server struct {
 	echo      *echo.Echo
 	http      *http.Server
 	log       *slog.Logger
-	lnErr     error
 }
 
 var upgrader = websocket.Upgrader{
@@ -203,7 +202,7 @@ func WSHandler(hub *logging.Hub) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
 		sub := hub.Subscribe()
 		defer hub.Unsubscribe(sub)

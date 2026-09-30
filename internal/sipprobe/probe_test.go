@@ -77,7 +77,7 @@ func TestRun_TimeoutExitCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	addr := l.LocalAddr().String()
-	l.Close()
+	_ = l.Close()
 
 	stderr := &bytes.Buffer{}
 	got, code := sipprobe.Run(context.Background(), sipprobe.Options{
@@ -140,20 +140,20 @@ func TestRun_AcceptAnyResponse(t *testing.T) {
 	}
 	lb, err := net.ListenPacket("udp", "127.0.0.1:0")
 	if err != nil {
-		la.Close()
+		_ = la.Close()
 		t.Fatal(err)
 	}
 	addrA := la.LocalAddr().String()
 	addrB := lb.LocalAddr().String()
-	la.Close()
-	lb.Close()
+	_ = la.Close()
+	_ = lb.Close()
 
 	// Start B as a fake UAS that responds to whatever it sees with 200 OK.
 	bTransport, err := siptransport.New("udp://" + addrB)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer bTransport.Close()
+	defer func() { _ = bTransport.Close() }()
 
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

@@ -343,7 +343,7 @@ func NewAsyncFileWriter(path string) (*AsyncFileWriter, error) {
 func (w *AsyncFileWriter) loop(f *os.File) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	for {
 		select {
 		case b, ok := <-w.ch:

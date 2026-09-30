@@ -45,10 +45,9 @@ import (
 // Version metadata. Overridden at link time via -ldflags "-X main.version=..."
 // for release builds; tests can poke them directly.
 var (
-	version   = "0.1.0-dev"
-	commit    = "unknown"
-	builtAt   = "unknown"
-	startedAt = time.Now()
+	version = "0.1.0-dev"
+	commit  = "unknown"
+	builtAt = "unknown"
 )
 
 func main() {
@@ -330,7 +329,9 @@ func run() error {
 			// gate) and the node service (HTTP fault API).
 			faults := app.NewFaultStore(registry, logging.L())
 			acceptor.WithFaults(faults)
-			svc.WithFaults(faults)
+			if _, err := svc.WithFaults(faults); err != nil {
+				return nil, fmt.Errorf("node service: %w", err)
+			}
 
 			// Wire platform-small supplementary capabilities onto the acceptor:
 			// dialog tracking (INVITE/ACK/BYE), playback, subscription and
@@ -488,7 +489,11 @@ func run() error {
 			return fmt.Errorf("node service: %w", err)
 		}
 	}
-	defer cancel.Close()
+	defer func() {
+		if err := cancel.Close(); err != nil {
+			logging.L().Warn("container close", "error", err.Error())
+		}
+	}()
 	// Registered after the container's own shutdown, so it runs first:
 	// heartbeats stop before anything they talk through is torn down.
 	defer func() {

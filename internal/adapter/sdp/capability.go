@@ -57,11 +57,11 @@ func (m MediaCapabilityModule) RTPMapValue() string {
 // m= line and rtpmap lines appear in ascending payload-type order regardless
 // of the call order.
 func (mb *MediaBlock) DeclareCapability(modules ...MediaCapabilityModule) {
-	if mb == nil || mb.MediaDescription == nil || mb.MediaDescription.MediaName.Formats == nil {
+	if mb == nil || mb.MediaDescription == nil || mb.MediaName.Formats == nil {
 		return
 	}
 
-	formats := mb.MediaDescription.MediaName.Formats
+	formats := mb.MediaName.Formats
 	// Build index of format strings already present (e.g. "96", "8").
 	existing := make(map[string]struct{}, len(formats))
 	for _, f := range formats {
@@ -87,13 +87,13 @@ func (mb *MediaBlock) DeclareCapability(modules ...MediaCapabilityModule) {
 	}
 
 	// Write back (may have re-sliced).
-	mb.MediaDescription.MediaName.Formats = formats
+	mb.MediaName.Formats = formats
 
 	if len(added) > 1 {
 		// Sort the format list by numeric payload type for deterministic output.
-		sort.Slice(mb.MediaDescription.MediaName.Formats, func(i, j int) bool {
-			ni, _ := strconv.Atoi(mb.MediaDescription.MediaName.Formats[i])
-			nj, _ := strconv.Atoi(mb.MediaDescription.MediaName.Formats[j])
+		sort.Slice(mb.MediaName.Formats, func(i, j int) bool {
+			ni, _ := strconv.Atoi(mb.MediaName.Formats[i])
+			nj, _ := strconv.Atoi(mb.MediaName.Formats[j])
 			return ni < nj
 		})
 	}

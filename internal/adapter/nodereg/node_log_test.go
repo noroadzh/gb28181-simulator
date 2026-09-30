@@ -135,6 +135,6 @@ func freeLogAddr(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("grab a free UDP port: %v", err)
 	}
-	defer pc.Close()
+	defer func() { _ = pc.Close() }()
 	return pc.LocalAddr().String()
 }

@@ -100,7 +100,7 @@ func TestDeviceSendsKeepalivesOverUDP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewUAS: %v", err)
 	}
-	defer uas.Close()
+	defer func() { _ = uas.Close() }()
 	go func() { _ = uas.Serve(ctx) }()
 
 	svc, stop := keepaliveService(t, ctx)
@@ -156,7 +156,7 @@ func TestDeviceFaultsWhenKeepalivesGoUnanswered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewUAS: %v", err)
 	}
-	defer uas.Close()
+	defer func() { _ = uas.Close() }()
 	go func() { _ = uas.Serve(ctx) }()
 
 	svc, stop := keepaliveService(t, ctx)
@@ -199,7 +199,7 @@ func TestDeviceUnregisterStopsKeepalives(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewUAS: %v", err)
 	}
-	defer uas.Close()
+	defer func() { _ = uas.Close() }()
 	go func() { _ = uas.Serve(ctx) }()
 
 	svc, stop := keepaliveService(t, ctx)

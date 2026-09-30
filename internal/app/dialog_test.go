@@ -94,8 +94,8 @@ func TestDialogManager_Concurrent(t *testing.T) {
 			defer wg.Done()
 			callID := fmt.Sprintf("call-%d", i)
 			mgr.Create(callID)
-			mgr.Confirm(callID, nil)
-			mgr.SetRemoteTag(callID, "t", false)
+			_, _ = mgr.Confirm(callID, nil)
+			_, _ = mgr.SetRemoteTag(callID, "t", false)
 			mgr.Terminate(callID)
 		}(i)
 	}

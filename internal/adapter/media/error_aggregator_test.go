@@ -3,7 +3,6 @@ package media
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"strings"
@@ -103,21 +102,6 @@ func TestErrorAggregator_FlushReportsActiveAndStopsAccepting(t *testing.T) {
 type nopCloserBuf struct{ *bytes.Buffer }
 
 func (n *nopCloserBuf) Close() error { return nil }
-
-// decodeJSONLines keeps the test self-contained; mirrors decodeRecord elsewhere.
-func decodeJSONLines(b []byte) []map[string]any {
-	var out []map[string]any
-	for _, line := range bytes.Split(bytes.TrimSpace(b), []byte("\n")) {
-		if len(line) == 0 {
-			continue
-		}
-		var m map[string]any
-		if err := json.Unmarshal(line, &m); err == nil {
-			out = append(out, m)
-		}
-	}
-	return out
-}
 
 // Ensure _context stays referenced for go vet consistency.
 var _ = context.Background

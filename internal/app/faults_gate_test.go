@@ -43,7 +43,7 @@ func faultGateFixture(
 	if err := acceptor.Serve(platformID, tr, "3402000000", policy); err != nil {
 		t.Fatalf("Serve: %v", err)
 	}
-	t.Cleanup(func() { acceptor.Close() })
+	t.Cleanup(func() { _ = acceptor.Close() })
 	return fs, tr, platformID
 }
 

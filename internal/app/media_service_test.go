@@ -117,7 +117,7 @@ func TestMediaService_OpenSource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenSource: %v", err)
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	frame, err := r.Read(context.Background())
 	if err != nil {
@@ -218,7 +218,7 @@ func TestMediaService_PacketizeOutboundContextCancel(t *testing.T) {
 	pr, pw := io.Pipe()
 	src := &blockingSource{rc: pr, cfg: model.MediaConfig{Kind: model.SourceKindSynthetic, Path: "", FPS: 25}}
 	go func() {
-		pw.Write(frameWithNAL([]byte{0x01}))
+		_, _ = pw.Write(frameWithNAL([]byte{0x01}))
 		// Leave writer open so StreamESReader blocks on next Read.
 	}()
 

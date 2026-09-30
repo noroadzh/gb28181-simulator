@@ -66,14 +66,6 @@ func (f *fakePlaybackPort) snapshot() []playCall {
 	return cp
 }
 
-func (f *fakePlaybackPort) snapshotQueries() []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	cp := make([]string, len(f.queries))
-	copy(cp, f.queries)
-	return cp
-}
-
 // platformServiceWithPlayback wires a full platform service (NodeService +
 // Keeper + Acceptor) with a playback port attached, so the acceptor's INFO
 // handler has a real downstream for MANSRTSP bodies (task 7.5).

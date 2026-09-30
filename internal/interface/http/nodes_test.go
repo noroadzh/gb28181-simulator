@@ -342,7 +342,7 @@ func getJSON(t *testing.T, url string) (int, string) {
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("read body: %v", err)
@@ -360,7 +360,7 @@ func postJSONWithBody(t *testing.T, url string, body []byte) (int, string) {
 	if err != nil {
 		t.Fatalf("POST %s: %v", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("read body: %v", err)
@@ -379,7 +379,7 @@ func putJSON(t *testing.T, url string, body []byte) (int, string) {
 	if err != nil {
 		t.Fatalf("PUT %s: %v", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("read body: %v", err)
@@ -397,7 +397,7 @@ func deleteJSON(t *testing.T, url string) (int, string) {
 	if err != nil {
 		t.Fatalf("DELETE %s: %v", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("read body: %v", err)
@@ -728,7 +728,7 @@ func TestNodes_CaptureEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET pcap: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.Header.Get("Content-Type") != "application/vnd.tcpdump.pcap" {
 		t.Fatalf("pcap content type = %s", resp.Header.Get("Content-Type"))
 	}

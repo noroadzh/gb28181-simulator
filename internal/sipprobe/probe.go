@@ -106,7 +106,9 @@ func (r Result) Print(w io.Writer) {
 	if code == 0 {
 		code = -1 // requests get -1 placeholder for column alignment in tooling
 	}
-	fmt.Fprintf(w, "%d\t%s\n", code, r.StartLine)
+	// Result.Print is always called in a "report" context; write failures
+	// here are not recoverable so the error is intentionally dropped.
+	_, _ = fmt.Fprintf(w, "%d\t%s\n", code, r.StartLine)
 }
 
 // Exit codes as documented in the package comment.
@@ -130,7 +132,8 @@ func (o Options) Mode() Mode {
 func Run(ctx context.Context, opts Options) (Result, int) {
 	errs := opts.stderr()
 	if opts.Bind == "" {
-		fmt.Fprintln(errs, "sipprobe: --bind is required")
+		// Errors here are user-facing diagnostics; the error is dropped.
+		_, _ = fmt.Fprintln(errs, "sipprobe: --bind is required")
 		return Result{}, ExitUsage
 	}
 	if opts.Timeout <= 0 {
@@ -138,10 +141,11 @@ func Run(ctx context.Context, opts Options) (Result, int) {
 	}
 	tr, err := siptransport.New(opts.Bind)
 	if err != nil {
-		fmt.Fprintf(errs, "sipprobe: bind %s: %v\n", opts.Bind, err)
+		// Errors here are user-facing diagnostics; the error is dropped.
+		_, _ = fmt.Fprintf(errs, "sipprobe: bind %s: %v\n", opts.Bind, err)
 		return Result{}, ExitUsage
 	}
-	defer tr.Close()
+	defer func() { _ = tr.Close() }()
 
 	switch opts.Mode() {
 	case ModeSend:
@@ -155,12 +159,13 @@ func runSend(ctx context.Context, tr *siptransport.Transport, opts Options) (Res
 	errs := opts.stderr()
 	invite, err := buildInvite(opts)
 	if err != nil {
-		fmt.Fprintf(errs, "sipprobe: build INVITE: %v\n", err)
+		// Errors here are user-facing diagnostics; the error is dropped.
+		_, _ = fmt.Fprintf(errs, "sipprobe: build INVITE: %v\n", err)
 		return Result{}, ExitUsage
 	}
 	dst := stripScheme(opts.SendTo)
 	if err := tr.Send(invite, dst); err != nil {
-		fmt.Fprintf(errs, "sipprobe: send: %v\n", err)
+		_, _ = fmt.Fprintf(errs, "sipprobe: send: %v\n", err)
 		return Result{}, ExitUsage
 	}
 	_, _, res, code := waitForResponse(ctx, tr, opts)
@@ -193,7 +198,7 @@ func runReceive(ctx context.Context, tr *siptransport.Transport, opts Options) (
 		return res, ExitOK
 	}
 	if err := sendAnswer(tr, req, peer); err != nil {
-		fmt.Fprintf(opts.stderr(), "sipprobe: answer: %v\n", err)
+		_, _ = fmt.Fprintf(opts.stderr(), "sipprobe: answer: %v\n", err)
 		return res, ExitUsage
 	}
 	return res, ExitOK
@@ -221,12 +226,12 @@ func waitForResponse(
 	msg, peer, err := tr.Receive(waitCtx)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-			fmt.Fprintf(errs,
+			_, _ = fmt.Fprintf(errs,
 				"timeout waiting for status=%d after %s\n",
 				opts.ExpectStatus, opts.Timeout)
 			return nil, "", Result{}, ExitTimeout
 		}
-		fmt.Fprintf(errs, "sipprobe: receive: %v\n", err)
+		_, _ = fmt.Fprintf(errs, "sipprobe: receive: %v\n", err)
 		return nil, "", Result{}, ExitUsage
 	}
 
@@ -235,7 +240,7 @@ func waitForResponse(
 	case sip.Response:
 		res.StatusCode = int(m.StatusCode())
 		if opts.ExpectStatus != 0 && res.StatusCode != opts.ExpectStatus {
-			fmt.Fprintf(errs,
+			_, _ = fmt.Fprintf(errs,
 				"unexpected status %d, want %d\n",
 				res.StatusCode, opts.ExpectStatus)
 			return msg, peer, res, ExitUnexpected
@@ -243,7 +248,7 @@ func waitForResponse(
 	case sip.Request:
 		res.Method = string(m.Method())
 	default:
-		fmt.Fprintf(errs, "sipprobe: unknown message type %T\n", msg)
+		_, _ = fmt.Fprintf(errs, "sipprobe: unknown message type %T\n", msg)
 		return msg, peer, res, ExitUsage
 	}
 	return msg, peer, res, ExitOK
@@ -290,7 +295,7 @@ func ourOutboundIP() string {
 	if err != nil {
 		return "127.0.0.1"
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	return conn.LocalAddr().(*net.UDPAddr).IP.String()
 }
 

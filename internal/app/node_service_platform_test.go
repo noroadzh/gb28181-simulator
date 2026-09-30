@@ -80,7 +80,7 @@ func TestNodeService_StartPlatformServes(t *testing.T) {
 func TestNodeService_StartPlatformWithoutAcceptorStaysRegistering(t *testing.T) {
 	t.Parallel()
 	tr := &scriptedTransport{}
-	svc, cat, lc := registrationFixture(t, testPlatformLarge, tr, nil)
+	svc, cat, lc := registrationFixture(t, testPlatformLarge, tr)
 	lc.transport = tr
 
 	id := mustParse(t, testPlatformLarge)

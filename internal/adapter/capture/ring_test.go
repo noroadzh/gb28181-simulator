@@ -12,11 +12,6 @@ import (
 	"github.com/your-org/gb28181-simulator/internal/domain/port"
 )
 
-// fixedClock returns the same instant for every Now call.
-type fixedClock struct{ t time.Time }
-
-func (f fixedClock) Now() time.Time { return f.t }
-
 // newStore is a shorthand used throughout these tests.
 func newStore(t *testing.T, cap int) port.CaptureStore {
 	t.Helper()

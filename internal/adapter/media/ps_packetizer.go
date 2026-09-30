@@ -18,12 +18,6 @@ import (
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
 )
 
-// PS constants — MPEG-2 Program Stream start codes.
-const (
-	psPackStartCode  = 0x000001BA
-	psVideoStartCode = 0x000001E0 // video elementary stream
-)
-
 // defaultMuxRate is the nominal stream bit-rate in bits per second.
 // 9_000_000 = 9 Mbps, a safe default that fits most SD/HD streams.
 // The MPEG-2 program_mux_rate field is measured in 50-byte units,

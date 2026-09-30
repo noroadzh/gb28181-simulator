@@ -53,7 +53,7 @@ func (s *SyntheticSource) Open(ctx context.Context) (io.ReadCloser, error) {
 }
 
 func (s *SyntheticSource) renderLoop(w *io.PipeWriter, cfg model.MediaConfig, ctx context.Context) {
-	defer w.Close()
+	defer func() { _ = w.Close() }()
 
 	width := 640
 	height := 480
@@ -129,7 +129,9 @@ func (s *SyntheticSource) Close() error {
 		s.mu.Unlock()
 		close(s.stop)
 		if s.pipe != nil {
-			s.pipe.Close()
+			// The reader is being torn down; a close error here has no
+			// observer, so it is intentionally discarded.
+			_ = s.pipe.Close()
 		}
 	})
 	return err

@@ -23,7 +23,7 @@ func TestOptions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AsyncFileWriter: %v", err)
 	}
-	defer w.Close()
+	defer func() { _ = w.Close() }()
 
 	h := NewMultiHandler(LevelWarn.ToSlog(),
 		[]string{"password", "authorization"},
@@ -64,13 +64,11 @@ func readN(t *testing.T, s *Subscriber, n int) []byte {
 	t.Helper()
 	var b []byte
 	for i := 0; i < n; i++ {
-		select {
-		case payload, ok := <-s.Chan():
-			if !ok {
-				t.Fatalf("subscriber closed early")
-			}
-			b = append(b, payload...)
+		payload, ok := <-s.Chan()
+		if !ok {
+			t.Fatalf("subscriber closed early")
 		}
+		b = append(b, payload...)
 	}
 	return b
 }

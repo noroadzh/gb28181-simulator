@@ -42,15 +42,8 @@ type Session struct {
 	origin      string
 	sessionName string
 	connection  string
-	time        timeExtent
 	streams     []MediaStream
 	extensions  []string // verbatim y= / f= lines, in order
-}
-
-// timeExtent is the unexported time description (start/stop). Kept as a
-// private struct so callers cannot mutate it after the Session is built.
-type timeExtent struct {
-	start, stop int64
 }
 
 // NewSession builds a Session. streams are copied defensively; extensions

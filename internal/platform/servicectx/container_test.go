@@ -37,7 +37,7 @@ func TestProvideBuildGet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	defer cancel.Close()
+	defer func() { _ = cancel.Close() }()
 
 	if got, ok := servicectx.GetTyped[int](c, kA); !ok || got != 42 {
 		t.Errorf("GetTyped(int)=%v,%v want 42,true", got, ok)
@@ -64,7 +64,7 @@ func TestDuplicateKey_OverridesBeforeBuild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	defer cancel.Close()
+	defer func() { _ = cancel.Close() }()
 
 	if got := servicectx.MustGet[int](c, k); got != 2 {
 		t.Errorf("MustGet=%d want 2 (later registration wins)", got)
@@ -83,7 +83,7 @@ func TestProvide_AfterBuildIgnored(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	defer cancel.Close()
+	defer func() { _ = cancel.Close() }()
 
 	// Late registration must be silently ignored.
 	c.Provide(k, func() (any, error) { return 999, nil })
@@ -224,7 +224,7 @@ func TestMustGet_TypeMismatchPanics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	defer cancel.Close()
+	defer func() { _ = cancel.Close() }()
 
 	defer func() {
 		r := recover()
@@ -251,7 +251,7 @@ func TestMustGet_MissingKeyPanics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	defer cancel.Close()
+	defer func() { _ = cancel.Close() }()
 
 	defer func() {
 		r := recover()
@@ -275,7 +275,7 @@ func TestConcurrent_GetIsSafe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	defer cancel.Close()
+	defer func() { _ = cancel.Close() }()
 
 	const goroutines = 32
 	var wg sync.WaitGroup

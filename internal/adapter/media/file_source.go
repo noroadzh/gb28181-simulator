@@ -33,7 +33,7 @@ func (f *FileSource) Open(ctx context.Context) (io.ReadCloser, error) {
 	if n, _ := file.ReadAt(head, 0); n >= 8 && string(head[4:8]) == "ftyp" {
 		demuxer, err := NewMP4Demuxer(file)
 		if err != nil {
-			file.Close()
+			_ = file.Close() // the open handle is dead once the sniffer fails
 			return nil, err
 		}
 		return &mp4ReadCloser{d: demuxer}, nil

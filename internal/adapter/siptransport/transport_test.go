@@ -38,13 +38,13 @@ func newTestPair(t *testing.T) (*siptransport.Transport, *siptransport.Transport
 	}
 	l2, err := net.ListenPacket("udp", "127.0.0.1:0")
 	if err != nil {
-		l1.Close()
+		func() { _ = l1.Close() }()
 		t.Fatal(err)
 	}
 	addr1 := l1.LocalAddr().String()
 	addr2 := l2.LocalAddr().String()
-	l1.Close()
-	l2.Close()
+	func() { _ = l1.Close() }()
+	func() { _ = l2.Close() }()
 
 	s1, err := siptransport.New("udp://" + addr1)
 	if err != nil {
@@ -52,12 +52,12 @@ func newTestPair(t *testing.T) (*siptransport.Transport, *siptransport.Transport
 	}
 	s2, err := siptransport.New("udp://"+addr2, siptransport.WithReceiveBuffer(4))
 	if err != nil {
-		s1.Close()
+		func() { _ = s1.Close() }()
 		t.Fatal(err)
 	}
 	cleanup := func() {
-		s1.Close()
-		s2.Close()
+		func() { _ = s1.Close() }()
+		func() { _ = s2.Close() }()
 	}
 	return s1, s2, cleanup
 }
@@ -384,13 +384,13 @@ func newNodeIDPair(t *testing.T, nodeID string) (*siptransport.Transport, *siptr
 	}
 	l2, err := net.ListenPacket("udp", "127.0.0.1:0")
 	if err != nil {
-		l1.Close()
+		func() { _ = l1.Close() }()
 		t.Fatal(err)
 	}
 	addr1 := l1.LocalAddr().String()
 	addr2 := l2.LocalAddr().String()
-	l1.Close()
-	l2.Close()
+	func() { _ = l1.Close() }()
+	func() { _ = l2.Close() }()
 
 	s1, err := siptransport.New("udp://"+addr1, siptransport.WithNodeID(nodeID))
 	if err != nil {
@@ -398,12 +398,12 @@ func newNodeIDPair(t *testing.T, nodeID string) (*siptransport.Transport, *siptr
 	}
 	s2, err := siptransport.New("udp://"+addr2, siptransport.WithNodeID(nodeID))
 	if err != nil {
-		s1.Close()
+		func() { _ = s1.Close() }()
 		t.Fatal(err)
 	}
 	cleanup := func() {
-		s1.Close()
-		s2.Close()
+		func() { _ = s1.Close() }()
+		func() { _ = s2.Close() }()
 	}
 	return s1, s2, cleanup
 }

@@ -33,12 +33,16 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	for _, p := range vPkts {
-		f.Write(p.Payload)
+		if _, err := f.Write(p.Payload); err != nil {
+			panic(err)
+		}
 	}
 	for _, p := range aPkts {
-		f.Write(p.Payload)
+		if _, err := f.Write(p.Payload); err != nil {
+			panic(err)
+		}
 	}
 	fmt.Println("wrote rtp-roundtrip.bin")
 }

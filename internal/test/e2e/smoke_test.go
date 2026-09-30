@@ -26,7 +26,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/your-org/gb28181-simulator/internal/interface/http"
+	httpapi "github.com/your-org/gb28181-simulator/internal/interface/http"
 	platformconfig "github.com/your-org/gb28181-simulator/internal/platform/config"
 	"github.com/your-org/gb28181-simulator/internal/platform/observability/logging"
 )
@@ -65,7 +65,7 @@ func TestSmokeHealthz(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /healthz: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -86,7 +86,7 @@ func TestSmokeVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /v1/version: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -112,7 +112,7 @@ func TestSmokeFaultsEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET faults: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 500 {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("server error: status=%d body=%s", resp.StatusCode, string(body))
@@ -142,7 +142,10 @@ func TestSmokeWebSocketLogs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ws dial: %v (status=%v)", err, statusOf(resp))
 	}
-	defer conn.Close()
+	if resp != nil && resp.Body != nil {
+		defer func() { _ = resp.Body.Close() }()
+	}
+	defer func() { _ = conn.Close() }()
 
 	// Publish to the server's own hub (not DefaultHub) so the WebSocket
 	// handler that subscribed to it actually receives a frame.
@@ -151,7 +154,7 @@ func TestSmokeWebSocketLogs(t *testing.T) {
 		hub.Publish([]byte(`{"level":"info","msg":"smoke hello"}`))
 	}()
 
-	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
 	_, msg, err := conn.ReadMessage()
 	if err != nil {
 		t.Fatalf("ws read: %v", err)

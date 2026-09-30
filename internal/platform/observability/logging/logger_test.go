@@ -39,7 +39,7 @@ func TestOptions_RedactionAndFanout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AsyncFileWriter: %v", err)
 	}
-	defer w.Close()
+	defer func() { _ = w.Close() }()
 
 	h := NewMultiHandler(slog.LevelDebug, []string{"password"}, false, hub, w)
 	logger := slog.New(h)
@@ -197,7 +197,7 @@ func TestInit_GlobalLoggerAndHub(t *testing.T) {
 			if !bytes.Contains(payload, []byte("***REDACTED***")) {
 				t.Fatalf("Init-driven redaction failed: %s", payload)
 			}
-			Shutdown(context.Background())
+			_ = Shutdown(context.Background())
 			return
 		case <-time.After(50 * time.Millisecond):
 		}

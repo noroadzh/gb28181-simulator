@@ -32,7 +32,7 @@ func (l *nodeSockets) Transport(id model.NodeID) port.SIPTransport {
 	if tr, ok := l.perNode[id.String()]; ok {
 		return tr
 	}
-	return l.fakeLifecycle.transport
+	return l.transport
 }
 
 // smallFixture wires a NodeService with a real Acceptor and, when the caller
@@ -274,7 +274,7 @@ func TestNodeService_StopPlatformSmallEndsBothHalves(t *testing.T) {
 	if _, err := svc.WithKeeper(keeper); err != nil {
 		t.Fatalf("WithKeeper: %v", err)
 	}
-	t.Cleanup(func() { keeper.Close() })
+	t.Cleanup(func() { _ = keeper.Close() })
 
 	id := mustParse(t, testPlatformSmall)
 	ctx := context.Background()

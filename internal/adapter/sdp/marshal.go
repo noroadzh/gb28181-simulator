@@ -21,7 +21,7 @@ func Marshal(s *Session) (string, error) {
 	}
 
 	// Step 1: have pion render RFC 4566 core (CRLF-terminated).
-	raw := s.SessionDescription.Marshal()
+	raw := s.Marshal()
 
 	if len(s.Media) == 0 {
 		// No media blocks: nothing to inject.
@@ -58,14 +58,6 @@ func Marshal(s *Session) (string, error) {
 	var out strings.Builder
 	nextBlock := 0
 	for i, ln := range lines {
-		// Before emitting the (nextBlock+1)-th "m=" line, flush the §K
-		// pair of block `nextBlock` (which ended just before this point).
-		if nextBlock < len(blockLines) &&
-			nextBlock < len(mIndexes) && i == mIndexes[nextBlock] {
-			// This is the first m= line — no block has ended yet, so
-			// there is nothing to flush before it (block index 0 has
-			// not started). Skip.
-		}
 		out.WriteString(ln)
 		if i < len(lines)-1 {
 			out.WriteString("\r\n")

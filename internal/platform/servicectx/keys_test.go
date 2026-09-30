@@ -30,7 +30,7 @@ func TestStorageKey_ResolvesToPortStorage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	defer cancel.Close()
+	defer func() { _ = cancel.Close() }()
 
 	got := MustGet[port.Storage](c, StorageKey)
 	if got == nil {

@@ -72,17 +72,6 @@ func supportedSubscribeEvent(raw string) (string, bool) {
 	return "", false
 }
 
-// inviteWatch pairs a pending INVITE's expiry timer with a stop channel so
-// the goroutine that waits for it can be woken up at three points: natural
-// expiry (timer.C), explicit cancellation by ACK or by the call site
-// (done), or whole-node shutdown (a.ctx.Done()). Without the stop channel,
-// calling timer.Stop would leave the goroutine blocked forever on a
-// channel that will never fire.
-type inviteWatch struct {
-	timer *time.Timer
-	done  chan struct{}
-}
-
 // Acceptor is the UAS half of the simulator: for every platform-large node
 // it runs one goroutine that receives REGISTERs on that node's transport,
 // challenges them the way GB/T 28181 §L.2 prescribes, and records the
@@ -2627,6 +2616,8 @@ func (a *Acceptor) closePipeline(callID string) {
 	}
 	a.mu.Unlock()
 	if ok && pl != nil {
-		pl.Close()
+		if err := pl.Close(); err != nil {
+			slog.Warn("pipeline close", "call_id", callID, "error", err.Error())
+		}
 	}
 }

@@ -113,14 +113,11 @@ func TestAcceptor_INVITEExpiry_NodeStopReleasesWatchers(t *testing.T) {
 	acceptor.Stop(nodeID)
 
 	deadline := time.Now().Add(2 * time.Second)
-	for {
-		if watcherCount(acceptor) == 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("node shutdown left %d watchers behind", watcherCount(acceptor))
-		}
+	for time.Now().Before(deadline) && watcherCount(acceptor) != 0 {
 		time.Sleep(5 * time.Millisecond)
+	}
+	if watcherCount(acceptor) != 0 {
+		t.Fatalf("node shutdown left %d watchers behind", watcherCount(acceptor))
 	}
 }
 

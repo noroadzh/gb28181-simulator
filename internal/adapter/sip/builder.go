@@ -145,11 +145,6 @@ func SetDefaultBranchGenerator(g *BranchGenerator) {
 	}
 }
 
-// Version is the User-Agent suffix (declared in sip.go, re-exported here
-// for documentation). The canonical definition lives in sip.go and is
-// overridable via SetVersion in tests.
-var _versionDoc = Version // re-export reference (unused at runtime)
-
 // --- Request --------------------------------------------------------------
 
 // BuildRequest constructs a SIP request message. The method and target
@@ -286,9 +281,7 @@ func BuildRequest(method sip.RequestMethod, target string, opts ...BuildOption) 
 	}
 
 	// Extra headers (e.g. X-GB-Ver).
-	for _, h := range cfg.headers {
-		hdrs = append(hdrs, h)
-	}
+	hdrs = append(hdrs, cfg.headers...)
 	if cfg.xGBVer != "" {
 		hdrs = append(hdrs, newXGBVer(cfg.xGBVer))
 	}
@@ -369,9 +362,7 @@ func BuildResponse(status sip.StatusCode, opts ...BuildOption) (sip.Response, er
 	if err != nil {
 		return nil, err
 	}
-	for _, h := range cfg.headers {
-		hdrs = append(hdrs, h)
-	}
+	hdrs = append(hdrs, cfg.headers...)
 
 	resp := sip.NewResponse(
 		"",

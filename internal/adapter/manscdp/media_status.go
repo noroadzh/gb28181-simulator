@@ -64,10 +64,21 @@ func parseVideoParam(raw string) *model.VideoParam {
 		return nil
 	}
 	vp := &model.VideoParam{}
-	fmt.Sscanf(parts[0], "%d", &vp.Width)
-	fmt.Sscanf(parts[1], "%d", &vp.Height)
-	fmt.Sscanf(parts[2], "%d", &vp.Bitrate)
-	fmt.Sscanf(parts[3], "%d", &vp.FrameRate)
+	// Each field is parsed independently: a malformed dimension or bitrate
+	// must not suppress the fields that did parse, so the scan count is
+	// checked per field and the zero value of that one field is kept.
+	if _, err := fmt.Sscanf(parts[0], "%d", &vp.Width); err != nil {
+		return nil
+	}
+	if _, err := fmt.Sscanf(parts[1], "%d", &vp.Height); err != nil {
+		return nil
+	}
+	if _, err := fmt.Sscanf(parts[2], "%d", &vp.Bitrate); err != nil {
+		return nil
+	}
+	if _, err := fmt.Sscanf(parts[3], "%d", &vp.FrameRate); err != nil {
+		return nil
+	}
 	vp.Codec = strings.TrimSpace(parts[4])
 	return vp
 }

@@ -101,8 +101,7 @@ func (t *acceptorTransport) responses() []model.Message {
 func (t *acceptorTransport) answers() int { return len(t.delivered()) }
 
 type fakeChallenger struct {
-	realm string
-	seq   int
+	seq int
 }
 
 func (c *fakeChallenger) Challenge(realm string) (model.Challenge, error) {
@@ -257,7 +256,7 @@ func acceptorFixture(t *testing.T, auth port.Authenticator) (
 	if err := acceptor.Serve(nodeID, tr, "3402000000", policy); err != nil {
 		t.Fatalf("Serve: %v", err)
 	}
-	t.Cleanup(func() { acceptor.Close() })
+	t.Cleanup(func() { _ = acceptor.Close() })
 	return acceptor, tr, creds, devices, nodeID
 }
 
