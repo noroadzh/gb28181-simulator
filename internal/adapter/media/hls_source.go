@@ -20,6 +20,13 @@ type HLSSource struct {
 	client *http.Client
 	mu     sync.Mutex
 	closed bool
+
+	// cancel interrupts the in-flight HTTP request that stream is blocked
+	// on. pw is the writer half of the pipe that the reader is waiting on;
+	// closing it with an error wakes the reader with a non-EOF result so
+	// that "we stopped this" is distinguishable from "the source ran out".
+	cancel context.CancelFunc
+	pw     *io.PipeWriter
 }
 
 // NewHLSSource builds an HLS-backed MediaSource.
@@ -32,20 +39,30 @@ func NewHLSSource(config model.MediaConfig) *HLSSource {
 
 // Open fetches the playlist and starts streaming segments.
 func (h *HLSSource) Open(ctx context.Context) (io.ReadCloser, error) {
-	segments, err := h.fetchSegments(ctx)
+	// Use a child of the caller's context: the stream goroutine is not
+	// allowed to outlive either the caller cancelling or the source being
+	// closed, and a cancellable child makes both paths expressible without
+	// a custom signal channel.
+	runCtx, cancel := context.WithCancel(ctx)
+	segments, err := h.fetchSegments(runCtx)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	if len(segments) == 0 {
+		cancel()
 		return nil, fmt.Errorf("hls: no segments in playlist")
 	}
 
+	pr, pw := io.Pipe()
+
 	h.mu.Lock()
 	h.closed = false
+	h.cancel = cancel
+	h.pw = pw
 	h.mu.Unlock()
 
-	pr, pw := io.Pipe()
-	go h.stream(ctx, segments, pw)
+	go h.stream(runCtx, segments, pw)
 	return pr, nil
 }
 
@@ -105,11 +122,35 @@ func (h *HLSSource) stream(ctx context.Context, segments []string, w *io.PipeWri
 	}
 }
 
-// Close stops the segment downloader.
+// Close stops the segment downloader. It is idempotent: a second call sees
+// the closed flag and returns nil without touching anything.
+//
+// Three things have to happen, in any order, for a slow segment fetch to
+// stop promptly: cancel() releases the HTTP client blocked on client.Do
+// and io.ReadAll, pw.CloseWithError wakes the reader with a non-EOF error
+// (so the call site can tell "we closed it" from "the source ended"), and
+// the closed flag stops a future Open from racing the in-flight stream.
+// We pull cancel and pw out under the lock and use them outside it so a
+// concurrent Open cannot observe them half-set.
 func (h *HLSSource) Close() error {
 	h.mu.Lock()
+	if h.closed {
+		h.mu.Unlock()
+		return nil
+	}
 	h.closed = true
+	cancel := h.cancel
+	pw := h.pw
+	h.cancel = nil
+	h.pw = nil
 	h.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	if pw != nil {
+		pw.CloseWithError(ErrSourceClosed)
+	}
 	return nil
 }
 

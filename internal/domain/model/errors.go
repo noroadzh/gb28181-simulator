@@ -10,4 +10,12 @@ import "errors"
 var (
 	ErrUnknownNode   = errors.New("model: unknown node")
 	ErrUnknownDevice = errors.New("model: unknown downstream device")
+
+	// ErrSourceClosed is what a reader of an already-closed media source
+	// gets back. It is a domain error because the distinction callers care
+	// about is "we closed it" versus "it broke": shutting a session down is
+	// not a media fault, and the node lifecycle must not be told it is.
+	// Every layer agrees on that meaning, so the sentinel lives here as well
+	// as next to the sources that raise it.
+	ErrSourceClosed = errors.New("model: media source closed")
 )

@@ -86,6 +86,8 @@ MUST 通过节点生命周期上报，且不中断信令。
 `MediaService` 是出站管道的入口：把源、PS 封装、RTP 分包串起来，对外暴露
 开/关/读；源失败只报错到节点生命周期，不中断信令。
 
+媒体源关闭语义（2026-09-30 fix-concurrency-lifecycles 新增的不变量）：任何媒体源的 `Close()` MUST 使此前 `Open()` 返回的 reader 的阻塞中的 `Read()` 在 100ms 内返回非 nil 错误，无论调用方传入的 context 是否已取消；源内部的下流 goroutine（如 HLS 分片下载循环）MUST 在 `Close()` 后退出。重复调用 `Close()` MUST 幂等且不 panic。
+
 #### Scenario: Open 把配置好的源接入管道
 
 - **WHEN** 以源名称和 transport 配置调用 `Open`
@@ -101,6 +103,16 @@ MUST 通过节点生命周期上报，且不中断信令。
 
 - **WHEN** 对已打开的 `MediaService` 调用 `Close`
 - **THEN** 源被关闭，管道被拆除，后续读取返回 closed 错误
+
+#### Scenario: Close 打断慢分片的阻塞 Read（fix-concurrency-lifecycles 新增）
+
+- **WHEN** HLS 源正在等待对端产出下一个分片（可能耗时数秒），调用方在未取消 context 的情况下调用 `Close()`
+- **THEN** `Open()` 返回的 reader 的阻塞 `Read` 在 100ms 内返回非 nil 错误，内部下载 goroutine 随之退出
+
+#### Scenario: Close 幂等（fix-concurrency-lifecycles 新增）
+
+- **WHEN** 对同一媒体源实例连续调用两次 `Close()`
+- **THEN** 第二次调用无错误无 panic 返回，且第一次调用启动的 goroutine 不残留
 
 ### Requirement: 按需声明 SDP capability module
 

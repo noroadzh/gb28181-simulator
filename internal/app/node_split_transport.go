@@ -4,6 +4,7 @@ package app
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
 	"github.com/your-org/gb28181-simulator/internal/domain/port"
@@ -68,6 +69,13 @@ type splitTransport struct {
 	// by splitQueue.
 	uas chan arrival
 	uac chan arrival
+
+	// closed makes a send racing the close give up instead of panicking on
+	// a closed channel, and closeOnce makes a second Close a no-op. The
+	// flag is stored before anything is torn down, so a sender that reads
+	// false still has time to deliver.
+	closed    atomic.Bool
+	closeOnce sync.Once
 
 	mu       sync.Mutex
 	handlers map[string]*transactionHandler
@@ -135,11 +143,7 @@ func (s *splitTransport) dispatch(a arrival) {
 			}
 		}
 		// Fall back to default: responses go to the upstream half.
-		select {
-		case s.uac <- a:
-		default:
-			// The upstream half is not reading; drop silently.
-		}
+		s.trySend(s.uac, a)
 		return
 	}
 
@@ -148,26 +152,22 @@ func (s *splitTransport) dispatch(a arrival) {
 	callID := extractCallID(msg)
 	method := msg.Method()
 	if callID != "" && (method == "INVITE" || method == "SUBSCRIBE") {
+		// One critical section covers the check and the write: between
+		// them an UnregisterHandler used to be able to delete the entry
+		// the write was about to blindly re-create.
 		s.mu.Lock()
-		_, already := s.handlers[callID]
-		s.mu.Unlock()
-		if !already {
+		if _, already := s.handlers[callID]; !already {
 			// Register a default handler that forwards to the serving half.
 			// The serving half can override this via RegisterHandler before
 			// the response arrives.
-			h := &transactionHandler{
+			s.handlers[callID] = &transactionHandler{
 				half: halfServing,
 				fn: func(m model.Message, p string) {
-					select {
-					case s.uas <- arrival{msg: m, peer: p}:
-					default:
-					}
+					s.trySend(s.uas, arrival{msg: m, peer: p})
 				},
 			}
-			s.mu.Lock()
-			s.handlers[callID] = h
-			s.mu.Unlock()
 		}
+		s.mu.Unlock()
 	}
 
 	// ACK for a pending INVITE is consumed by the transaction handler so
@@ -183,10 +183,26 @@ func (s *splitTransport) dispatch(a arrival) {
 	}
 
 	// All other requests go to the serving half.
+	s.trySend(s.uas, a)
+}
+
+// trySend delivers a to ch unless the splitter is closed. The closed flag
+// is what makes this safe to call from a handler that a closing splitter
+// can no longer reach: every sender that went through dispatch stopped
+// when the reader did, but a handler registered from outside is fired by
+// whoever owns the transaction, and may fire once more after Close has
+// returned. For such a late send, dropping is the only non-panicking
+// outcome — the halves are gone and nobody is reading.
+func (s *splitTransport) trySend(ch chan arrival, a arrival) bool {
+	if s.closed.Load() {
+		return false
+	}
 	select {
-	case s.uas <- a:
+	case ch <- a:
+		return true
 	default:
-		// The serving half is not reading; drop silently.
+		// The half is not reading; drop rather than jam the reader.
+		return false
 	}
 }
 
@@ -201,14 +217,20 @@ func (s *splitTransport) Upstream() port.SIPTransport { return splitHalf{split: 
 // Close ends the sorting and waits for the reader to stop. It does not close
 // the socket itself — that belongs to the lifecycle that bound it.
 //
-// The two queues are closed once the reader has stopped, so a half that is
-// still waiting is released instead of waiting forever for a message that
-// can no longer arrive.
+// The order matters. The closed flag goes up first, so any send that races
+// the close sees it and gives up; then the reader is waited out, which
+// guarantees no dispatch is in flight; only then are the queues closed, so
+// a half still waiting on them is released instead of waiting forever for
+// a message that can no longer arrive. A second Close is a no-op: closing
+// an already-closed channel would panic.
 func (s *splitTransport) Close() error {
-	s.cancel()
-	<-s.done
-	close(s.uas)
-	close(s.uac)
+	s.closeOnce.Do(func() {
+		s.closed.Store(true)
+		s.cancel()
+		<-s.done
+		close(s.uas)
+		close(s.uac)
+	})
 	return nil
 }
 

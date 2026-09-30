@@ -72,10 +72,16 @@ func supportedSubscribeEvent(raw string) (string, bool) {
 	return "", false
 }
 
-// inviteTimers maps Call-ID → *time.Timer for pending INVITE dialogs waiting
-// for ACK. The splitTransport dispatch checks this map to route ACK requests
-// to the serving half so the expiry timer can be cancelled.
-var inviteTimers sync.Map
+// inviteWatch pairs a pending INVITE's expiry timer with a stop channel so
+// the goroutine that waits for it can be woken up at three points: natural
+// expiry (timer.C), explicit cancellation by ACK or by the call site
+// (done), or whole-node shutdown (a.ctx.Done()). Without the stop channel,
+// calling timer.Stop would leave the goroutine blocked forever on a
+// channel that will never fire.
+type inviteWatch struct {
+	timer *time.Timer
+	done  chan struct{}
+}
 
 // Acceptor is the UAS half of the simulator: for every platform-large node
 // it runs one goroutine that receives REGISTERs on that node's transport,
@@ -117,6 +123,16 @@ type Acceptor struct {
 	serving map[string]*platform
 	cascade port.CascadeHandler
 	faults  port.FaultStore
+
+	// inviteMu guards both invite maps. Watchers live for the life of one
+	// pending INVITE and are removed either by the timer firing or by an
+	// explicit cancel (ACK arrived, or node is stopping). Keeping them on the
+	// acceptor instead of in a package-level sync.Map means two Acceptor
+	// instances (e.g. one per node in a multi-tenant process, or two test
+	// fixtures running side by side) never see each other's timers.
+	inviteMu       sync.Mutex
+	inviteTimers   map[string]*time.Timer
+	inviteWatchers map[string]chan struct{}
 }
 
 // platform is one node's serving goroutine and the settings it serves with.
@@ -245,17 +261,19 @@ func NewAcceptor(
 		log = slog.Default()
 	}
 	return &Acceptor{
-		ctx:           ctx,
-		clock:         clock,
-		challenger:    challenger,
-		authenticator: authenticator,
-		creds:         creds,
-		devices:       devices,
-		manscdp:       manscdp,
-		newTicker:     newTicker,
-		log:           log.With("component", "internal/app", "subsystem", "sip_acceptor"),
-		serving:       make(map[string]*platform),
-		pipelines:     make(map[string]*InboundPipeline),
+		ctx:             ctx,
+		clock:           clock,
+		challenger:      challenger,
+		authenticator:   authenticator,
+		creds:           creds,
+		devices:         devices,
+		manscdp:         manscdp,
+		newTicker:       newTicker,
+		log:             log.With("component", "internal/app", "subsystem", "sip_acceptor"),
+		serving:         make(map[string]*platform),
+		pipelines:       make(map[string]*InboundPipeline),
+		inviteTimers:    make(map[string]*time.Timer),
+		inviteWatchers:  make(map[string]chan struct{}),
 	}, nil
 }
 
@@ -875,26 +893,66 @@ func (a *Acceptor) handleInvite(
 // watchInviteExpiry schedules a 30 s timer for the INVITE dialog. If the ACK
 // is not received in time the dialog is terminated, which tears down the
 // inbound media pipeline through the manager's onDelete callback.
+//
+// The watcher goroutine exits on whichever of three signals fires first:
+// the timer firing, an explicit cancellation (ACK arrived), or the parent
+// node stopping. That third arm is the one the previous implementation
+// missed, and is the reason this used to leak a goroutine per cancel.
 func (a *Acceptor) watchInviteExpiry(p *platform, callID string) {
 	timer := time.NewTimer(30 * time.Second)
-	inviteTimers.Store(callID, timer)
+	done := make(chan struct{})
+
+	a.inviteMu.Lock()
+	a.inviteTimers[callID] = timer
+	a.inviteWatchers[callID] = done
+	a.inviteMu.Unlock()
+
 	go func() {
-		<-timer.C
-		a.log.Debug("INVITE expired without ACK, terminating dialog",
-			"node_id", p.id.String(), "call_id", callID)
-		if a.dialogs != nil {
-			a.dialogs.Terminate(callID)
+		select {
+		case <-timer.C:
+			a.log.Debug("INVITE expired without ACK, terminating dialog",
+				"node_id", p.id.String(), "call_id", callID)
+			if a.dialogs != nil {
+				a.dialogs.Terminate(callID)
+			}
+		case <-done:
+			// Cancelled by ACK or call-site termination; nothing to do.
+		case <-p.done:
+			// The node that owned this dialog stopped serving (Stop and
+			// Close both wait for p.done), so the dialog table is being
+			// unwound by whoever stopped it. Tearing down from here
+			// would report a media fault for a clean shutdown.
+		case <-a.ctx.Done():
+			// The whole acceptor is shutting down: same reasoning, one
+			// level up.
 		}
-		inviteTimers.Delete(callID)
+		a.inviteMu.Lock()
+		delete(a.inviteTimers, callID)
+		delete(a.inviteWatchers, callID)
+		a.inviteMu.Unlock()
 	}()
 }
 
 // cancelInviteExpiry stops a pending INVITE expiry timer and removes it.
+// Closing the done channel is what wakes the watcher goroutine; timer.Stop
+// alone would not, because Stop on an unfired timer does not drain the
+// channel that the goroutine is reading.
 func (a *Acceptor) cancelInviteExpiry(callID string) {
-	if v, ok := inviteTimers.LoadAndDelete(callID); ok {
-		if t, ok := v.(*time.Timer); ok {
-			t.Stop()
-		}
+	a.inviteMu.Lock()
+	timer, timerOK := a.inviteTimers[callID]
+	done, doneOK := a.inviteWatchers[callID]
+	delete(a.inviteTimers, callID)
+	delete(a.inviteWatchers, callID)
+	a.inviteMu.Unlock()
+
+	if !timerOK && !doneOK {
+		return
+	}
+	if doneOK {
+		close(done)
+	}
+	if timerOK {
+		timer.Stop()
 	}
 }
 

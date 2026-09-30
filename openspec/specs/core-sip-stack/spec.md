@@ -6,7 +6,7 @@
 
 ## Requirements
 
-### 需求：SIP 消息往返保持线上字节一致
+### Requirement: SIP 消息往返保持线上字节一致
 
 系统 MUST 能构建与解析 SIP 请求和响应消息，其线上字节表示在 start-line、头字段和 SDP body 上与 GB/T 28181 §L.1（RFC 3261）一致，**不得**进行有损重格式化。调用方显式提供的头部 MUST 在 stack 执行的每次转换中均保留，包括从领域消息类型传递到线编码器的过程：丢弃调用方提供的头部（如 `Contact`、`Expires`、`Authorization`）是缺陷，不被允许的简化。
 
@@ -30,7 +30,7 @@
 - **WHEN** 以 TCP 传输发送一条由上层构造的请求
 - **THEN** `Via` 头中的传输协议为 `TCP`（而非固定 `UDP`）；未指定传输时沿用默认 UDP，行为不变
 
-### 需求： GB/T 28181 mandatory headers auto-filled
+### Requirement:  GB/T 28181 mandatory headers auto-filled
 
 系统 MUST 在调用方未提供时自动填充 GB/T 28181-2016 §L.1 §L.2 要求的头部：唯一的 `Via` 分支（`z9hG4bK-` + 12 位随机 base32 字符）、`Max-Forwards`（默认 70）、`Content-Length`（有 body 时填充）和 `User-Agent`（包含模拟器版本号）。
 
@@ -44,7 +44,7 @@
 - **WHEN** 构造请求同时提供 body 与 `Content-Type: Application/SDP`
 - **THEN** 序列化结果包含 `Content-Length: <n>`，其中 `<n>` 等于 body 字节数；不重复出现上层显式给出的 Content-Length（避免双头）
 
-### 需求： GB/T 28181-2016 §K SDP parsing
+### Requirement:  GB/T 28181-2016 §K SDP parsing
 
 系统 MUST 解析包含 GB/T 28181 §K 扩展行的 SDP body：`y=`（32 位十进制 SSRC）与 `f=`（媒体选项：`v` / `AudioTrack` / `VideoTrack` / `AudioVideoTrack` / `Metadata`），以结构化字段暴露且不丢失 RFC 4566 各段内容。
 
@@ -58,7 +58,7 @@
 - **WHEN** 收到的 SDP body 不含 §K 扩展（纯 RFC 4566）
 - **THEN** 解析成功；`SSRC()` 返回空字符串，`MediaOption()` 返回空字符串；上层应能区分"未声明"与"声明为空"
 
-### 需求： GB/T 28181 §K SDP serialization
+### Requirement:  GB/T 28181 §K SDP serialization
 
 系统 MUST 按 GB/T 28181-2016 §K.2 的顺序 marshal 包含 `y=` 与 `f=` 行的 SDP body：两行位于 `m=`/`a=`（媒体描述块）之后、下一个 `m=` 之前，且 MUST 按 `y=`、再 `f=` 的顺序出现。
 
@@ -72,7 +72,7 @@
 - **WHEN** 上层 SSRC 为空
 - **THEN** marshal 结果不含空 `y=` 行；`f=` 仍可独立输出
 
-### 需求： Digest challenge and response (RFC 2617 / RFC 7616 / GB28181)
+### Requirement:  Digest challenge and response (RFC 2617 / RFC 7616 / GB28181)
 
 系统 MUST 覆盖 GB/T 28181 Digest 认证的双向流程。Server 侧：生成包含 `realm`、`nonce`、`qop=auth`、`algorithm=MD5` 与可选 `opaque` 的 `WWW-Authenticate` 挑战。Client 侧：解析此类挑战（包括从第三方平台收到的），并生成匹配的 `Authorization` 头值——提供 `qop=auth` 时按 RFC 7616 §3.4 计算 `response`（携带 `nc`、`cnonce`），否则按 RFC 2617 §3 计算，并以正确的引号包裹方式渲染完整头部。不支持的 `algorithm` 取值 MUST 显式报错，不得静默回退。
 
@@ -124,9 +124,11 @@
 - **WHEN** `WWW-Authenticate` 的 `algorithm` 为 MD5 / MD5-sess 之外的值
 - **THEN** 生成 Authorization 返回"算法不支持"的错误，不静默按 MD5 计算
 
-### 需求：进程内多传输监听器
+### Requirement: 进程内多传输监听器
 
 系统 MUST 支持在同一进程内绑定多个 SIP 传输监听器，各自绑定独立的本地地址，每个监听器拥有独立的 TCP/UDP socket 和隔离的发送/接收队列。
+
+传输队列的并发关闭契约（2026-09-30 fix-concurrency-lifecycles 新增的不变量）：队列的 `Close()` MUST 与消息分发及外部注册的事务 handler 并发安全；`Close()` 返回后任何对内部队列的 send MUST NOT panic——与关闭竞争的 send 要么成功投递要么被静默丢弃。队列关闭顺序 MUST 为：先置 closed 标志 → 再 close channel → 最后等待 reader 退出。重复调用 `Close()` MUST 幂等。
 
 #### 场景：同一进程内两个 UDP 监听器
 
@@ -138,7 +140,17 @@
 - **WHEN** 调用 `Transport.Close()`
 - **THEN** 原绑定端口可被后续 `Transport(bind=<same>)` 立即重新绑定（无 TIME_WAIT 阻塞）
 
-### 需求：SIP 传输层显式暴露对端与目标地址
+#### 场景：关闭与事务 handler 并发不 panic（fix-concurrency-lifecycles 新增）
+
+- **WHEN** 外部注册的事务 handler 恰好在节点停止、队列被关闭的同一时刻被触发
+- **THEN** 不发生 `send on closed channel` panic；竞争中的消息要么投递成功要么被静默丢弃
+
+#### 场景：重复 Close 幂等（fix-concurrency-lifecycles 新增）
+
+- **WHEN** 对同一 splitter/transport 队列实例连续调用两次 `Close()`
+- **THEN** 第二次调用返回 nil，channel 与 reader 均不再被触碰
+
+### Requirement: SIP 传输层显式暴露对端与目标地址
 
 系统 MUST 将远端端点地址显式化：发送消息时 MUST 接受目标地址，接收消息时 MUST 报告报文到达的地址。地址为 `host:port` 字符串（可选以传输 scheme 为前缀）。无法确定对端地址的传输层 MUST 显式返回错误，而非返回空字符串。
 
@@ -162,7 +174,7 @@
 - **WHEN** 传输实现无法确定对端地址
 - **THEN** 返回错误（而非返回空地址让调用方静默发往错误目标）
 
-### 需求：SIP 审计日志产生线上字节事件
+### Requirement: SIP 审计日志产生线上字节事件
 
 系统 MUST 对每条接收和发送的 SIP 消息写入结构化日志记录，包含方向（`rx`/`tx`）、传输端点（本地/远端地址）以及原始字节（trace 级别，裁剪至 4 KiB）；头部中的敏感 Digest 凭据 MUST 脱敏。
 
@@ -176,7 +188,7 @@
 - **WHEN** 上层调用 `Transport.Send(req, dst)` 成功
 - **THEN** 写入 `msg="sip tx"`，包含 `local`、`remote`、`bytes` 字段
 
-### 需求：诊断 CLI `sipprobe` 供 golden 测试使用
+### Requirement: 诊断 CLI `sipprobe` 供 golden 测试使用
 
 系统 MUST 提供 `sipprobe` 子命令，能够绑定 UDP/TCP 监听器并发送一条 SIP 消息，然后将收到的第一条响应打印到 stdout，供 CI golden 测试与开发者冒烟测试使用。在仅接收模式下，通过 `--answer` 调用时 MUST 能以 200 OK 响应入站 SIP 请求，使两个 `sipprobe` 进程无需第三方进程即可完成请求/响应交换。应答功能 MUST 显式启用：不带 `--answer` 时可观察行为不变。
 
@@ -201,7 +213,7 @@
   进程 B 执行 `sipprobe --bind udp://127.0.0.1:15061 --send-to udp://127.0.0.1:15060 --expect-status 200`
 - **THEN** B 收到 200 OK 并退出 0；A 回应后退出 0；`scripts/smoke-sip.sh` 的原始断言通过
 
-### 需求：所有支持平台 CGO-free 构建
+### Requirement: 所有支持平台 CGO-free 构建
 
 系统 MUST 在 Linux amd64/arm64、macOS amd64/arm64 与 Windows amd64 上编译并通过 `CGO_ENABLED=0 go build ./...`，本变更不引入新的 CGO 依赖。
 
