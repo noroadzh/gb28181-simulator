@@ -79,6 +79,7 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
+          RUN_DATE: ${{ github.event.repository.updated_at }}
         run: |
           mkdir -p out
           go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME} -X main.commit=${GITHUB_SHA} -X main.builtAt=${RUN_DATE}" -o out/gb28181-simulator-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./cmd/gb28181-simulator
@@ -93,8 +94,6 @@ jobs:
           name: gb28181-simulator-${{ matrix.goos }}-${{ matrix.goarch }}
           path: out/
           if-no-files-found: error
-env:
-  RUN_DATE: ${{ github.event.repository.updated_at }}
 
   # Change: fix-problems-and-smoke-deploy-docs, task 4.1.
   # One-command smoke baseline for the gb28181-simulator. Produces the
