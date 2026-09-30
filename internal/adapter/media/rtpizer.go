@@ -32,10 +32,14 @@ type RTPizer struct {
 	seq         uint16
 	payloadType uint8
 	mtu         int
+	// agg is the optional error aggregator; nil disables aggregation.
+	agg *ErrorAggregator
 }
 
-// NewRTPizer returns a configured RTPizer.
-func NewRTPizer(ssrc uint32, mtu int) *RTPizer {
+// NewRTPizer returns a configured RTPizer. A nil aggregator disables error
+// aggregation (the Packetize hot loop returns the original error without
+// recording it).
+func NewRTPizer(ssrc uint32, mtu int, agg *ErrorAggregator) *RTPizer {
 	if mtu <= 13 {
 		mtu = 1400
 	}
@@ -47,6 +51,7 @@ func NewRTPizer(ssrc uint32, mtu int) *RTPizer {
 		seq:         0,
 		payloadType: defaultRTPPayloadType,
 		mtu:         mtu,
+		agg:         agg,
 	}
 }
 
@@ -54,6 +59,9 @@ func NewRTPizer(ssrc uint32, mtu int) *RTPizer {
 // marker=true on the last packet marks the PS frame boundary.
 func (r *RTPizer) Packetize(ps model.PSFrame) ([]model.RTPPacket, error) {
 	if err := ps.Validate(); err != nil {
+		if r.agg != nil {
+			r.agg.Record("rtp-send", err)
+		}
 		return nil, err
 	}
 

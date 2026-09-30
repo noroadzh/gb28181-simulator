@@ -29,7 +29,7 @@ var sampleES = []byte{
 }
 
 func TestPSPacketizeRoundTrip(t *testing.T) {
-	pktz := NewPSPacketizer()
+	pktz := NewPSPacketizer(nil)
 	depktz := NewPSDepacketizer()
 
 	frame := model.NewESFrame(sampleES, 270000)
@@ -66,7 +66,7 @@ func TestPSPacketizeRoundTrip(t *testing.T) {
 }
 
 func TestPSDepacketizerMultipleFrames(t *testing.T) {
-	pktz := NewPSPacketizer()
+	pktz := NewPSPacketizer(nil)
 	depktz := NewPSDepacketizer()
 
 	frame1 := model.NewESFrame(sampleES, 90000)
@@ -105,7 +105,7 @@ func TestPSDepacketizerMultipleFrames(t *testing.T) {
 }
 
 func TestRTPizerSinglePacket(t *testing.T) {
-	rtp := NewRTPizer(0xABCDEF01, 1400)
+	rtp := NewRTPizer(0xABCDEF01, 1400, nil)
 
 	ps := model.PSFrame{Payload: []byte{0x01, 0x02, 0x03, 0x04, 0x05}, PTS: 123456}
 	pkts, err := rtp.Packetize(ps)
@@ -135,7 +135,7 @@ func TestRTPizerSinglePacket(t *testing.T) {
 }
 
 func TestRTPizerFragmentsLargeFrame(t *testing.T) {
-	rtp := NewRTPizer(0x12345678, 50)
+	rtp := NewRTPizer(0x12345678, 50, nil)
 
 	// A 200-byte PS frame with MTU 50 should produce multiple RTP packets.
 	ps := model.PSFrame{Payload: bytes.Repeat([]byte{0xAB}, 200), PTS: 45000}
@@ -176,7 +176,7 @@ func TestRTPizerFragmentsLargeFrame(t *testing.T) {
 }
 
 func TestRTPizerSequenceMonotonic(t *testing.T) {
-	rtp := NewRTPizer(1, 1400)
+	rtp := NewRTPizer(1, 1400, nil)
 	for i := 0; i < 100; i++ {
 		ps := model.PSFrame{Payload: []byte{byte(i)}, PTS: uint64(i)}
 		pkts, err := rtp.Packetize(ps)
@@ -196,7 +196,7 @@ func TestRTPDeizerReassemblesFrame(t *testing.T) {
 	deizer := NewRTPDeizer(0xABCDEF01)
 
 	// Build a 200-byte PS payload and fragment it with RTPizer.
-	rtp := NewRTPizer(0xABCDEF01, 50)
+	rtp := NewRTPizer(0xABCDEF01, 50, nil)
 	ps := model.PSFrame{Payload: bytes.Repeat([]byte{0xCD}, 200), PTS: 78900}
 	pkts, err := rtp.Packetize(ps)
 	if err != nil {
@@ -232,7 +232,7 @@ func TestRTPDeizerReassemblesFrame(t *testing.T) {
 func TestRTPDeizerMarkerEndsFrame(t *testing.T) {
 	deizer := NewRTPDeizer(0xDEADBEEF)
 
-	rtp := NewRTPizer(0xDEADBEEF, 30)
+	rtp := NewRTPizer(0xDEADBEEF, 30, nil)
 	// 36 bytes > MTU(30)-12 = 18, so RTPizer produces exactly 2 packets.
 	ps := model.PSFrame{Payload: bytes.Repeat([]byte{0x01, 0x02, 0x03}, 12), PTS: 5000}
 	pkts, err := rtp.Packetize(ps)
@@ -322,7 +322,7 @@ func TestRTPGoldenRoundTrip(t *testing.T) {
 	}
 
 	// Slice the golden PS bytes through RTPizer then rebuild via RTPDeizer.
-	rtp := NewRTPizer(0xABCDEF01, 1400)
+	rtp := NewRTPizer(0xABCDEF01, 1400, nil)
 	deizer := NewRTPDeizer(0xABCDEF01)
 
 	ps := model.PSFrame{Payload: golden, PTS: 270000}
@@ -356,7 +356,7 @@ func TestRTPGoldenRoundTrip(t *testing.T) {
 func TestRTPDeizerDedupAndLoss(t *testing.T) {
 	deizer := NewRTPDeizer(0xCAFEBABE)
 
-	rtp := NewRTPizer(0xCAFEBABE, 40)
+	rtp := NewRTPizer(0xCAFEBABE, 40, nil)
 	ps := model.PSFrame{Payload: bytes.Repeat([]byte{0x5A}, 100), PTS: 100000}
 	pkts, err := rtp.Packetize(ps)
 	if err != nil {
@@ -391,7 +391,7 @@ func TestRTPDeizerDedupAndLoss(t *testing.T) {
 
 func TestRTPizerMTUConfigurable(t *testing.T) {
 	for _, mtu := range []int{13, 100, 1400, 60000} {
-		rtp := NewRTPizer(1, mtu)
+		rtp := NewRTPizer(1, mtu, nil)
 		// Use a payload larger than MTU to force fragmentation.
 		ps := model.PSFrame{Payload: bytes.Repeat([]byte{0xFF}, mtu*3), PTS: 1}
 		pkts, err := rtp.Packetize(ps)
@@ -418,7 +418,7 @@ func TestRTPizerMTUConfigurable(t *testing.T) {
 
 func TestRTPizerDefaultMTU(t *testing.T) {
 	// Zero MTU must normalize to the documented default of 1400.
-	rtp := NewRTPizer(1, 0)
+	rtp := NewRTPizer(1, 0, nil)
 	ps := model.PSFrame{Payload: bytes.Repeat([]byte{0x11}, 2000), PTS: 1}
 	pkts, err := rtp.Packetize(ps)
 	if err != nil {

@@ -131,6 +131,22 @@ func (a *ErrorAggregator) Sweep() {
 	}
 }
 
+// Snapshot returns a copy of the current per-signature counts. It is intended
+// for tests that need to assert which signatures have been recorded without
+// driving a sweep. Safe for concurrent use.
+func (a *ErrorAggregator) Snapshot() map[string]int {
+	if a == nil {
+		return nil
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make(map[string]int, len(a.entries))
+	for sig, e := range a.entries {
+		out[sig] = e.count
+	}
+	return out
+}
+
 // Flush reports every active window immediately and stops accepting new
 // records. Call at shutdown so the operator does not lose the last burst.
 func (a *ErrorAggregator) Flush() {

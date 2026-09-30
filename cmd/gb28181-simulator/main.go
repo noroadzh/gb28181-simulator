@@ -348,10 +348,32 @@ func run() error {
 			// The SSRC used here is a process-default; per-session SDP can
 			// override it later when INVITE handling (#9) lands.
 			const defaultSSRC uint32 = 0xABCDEF01
+
+			// Media hot-loop error aggregator (openspec/changes/media-aggregator-integration):
+			// shared across every PS/RTP packetizer created by the factories
+			// below; a background ticker rolls the 60s window, and Flush() at
+			// shutdown prevents losing the final burst.
+			mediaAgg := media.NewErrorAggregator()
+			defer mediaAgg.Flush()
+			mediaAggCtx, mediaAggStop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			defer mediaAggStop()
+			go func() {
+				ticker := time.NewTicker(media.DefaultWindow)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-mediaAggCtx.Done():
+						return
+					case <-ticker.C:
+						mediaAgg.Sweep()
+					}
+				}
+			}()
+
 			mediaService = app.NewMediaService(
 				func(cfg model.MediaConfig) port.MediaSource { return media.NewFileSource(cfg) },
-				func() port.PSPacketizer { return media.NewPSPacketizer() },
-				func(mtu int) port.RTPizer { return media.NewRTPizer(defaultSSRC, mtu) },
+				func() port.PSPacketizer { return media.NewPSPacketizer(mediaAgg) },
+				func(mtu int) port.RTPizer { return media.NewRTPizer(defaultSSRC, mtu, mediaAgg) },
 				logging.L(),
 			)
 			defer func() { _ = mediaService.Close() }()

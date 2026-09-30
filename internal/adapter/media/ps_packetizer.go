@@ -39,11 +39,17 @@ const defaultMuxRate = 9000000
 //	<ES payload>
 type PSPacketizer struct {
 	muxRate uint32
+	// agg is the optional error aggregator. nil disables aggregation; the
+	// Record method is itself nil-safe but skipping the call entirely keeps
+	// the hot loop cheaper.
+	agg *ErrorAggregator
 }
 
-// NewPSPacketizer returns a PSPacketizer ready to emit PS frames.
-func NewPSPacketizer() *PSPacketizer {
-	return &PSPacketizer{muxRate: defaultMuxRate}
+// NewPSPacketizer returns a PSPacketizer ready to emit PS frames. A nil
+// aggregator disables error aggregation (the Packetize hot loop returns the
+// original error without recording it).
+func NewPSPacketizer(agg *ErrorAggregator) *PSPacketizer {
+	return &PSPacketizer{muxRate: defaultMuxRate, agg: agg}
 }
 
 // streamIDForKind returns the MPEG-2 PES stream_id for the given frame kind.
@@ -59,6 +65,9 @@ func streamIDForKind(kind model.ESFrameKind) byte {
 // bytes so the caller does not need to prepend anything.
 func (p *PSPacketizer) Packetize(frame model.ESFrame) (model.PSFrame, error) {
 	if err := frame.Validate(); err != nil {
+		if p.agg != nil {
+			p.agg.Record("ps-mux", err)
+		}
 		return model.PSFrame{}, err
 	}
 

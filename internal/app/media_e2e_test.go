@@ -28,8 +28,8 @@ func TestE2E_OutboundSyntheticToRTP(t *testing.T) {
 	// Build the real MediaService with the adapter factories wired.
 	svc := NewMediaService(
 		func(cfg model.MediaConfig) port.MediaSource { return media.NewSyntheticSource(cfg) },
-		func() port.PSPacketizer { return media.NewPSPacketizer() },
-		func(mtu int) port.RTPizer { return media.NewRTPizer(defaultSSRC, mtu) },
+		func() port.PSPacketizer { return media.NewPSPacketizer(nil) },
+		func(mtu int) port.RTPizer { return media.NewRTPizer(defaultSSRC, mtu, nil) },
 		slog.Default(),
 	)
 
@@ -117,14 +117,14 @@ func TestE2E_InboundRTPToFile(t *testing.T) {
 	esFrame := model.ESFrameWithPTS(esIn, 3600)
 
 	// PS encode.
-	psPktz := media.NewPSPacketizer()
+	psPktz := media.NewPSPacketizer(nil)
 	ps, err := psPktz.Packetize(esFrame)
 	if err != nil {
 		t.Fatalf("PSPacketize: %v", err)
 	}
 
 	// RTP encode.
-	rtpPktz := media.NewRTPizer(defaultSSRC, 1400)
+	rtpPktz := media.NewRTPizer(defaultSSRC, 1400, nil)
 	rtpPkts, err := rtpPktz.Packetize(ps)
 	if err != nil {
 		t.Fatalf("RTPPacketize: %v", err)
