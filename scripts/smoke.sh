@@ -92,10 +92,16 @@ OVERALL_RC=0
 FAILED_STEP=""
 
 # ── Step 1: Go unit tests ────────────────────────────────────────────────────
+# NOTE: do not pass -race here. `-race` requires cgo, but the smoke job is
+# explicitly a "production-shape" smoke that must build with CGO_ENABLED=0
+# to match the release binaries. CI runners with Go ≥1.22 default to
+# CGO_ENABLED=1, so the combination `CGO_ENABLED=0 go test -race` aborts
+# with `go: -race requires cgo; enable cgo by setting CGO_ENABLED=1`.
+# Race coverage belongs in `make test` / the lint+test jobs, not here.
 echo ""
 echo "--- [1] go-test ---"
 T0=$(now_ms)
-if (cd "$REPO_ROOT" && CGO_ENABLED=0 go test -race -count=1 ./...) 2>&1; then
+if (cd "$REPO_ROOT" && CGO_ENABLED=0 go test -count=1 ./...) 2>&1; then
   T1=$(now_ms); DUR=$((T1 - T0))
   echo "  ✓ go-test passed in ${DUR}ms"
   append_step "go-test" "passed" "$DUR" "[]" ""
