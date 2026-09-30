@@ -81,6 +81,12 @@ jobs:
           - { goos: darwin, goarch: arm64, os: macos-latest, ext: '' }
           - { goos: windows, goarch: amd64, os: windows-latest, ext: '.exe' }
     runs-on: ${{ matrix.os }}
+    # Force bash on every OS. windows-latest otherwise defaults to PowerShell
+    # Core, which cannot parse the `for f in ...; do` loop in the Checksum
+    # step and fails with a ParserError before any checksum is produced.
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
