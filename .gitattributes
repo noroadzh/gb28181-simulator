@@ -1,0 +1,15 @@
+# 文本文件行尾策略
+# - 全仓默认 LF（与 macOS/Linux/Windows 编辑器无关，避免被 autocrlf=auto 误伤）
+# - SIP 协议相关 testdata 例外：SIP/RFC 3261 规定消息必须以 CRLF 行尾传输，
+#   golden fixture 必须保留 CRLF 字节流，否则与 gosip 的 String() 输出不匹配
+# - Windows shell 脚本保持 CRLF，保证在原生 cmd 下也能正确执行
+
+*               text=auto eol=lf
+
+# SIP 协议黄金样本（CRLF 是协议合规性的一部分，test 字节对比依赖此字节流）
+*.sip           text eol=crlf
+
+# Windows 原生脚本
+*.bat           text eol=crlf
+*.cmd           text eol=crlf
+*.ps1           text eol=crlf
