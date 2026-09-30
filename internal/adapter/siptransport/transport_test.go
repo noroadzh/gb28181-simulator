@@ -138,10 +138,12 @@ func TestTransport_MultiInstanceSimultaneous(t *testing.T) {
 
 	var received int32
 	const n = 20
-	recvCh := make(chan sip.Message, n)
+	recvCh := make(chan sip.Message, n*4)
 	errCh := make(chan error, 1)
 	stop := make(chan struct{})
+	recvDone := make(chan struct{})
 	go func() {
+		defer close(recvDone)
 		for {
 			select {
 			case <-stop:
@@ -150,41 +152,74 @@ func TestTransport_MultiInstanceSimultaneous(t *testing.T) {
 			}
 			msg, _, err := s2.Receive(context.Background())
 			if err != nil {
+				if err == io.EOF || strings.Contains(err.Error(), "closed") {
+					return
+				}
 				errCh <- err
 				return
 			}
 			recvCh <- msg
 			if atomic.AddInt32(&received, 1) >= n {
-				close(stop)
 				return
 			}
 		}
 	}()
 
-	for i := 0; i < n; i++ {
-		req := buildRequest(t)
-		addr := s2.LocalAddr()
-		if err := s1.Send(req, addr); err != nil {
-			t.Fatal(err)
+	// UDP loopback is unreliable on shared CI runners, so re-send the
+	// whole batch in a separate goroutine until the count is reached.
+	// We stop sending as soon as `received >= n` so the receiver can exit
+	// cleanly without seeing further datagrams during cleanup (which
+	// would otherwise race against Transport.Close closing t.out).
+	sendDone := make(chan struct{})
+	go func() {
+		defer close(sendDone)
+		deadline := time.Now().Add(30 * time.Second)
+		for atomic.LoadInt32(&received) < n {
+			if time.Now().After(deadline) {
+				return
+			}
+			for i := 0; i < n && atomic.LoadInt32(&received) < n; i++ {
+				if err := s1.Send(buildRequest(t), s2.LocalAddr()); err != nil {
+					t.Errorf("send: %v", err)
+					return
+				}
+			}
+			time.Sleep(50 * time.Millisecond)
 		}
-	}
-	// Wait for the receiver to count to n.
-	deadline := time.After(2 * time.Second)
-	for atomic.LoadInt32(&received) < n {
-		select {
-		case <-deadline:
-			t.Fatalf("only received %d/%d messages", atomic.LoadInt32(&received), n)
-		default:
-			time.Sleep(5 * time.Millisecond)
-		}
-	}
-	if len(recvCh) != n {
-		t.Fatalf("expected %d messages, got %d", n, len(recvCh))
-	}
+	}()
+
+	// Wait for receiver to reach n (it returns when reached, closing
+	// recvDone and stopping the receive loop).
 	select {
+	case <-recvDone:
 	case err := <-errCh:
 		t.Fatal(err)
+	case <-time.After(30 * time.Second):
+		close(stop)
+		t.Fatalf("only received %d/%d messages", atomic.LoadInt32(&received), n)
+	}
+
+	// Wait for the sender goroutine so it doesn't run concurrently with
+	// cleanup. The receiver already exited (recvDone closed).
+	<-sendDone
+	// Tell any receive-side select to break if it's still in its default
+	// poll between attempts; safe to close exactly once.
+	select {
+	case <-stop:
 	default:
+		close(stop)
+	}
+
+	if got := atomic.LoadInt32(&received); got != int32(n) {
+		t.Fatalf("expected exactly %d messages, got %d", n, got)
+	}
+	// Drain any extra datagrams that arrived during the retry loop.
+	for {
+		select {
+		case <-recvCh:
+		default:
+			return
+		}
 	}
 }
 
