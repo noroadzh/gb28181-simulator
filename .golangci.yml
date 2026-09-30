@@ -1,21 +1,24 @@
+version: "2"
+
 run:
   timeout: 5m
   tests: true
 
 linters:
+  # standard = errcheck, govet, ineffassign, staticcheck, unused
+  # staticcheck in v2 已合并 v1 的 gosimple / stylecheck。
+  default: standard
   enable:
     - errcheck
     - govet
     - staticcheck
     - unused
     - ineffassign
-    - gosimple
-    - gofmt
-    - goimports
     - misspell
     - bodyclose
 
-issues:
-  exclude-rules:
-    - path: _test\.go
-      linters: [gofmt]
+formatters:
+  # v2 把 gofmt / goimports 从 linters 移到 formatters 分区。
+  enable:
+    - gofmt
+    - goimports
