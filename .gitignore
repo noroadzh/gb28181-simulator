@@ -1,9 +1,14 @@
 # Build artifacts
 bin/
-dist/
-web/dist/
+# NOTE: `dist/` is intentionally NOT ignored at the repo root.
+# internal/interface/webui/embed/dist/ holds the Vite SPA bundle that is
+# pulled into the Go binary via `//go:embed all:embed/dist`. Keeping the
+# directory tracked in git means `go test`, `golangci-lint` and the
+# production binary can typecheck without first running `npm run build`.
+# Local per-developer scratch output should use `web/dist/` instead.
 out/
 build/
+web/dist/
 
 # Smoke test outputs (Change: fix-problems-and-smoke-deploy-docs, task 2.3)
 docs/smoke-results.json

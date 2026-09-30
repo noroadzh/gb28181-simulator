@@ -59,7 +59,9 @@ lint:
 	go vet ./...
 
 clean:
-	rm -rf $(BIN_DIR) web/node_modules internal/interface/webui/embed/dist/assets
+	# NOTE: internal/interface/webui/embed/dist is tracked in git and pulled
+	# into the Go binary via //go:embed, so it must NOT be removed here.
+	rm -rf $(BIN_DIR) web/node_modules web/dist
 
 # Change: fix-problems-and-smoke-deploy-docs, task 2.2.
 # One-command smoke baseline: tests + vet + build + cross-compile + web build + e2e.

@@ -1,10 +1,12 @@
 // Package webui exposes the embedded Vite-built Dashboard.
 //
 // The actual dist files are produced by `npm --prefix web run build` (see
-// Makefile). When dist/ has no files yet the package still compiles because
-// the //go:embed directive allows empty directories — the embed.FS will be
-// non-nil but reads will return ErrNotExist, which the SPA handler falls
-// back to a graceful HTML message.
+// Makefile) and live in internal/interface/webui/embed/dist/. They are
+// tracked in git so that `go test`, `golangci-lint` and the production
+// binary can all typecheck without first running the Node build. The
+// //go:embed directive embeds the whole subtree; a `make clean` that drops
+// the directory will make the package fail to compile — run `make web`
+// to restore it.
 package webui
 
 import (

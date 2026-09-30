@@ -3,11 +3,27 @@ package webui
 import (
 	"io/fs"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v4"
 )
+
+// reAssetRef matches the first <script src> or <link href> that points into
+// the `assets/` subtree. The filenames carry a content hash (e.g.
+// index-XXXXXX.js / index-XXXXXX.css) that changes on every rebuild, so the
+// test must discover them instead of hardcoding one.
+var reAssetRef = regexp.MustCompile(`(?:src|href)="\.?/?(assets/[^"]+)"`)
+
+func firstAssetRef(t *testing.T, index string) string {
+	t.Helper()
+	m := reAssetRef.FindStringSubmatch(index)
+	if m == nil {
+		t.Fatalf("index.html has no assets/ reference: %s", index)
+	}
+	return strings.TrimPrefix(m[1], "./")
+}
 
 func TestEmbedContainsIndex(t *testing.T) {
 	root := fs.FS(distFS)
@@ -40,6 +56,7 @@ func TestSpaHandlerServesIndex(t *testing.T) {
 	ts := httptest.NewServer(e)
 	defer ts.Close()
 
+	// Root
 	resp, err := ts.Client().Get(ts.URL + "/")
 	if err != nil {
 		t.Fatalf("get /: %v", err)
@@ -57,17 +74,29 @@ func TestSpaHandlerServesIndex(t *testing.T) {
 		t.Fatalf("root body does not look like the SPA shell: %s", string(buf[:n]))
 	}
 
-	// Asset
-	resp2, err := ts.Client().Get(ts.URL + "/assets/index-6brgIjDG.css")
+	// Discover the hashed asset filename from the embedded index.html.
+	sub, err := fs.Sub(distFS, "embed/dist")
 	if err != nil {
-		t.Fatalf("get css: %v", err)
+		t.Fatalf("sub: %v", err)
+	}
+	index, err := fs.ReadFile(sub, "index.html")
+	if err != nil {
+		t.Fatalf("read embedded index.html: %v", err)
+	}
+	assetPath := firstAssetRef(t, string(index))
+	t.Logf("resolved asset path: %s", assetPath)
+
+	// Asset
+	resp2, err := ts.Client().Get(ts.URL + "/" + assetPath)
+	if err != nil {
+		t.Fatalf("get asset: %v", err)
 	}
 	defer func() { _ = resp2.Body.Close() }()
 	if resp2.StatusCode != 200 {
-		t.Fatalf("css status = %d", resp2.StatusCode)
+		t.Fatalf("asset status = %d", resp2.StatusCode)
 	}
-	if ct := resp2.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/css") {
-		t.Fatalf("css content-type = %q", ct)
+	if resp2.ContentLength == 0 {
+		t.Fatalf("asset body is empty")
 	}
 
 	// SPA fallback

@@ -17,20 +17,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      # The webui embed package uses //go:embed all:embed/dist, so the
-      # directory must contain real assets before lint typechecks the
-      # modules. Without this step, golangci-lint v2 in modules mode
-      # fails on the empty embed directory.
-      - name: Build web assets
-        run: |
-          cd web
-          npm ci --no-audit --no-fund
-          npm run build
+      # NOTE: internal/interface/webui/embed/dist is now tracked in git, so
+      # no Node/web-build step is needed here. golangci-lint typechecks the
+      # whole module and can resolve //go:embed all:embed/dist from the
+      # committed dist/ subtree without running `npm run build` first.
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
