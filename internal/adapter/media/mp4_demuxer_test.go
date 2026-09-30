@@ -18,7 +18,7 @@ import (
 // (mp4a/AAC-LC, timescale 48000, one sample). The generator is the golden
 // fixture: any demuxer byte drift breaks the assertions below.
 
-func u8(v byte) []byte  { return []byte{v} }
+func u8(v byte) []byte { return []byte{v} }
 func u16(v uint16) []byte {
 	b := make([]byte, 2)
 	binary.BigEndian.PutUint16(b, v)
@@ -66,24 +66,24 @@ func buildMinimalMP4(t *testing.T) []byte {
 	// avcC: AVCDecoderConfigurationRecord with one 4-byte SPS and one
 	// 4-byte PPS; nalLenSize derived from byte 4 low bits = 3 → 4.
 	avcCPayload := bytes.Join([][]byte{
-		u8(0x01),                      // configurationVersion
-		u8(0x42), u8(0x00), u8(0x0A),  // profile, compat, level
-		u8(0xFF),                      // 6 reserved bits + nalLenSize-1 = 3
-		u8(0xE1),                      // reserved + numSPS = 1
+		u8(0x01),                     // configurationVersion
+		u8(0x42), u8(0x00), u8(0x0A), // profile, compat, level
+		u8(0xFF),                         // 6 reserved bits + nalLenSize-1 = 3
+		u8(0xE1),                         // reserved + numSPS = 1
 		u16(4), {0x67, 0x42, 0x00, 0x0A}, // SPS
 		u8(1),                            // numPPS
 		u16(4), {0x68, 0xCE, 0x38, 0x80}, // PPS
 	}, nil)
 	avcC := box("avcC", avcCPayload)
 	avc1 := box("avc1", bytes.Join([][]byte{
-		make([]byte, 6), u16(1),          // SampleEntry: reserved + data_ref_idx
+		make([]byte, 6), u16(1), // SampleEntry: reserved + data_ref_idx
 		u16(0), u16(0), make([]byte, 12), // pre_defined, reserved, pre_defined[3]
-		u16(320), u16(240),               // width, height
+		u16(320), u16(240), // width, height
 		u32(0x00480000), u32(0x00480000), // h/v resolution
-		u32(0),                           // reserved
-		u16(1),                           // frame_count
-		make([]byte, 32),                 // compressorname
-		u16(0x18), u16(0xFFFF),           // depth, pre_defined
+		u32(0),                 // reserved
+		u16(1),                 // frame_count
+		make([]byte, 32),       // compressorname
+		u16(0x18), u16(0xFFFF), // depth, pre_defined
 		avcC,
 	}, nil))
 
@@ -91,11 +91,11 @@ func buildMinimalMP4(t *testing.T) []byte {
 	// > DecoderSpecificInfo(0x05) carrying the ASC [0x11, 0x90]
 	// (AAC-LC, 48 kHz, stereo).
 	asc := []byte{0x11, 0x90}
-	dsi := box2(0x05, asc)                       // tag 0x05, len 2
+	dsi := box2(0x05, asc) // tag 0x05, len 2
 	dcdPayload := bytes.Join([][]byte{
-		u8(0x40),                                 // objectTypeIndication: MPEG-4 Audio
-		u8(0x15), {0x00, 0x00, 0x00},             // streamType etc + bufferSizeDB
-		u32(192000), u32(128000),                 // maxBitrate, avgBitrate
+		u8(0x40),                     // objectTypeIndication: MPEG-4 Audio
+		u8(0x15), {0x00, 0x00, 0x00}, // streamType etc + bufferSizeDB
+		u32(192000), u32(128000), // maxBitrate, avgBitrate
 	}, nil)
 	dcdPayload = append(dcdPayload, dsi...)
 	dcd := box2(0x04, dcdPayload)
@@ -104,11 +104,11 @@ func buildMinimalMP4(t *testing.T) []byte {
 	esds := box("esds", u32(0), es)
 
 	mp4a := box("mp4a", bytes.Join([][]byte{
-		make([]byte, 6), u16(1),          // SampleEntry: reserved + data_ref_idx
-		make([]byte, 8),                  // reserved[2]
-		u16(2), u16(16),                  // channelcount, samplesize
-		u16(0), u16(0),                   // pre_defined, reserved
-		u32(48000 << 16),                 // samplerate 16.16
+		make([]byte, 6), u16(1), // SampleEntry: reserved + data_ref_idx
+		make([]byte, 8), // reserved[2]
+		u16(2), u16(16), // channelcount, samplesize
+		u16(0), u16(0), // pre_defined, reserved
+		u32(48000 << 16), // samplerate 16.16
 		esds,
 	}, nil))
 
@@ -218,9 +218,9 @@ func TestMP4Demux_Golden(t *testing.T) {
 		pts     uint64
 		kind    string
 	}{
-		{goldenVideo1, 0, "video"},      // video sample 1: PTS 0 × 90000/90000
-		{goldenAudio, 0, "audio"},       // audio sample: PTS 0, tie keeps writer order
-		{goldenVideo2, 3000, "video"},   // video sample 2: delta 3000 @ 90 kHz
+		{goldenVideo1, 0, "video"},    // video sample 1: PTS 0 × 90000/90000
+		{goldenAudio, 0, "audio"},     // audio sample: PTS 0, tie keeps writer order
+		{goldenVideo2, 3000, "video"}, // video sample 2: delta 3000 @ 90 kHz
 	}
 	for i, w := range want {
 		frame, err := d.ReadFrame(ctx)

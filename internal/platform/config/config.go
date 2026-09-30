@@ -70,7 +70,7 @@ type NodePlatformConfig struct {
 	// register without a Digest password. Only suitable for trusted test
 	// or intranet deployments: any unauthenticated downstream can join
 	// and the platform skips the password compare on its side.
-	AllowNoAuth bool `mapstructure:"allow_no_auth"`
+	AllowNoAuth bool                  `mapstructure:"allow_no_auth"`
 	Accounts    []NodePlatformAccount `mapstructure:"accounts"`
 	Min         uint32                `mapstructure:"min_expires"`
 	Default     uint32                `mapstructure:"default_expires"`
@@ -133,14 +133,14 @@ func (c Config) ValidateNodes() error {
 		if n.Registration != nil {
 			r := n.Registration
 			if _, err := model.NewRegistration(model.RegistrationParams{
-				Server:    r.Server,
-				ServerID:  r.ServerID,
-				Username:  r.Username,
-				Password:  r.Password,
-				GBVersion: r.GBVersion,
-				Expires:   r.Expires,
-				Timeout:   r.Timeout,
-				Transport: r.Transport,
+				Server:      r.Server,
+				ServerID:    r.ServerID,
+				Username:    r.Username,
+				Password:    r.Password,
+				GBVersion:   r.GBVersion,
+				Expires:     r.Expires,
+				Timeout:     r.Timeout,
+				Transport:   r.Transport,
 				AllowNoAuth: r.AllowNoAuth,
 
 				HeartbeatInterval:    r.HeartbeatInterval,
@@ -210,11 +210,11 @@ func (h HTTPConfig) Addr() string {
 
 // LogConfig configures the logger package.
 type LogConfig struct {
-	Level      Level              `mapstructure:"level"`
-	File       string             `mapstructure:"file"`
-	AddSource  bool               `mapstructure:"add_source"`
-	RedactKeys []string           `mapstructure:"redact_keys"`
-	Modules    map[string]Level   `mapstructure:"modules"`
+	Level      Level            `mapstructure:"level"`
+	File       string           `mapstructure:"file"`
+	AddSource  bool             `mapstructure:"add_source"`
+	RedactKeys []string         `mapstructure:"redact_keys"`
+	Modules    map[string]Level `mapstructure:"modules"`
 }
 
 // Level is the user-facing log severity for the YAML layer. We re-use

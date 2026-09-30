@@ -27,8 +27,8 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/your-org/gb28181-simulator/internal/interface/http"
-	"github.com/your-org/gb28181-simulator/internal/platform/observability/logging"
 	platformconfig "github.com/your-org/gb28181-simulator/internal/platform/config"
+	"github.com/your-org/gb28181-simulator/internal/platform/observability/logging"
 )
 
 // A representative 20-digit GB28181 node id used by the faults-endpoint probe.

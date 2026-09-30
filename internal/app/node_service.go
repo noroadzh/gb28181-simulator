@@ -227,7 +227,6 @@ func (s *NodeService) CapturePCAP(ctx context.Context, id model.NodeID) ([]byte,
 // cannot drain the whole ring in a single response.
 const defaultCaptureQueryLimit = 256
 
-
 // WithKeeper attaches the keepalive and renewal use case. Without one a
 // registered node still comes online — its registration simply is not held
 // open, which is what tests and the other identities want.

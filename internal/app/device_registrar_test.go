@@ -55,7 +55,7 @@ func (t *scriptedTransport) Receive(ctx context.Context) (model.Message, string,
 	return model.Message{}, "", ctx.Err()
 }
 
-func (t *scriptedTransport) Close() error   { return nil }
+func (t *scriptedTransport) Close() error      { return nil }
 func (t *scriptedTransport) LocalAddr() string { return "127.0.0.1:5060" }
 
 func (t *scriptedTransport) messages() []sentMessage {

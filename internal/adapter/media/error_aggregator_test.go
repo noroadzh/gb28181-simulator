@@ -28,7 +28,7 @@ func TestErrorAggregator_WindowRollsOver(t *testing.T) {
 
 	a.Record("rtp-send", errors.New("first"))
 	a.Record("rtp-send", errors.New("second"))
-	clock = clock.Add(60 * time.Millisecond) // window elapsed
+	clock = clock.Add(60 * time.Millisecond)  // window elapsed
 	a.Record("rtp-send", errors.New("third")) // triggers rollover + fresh count
 
 	out := buf.String()

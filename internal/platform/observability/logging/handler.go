@@ -39,10 +39,10 @@ type Options struct {
 type MultiHandler struct {
 	defaultLevel Level
 	moduleLevels map[string]Level
-	addSource   bool
-	redactKeys  map[string]struct{}
-	hub         *Hub
-	writer      io.WriteCloser
+	addSource    bool
+	redactKeys   map[string]struct{}
+	hub          *Hub
+	writer       io.WriteCloser
 
 	// rwmu protects moduleLevels / defaultLevel. Reads (the Enabled fast path)
 	// take a read lock; UpdateLevels / Init takes the write lock.
@@ -69,7 +69,7 @@ func NewMultiHandlerWithModules(level slog.Level, modules map[string]Level, reda
 	return &MultiHandler{
 		defaultLevel: LevelFromSlog(level),
 		moduleLevels: cloned,
-		addSource:     addSource,
+		addSource:    addSource,
 		redactKeys:   redactSet,
 		hub:          hub,
 		writer:       writer,
@@ -194,13 +194,13 @@ func (h *MultiHandler) render(ctx context.Context, r slog.Record) ([]byte, error
 	// Emit via a fresh JSON handler bound to scratch. We avoid `h.inner`'s
 	// internal buffer because it is shared across goroutines.
 	// The inner JSON handler runs at slogLevelTrace so the per-record gating
-// above (which already dropped records below the threshold) is the only gate.
-// Avoid letting the JSON handler re-filter at the default level, which
-// would silently drop module-override trace/debug records.
-tmp := slog.NewJSONHandler(scratch, &slog.HandlerOptions{
-	Level:     slogLevelTrace,
-	AddSource: h.addSource,
-})
+	// above (which already dropped records below the threshold) is the only gate.
+	// Avoid letting the JSON handler re-filter at the default level, which
+	// would silently drop module-override trace/debug records.
+	tmp := slog.NewJSONHandler(scratch, &slog.HandlerOptions{
+		Level:     slogLevelTrace,
+		AddSource: h.addSource,
+	})
 	if err := tmp.Handle(ctx, redacted); err != nil {
 		return nil, err
 	}

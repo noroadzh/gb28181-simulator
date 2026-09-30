@@ -155,7 +155,7 @@ type platform struct {
 	// Call-ID of the SUBSCRIBE; the value carries the subscriber's peer,
 	// event and expiry. subMu guards the map because a timer goroutine
 	// may delete an expired entry while a request handler is reading it.
-	subMu      	sync.Mutex
+	subMu       sync.Mutex
 	subscribers map[string]*catalogSub
 
 	// pendingNotify carries the parameters for the initial NOTIFY that must
@@ -261,19 +261,19 @@ func NewAcceptor(
 		log = slog.Default()
 	}
 	return &Acceptor{
-		ctx:             ctx,
-		clock:           clock,
-		challenger:      challenger,
-		authenticator:   authenticator,
-		creds:           creds,
-		devices:         devices,
-		manscdp:         manscdp,
-		newTicker:       newTicker,
-		log:             log.With("component", "internal/app", "subsystem", "sip_acceptor"),
-		serving:         make(map[string]*platform),
-		pipelines:       make(map[string]*InboundPipeline),
-		inviteTimers:    make(map[string]*time.Timer),
-		inviteWatchers:  make(map[string]chan struct{}),
+		ctx:            ctx,
+		clock:          clock,
+		challenger:     challenger,
+		authenticator:  authenticator,
+		creds:          creds,
+		devices:        devices,
+		manscdp:        manscdp,
+		newTicker:      newTicker,
+		log:            log.With("component", "internal/app", "subsystem", "sip_acceptor"),
+		serving:        make(map[string]*platform),
+		pipelines:      make(map[string]*InboundPipeline),
+		inviteTimers:   make(map[string]*time.Timer),
+		inviteWatchers: make(map[string]chan struct{}),
 	}, nil
 }
 

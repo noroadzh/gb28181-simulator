@@ -50,7 +50,7 @@ func (r *recordingPlayback) Play(_ context.Context, deviceID, channelID, start, 
 	r.mu.Unlock()
 	return "sess-1", nil
 }
-func (r *recordingPlayback) Stop(_ context.Context, _ string) error    { return nil }
+func (r *recordingPlayback) Stop(_ context.Context, _ string) error { return nil }
 func (r *recordingPlayback) Query(_ context.Context, _ string) (port.PlaybackState, error) {
 	return port.PlaybackState{}, nil
 }

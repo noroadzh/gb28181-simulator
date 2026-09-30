@@ -6,12 +6,12 @@ import (
 	"time"
 
 	"github.com/your-org/gb28181-simulator/internal/adapter/audit"
+	sipauth "github.com/your-org/gb28181-simulator/internal/adapter/auth"
 	"github.com/your-org/gb28181-simulator/internal/adapter/capture"
 	"github.com/your-org/gb28181-simulator/internal/adapter/credstore"
 	"github.com/your-org/gb28181-simulator/internal/adapter/devicereg"
 	"github.com/your-org/gb28181-simulator/internal/adapter/manscdp"
 	"github.com/your-org/gb28181-simulator/internal/adapter/nodereg"
-	sipauth "github.com/your-org/gb28181-simulator/internal/adapter/auth"
 	"github.com/your-org/gb28181-simulator/internal/adapter/siptransport"
 	"github.com/your-org/gb28181-simulator/internal/app"
 	"github.com/your-org/gb28181-simulator/internal/domain/model"

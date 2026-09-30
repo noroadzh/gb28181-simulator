@@ -497,8 +497,6 @@ func childBox(entry []byte, fourCC string, fixed int) ([]byte, error) {
 	return nil, fmt.Errorf("box %s not found", fourCC)
 }
 
-
-
 // avcParameterSets extracts SPS/PPS from an avcC payload as an Annex-B
 // blob ready to be prepended to the stream.
 func avcParameterSets(avcC []byte) ([]byte, error) {

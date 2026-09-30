@@ -13,10 +13,10 @@ import (
 )
 
 type fakeScenarioRunner struct {
-	metas    []model.ScenarioMeta
-	runErr   error
-	lastOk   bool
-	lastRun  model.RunReport
+	metas   []model.ScenarioMeta
+	runErr  error
+	lastOk  bool
+	lastRun model.RunReport
 }
 
 func (f *fakeScenarioRunner) List() []model.ScenarioMeta { return f.metas }

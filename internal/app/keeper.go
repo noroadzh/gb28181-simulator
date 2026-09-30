@@ -7,8 +7,8 @@ import (
 	"io"
 	"log/slog"
 	"math/rand"
-	"strconv"
 	"slices"
+	"strconv"
 	"sync"
 	"time"
 
@@ -113,7 +113,9 @@ func (k *Keeper) keeperFaultGate(ctx context.Context, nodeID model.NodeID, metho
 }
 
 func (k *Keeper) recordFault(nodeID model.NodeID, action model.FaultAction) {
-	if rec, ok := k.faults.(interface{ Record(model.NodeID, model.FaultAction) }); ok {
+	if rec, ok := k.faults.(interface {
+		Record(model.NodeID, model.FaultAction)
+	}); ok {
 		rec.Record(nodeID, action)
 	}
 }
