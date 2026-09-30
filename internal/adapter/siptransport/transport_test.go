@@ -3,6 +3,7 @@ package siptransport_test
 import (
 	"context"
 	"io"
+	"math/rand"
 	"net"
 	"os"
 	"strings"
@@ -178,13 +179,19 @@ func TestTransport_MultiInstanceSimultaneous(t *testing.T) {
 			if time.Now().After(deadline) {
 				return
 			}
-			for i := 0; i < n && atomic.LoadInt32(&received) < n; i++ {
-				if err := s1.Send(buildRequest(t), s2.LocalAddr()); err != nil {
-					t.Errorf("send: %v", err)
-					return
-				}
+			// Send one datagram at a time with 1–3ms jitter. The s2
+			// transport is created with WithReceiveBuffer(4) and the
+			// dispatch goroutine uses a non-blocking `select { case out <-
+			// msg: default }`, so a burst larger than 4 gets silently
+			// dropped on busy CI runners. Single-shot with jitter keeps
+			// the burst size strictly ≤ the channel capacity, which is
+			// the property TestTransport_MultiInstanceSimultaneous actually
+			// wants to assert.
+			if err := s1.Send(buildRequest(t), s2.LocalAddr()); err != nil {
+				t.Errorf("send: %v", err)
+				return
 			}
-			time.Sleep(50 * time.Millisecond)
+			time.Sleep(time.Duration(rand.Intn(3)+1) * time.Millisecond)
 		}
 	}()
 
