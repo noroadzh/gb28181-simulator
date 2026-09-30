@@ -17,6 +17,20 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      # The webui embed package uses //go:embed all:embed/dist, so the
+      # directory must contain real assets before lint typechecks the
+      # modules. Without this step, golangci-lint v2 in modules mode
+      # fails on the empty embed directory.
+      - name: Build web assets
+        run: |
+          cd web
+          npm ci --no-audit --no-fund
+          npm run build
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
@@ -30,6 +44,12 @@ jobs:
       matrix:
         os: [ubuntu-24.04, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    # Force bash on every OS so the test step parses arguments identically:
+    # windows-latest would otherwise default to PowerShell Core, which has
+    # produced broken command parsing on this job in the past.
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -46,13 +66,19 @@ jobs:
           npm ci --no-audit --no-fund
           npm run build
       - name: Test
-        run: go test -race -covermode=atomic -coverprofile=coverage.out ./...
+        run: |
+          # Coverage profile lives in ./build/ to avoid clashing with anything
+          # that might create an `out/` or `.out` artifact in the workspace
+          # root (CI runners have been seen to leave stray `.out` entries that
+          # confuse `go test ./...` on Windows).
+          mkdir -p build
+          go test -race -covermode=atomic -coverprofile=build/coverage.txt ./...
       - name: Upload coverage
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
         with:
           name: coverage-${{ runner.os }}
-          path: coverage.out
+          path: build/coverage.txt
 
   build:
     needs: [lint, test]
