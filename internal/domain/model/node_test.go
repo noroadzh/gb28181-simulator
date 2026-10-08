@@ -184,3 +184,110 @@ func TestNode_StartsIdleAndAdvances(t *testing.T) {
 		t.Errorf("receiver mutated to %v, want idle", n.Status())
 	}
 }
+
+func TestNodeProfile_MediaConfig_RoundTrip(t *testing.T) {
+	p, err := NewNodeProfile("34020000001110000001", "127.0.0.1:5060", "3402000000", "test")
+	if err != nil {
+		t.Fatalf("NewNodeProfile: %v", err)
+	}
+	if _, ok := p.MediaConfig(); ok {
+		t.Fatalf("fresh profile reports media, want none")
+	}
+	cfg := MediaConfig{
+		Kind:  SourceKindSynthetic,
+		Path:  "",
+		SSRC:  0x1234,
+		MTU:   1300,
+		FPS:   30,
+		Clock: 90000,
+	}
+	p.SetMediaConfig(cfg)
+	got, ok := p.MediaConfig()
+	if !ok {
+		t.Fatalf("after Set, MediaConfig reports !ok")
+	}
+	if got.Kind != SourceKindSynthetic {
+		t.Errorf("kind = %q, want synthetic", got.Kind)
+	}
+	if got.SSRC != 0x1234 || got.MTU != 1300 || got.FPS != 30 {
+		t.Errorf("media fields lost: %+v", got)
+	}
+}
+
+func TestNodeProfile_MediaConfig_Clear(t *testing.T) {
+	p, err := NewNodeProfile("34020000001110000001", "127.0.0.1:5060", "3402000000", "test")
+	if err != nil {
+		t.Fatalf("NewNodeProfile: %v", err)
+	}
+	p.SetMediaConfig(MediaConfig{Kind: SourceKindSynthetic, FPS: 25})
+	if _, ok := p.MediaConfig(); !ok {
+		t.Fatalf("after Set, MediaConfig reports !ok")
+	}
+	// Zero Kind must clear the slot — used by HTTP DELETE.
+	p.SetMediaConfig(MediaConfig{})
+	if _, ok := p.MediaConfig(); ok {
+		t.Fatalf("after Set(empty), MediaConfig still reports ok")
+	}
+}
+
+func TestNewNodeProfileWithMedia(t *testing.T) {
+	media := MediaConfig{Kind: SourceKindFile, Path: "/tmp/v.ps", Loop: true, FPS: 25}
+	p, err := NewNodeProfileWithMedia("34020000001110000001", "127.0.0.1:5060", "3402000000", "test", &media)
+	if err != nil {
+		t.Fatalf("NewNodeProfileWithMedia: %v", err)
+	}
+	got, ok := p.MediaConfig()
+	if !ok {
+		t.Fatalf("no media after builder")
+	}
+	if got.Kind != SourceKindFile || got.Path != "/tmp/v.ps" || !got.Loop {
+		t.Errorf("builder lost fields: %+v", got)
+	}
+}
+
+func TestNewNodeProfileWithMedia_NilMedia(t *testing.T) {
+	p, err := NewNodeProfileWithMedia("34020000001110000001", "127.0.0.1:5060", "3402000000", "test", nil)
+	if err != nil {
+		t.Fatalf("NewNodeProfileWithMedia(nil): %v", err)
+	}
+	if _, ok := p.MediaConfig(); ok {
+		t.Errorf("nil media should leave profile unconfigured")
+	}
+}
+
+func TestParseNodeMediaConfig(t *testing.T) {
+	cases := []struct {
+		name    string
+		kind    string
+		path    string
+		loop    bool
+		mtu     int
+		ssrc    uint32
+		clock   uint64
+		fps     int
+		wantErr bool
+		wantK   MediaSourceKind
+	}{
+		{"empty kind yields zero value", "", "", false, 0, 0, 0, 0, false, ""},
+		{"synthetic no path", "synthetic", "", false, 0, 0, 0, 25, false, SourceKindSynthetic},
+		{"file requires path", "file", "", false, 0, 0, 0, 0, true, ""},
+		{"file with path", "file", "/tmp/v.ps", true, 1400, 0x11, 90000, 0, false, SourceKindFile},
+		{"rtsp with url", "rtsp", "rtsp://x/y", false, 0, 0, 0, 0, false, SourceKindRTSP},
+		{"hls with url", "hls", "http://x/m3u8", false, 0, 0, 0, 0, false, SourceKindHLS},
+		{"unknown kind rejected", "webrtc", "", false, 0, 0, 0, 0, true, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := ParseNodeMediaConfig(tc.kind, tc.path, tc.loop, tc.mtu, tc.ssrc, tc.clock, tc.fps)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, wantErr = %v", err, tc.wantErr)
+			}
+			if err != nil {
+				return
+			}
+			if cfg.Kind != tc.wantK {
+				t.Errorf("kind = %q, want %q", cfg.Kind, tc.wantK)
+			}
+		})
+	}
+}

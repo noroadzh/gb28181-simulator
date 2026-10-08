@@ -73,6 +73,13 @@ type NodeView interface {
 	QueryCapture(ctx context.Context, nodeID model.NodeID, limit int) ([]port.CaptureEvent, error)
 	// CapturePCAP renders the node's buffered capture as a pcap document.
 	CapturePCAP(ctx context.Context, nodeID model.NodeID) ([]byte, error)
+
+	// GetMedia returns the node's media config, or (zero, false) when none is set.
+	GetMedia(ctx context.Context, id model.NodeID) (model.MediaConfig, bool, error)
+	// SetMedia validates and stores the supplied config on the node's profile.
+	SetMedia(ctx context.Context, id model.NodeID, cfg model.MediaConfig) error
+	// ClearMedia removes any configured media from the node's profile.
+	ClearMedia(ctx context.Context, id model.NodeID) error
 }
 
 // nodeResponse is the JSON shape of a node. Deliberately flat and
@@ -575,4 +582,57 @@ func (s *Server) handleCapturePCAP(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, errorBody{Error: err.Error()})
 	}
 	return c.Blob(http.StatusOK, "application/vnd.tcpdump.pcap", data)
+}
+
+// handleGetMedia returns the node's media config or 204 if none is set.
+func (s *Server) handleGetMedia(c echo.Context) error {
+	id, err := s.nodeIDParam(c)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, errorBody{Error: err.Error()})
+	}
+	cfg, ok, err := s.nodes.GetMedia(c.Request().Context(), id)
+	if err != nil {
+		if errors.Is(err, model.ErrUnknownNode) {
+			return c.JSON(http.StatusNotFound, errorBody{Error: "unknown node " + id.String()})
+		}
+		return c.JSON(http.StatusInternalServerError, errorBody{Error: err.Error()})
+	}
+	if !ok {
+		return c.NoContent(http.StatusNoContent)
+	}
+	return c.JSON(http.StatusOK, cfg)
+}
+
+// handlePutMedia validates and stores the supplied config on the node.
+func (s *Server) handlePutMedia(c echo.Context) error {
+	id, err := s.nodeIDParam(c)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, errorBody{Error: err.Error()})
+	}
+	var cfg model.MediaConfig
+	if err := c.Bind(&cfg); err != nil {
+		return c.JSON(http.StatusBadRequest, errorBody{Error: "invalid json: " + err.Error()})
+	}
+	if err := s.nodes.SetMedia(c.Request().Context(), id, cfg); err != nil {
+		if errors.Is(err, model.ErrUnknownNode) {
+			return c.JSON(http.StatusNotFound, errorBody{Error: "unknown node " + id.String()})
+		}
+		return c.JSON(http.StatusBadRequest, errorBody{Error: err.Error()})
+	}
+	return c.JSON(http.StatusOK, cfg)
+}
+
+// handleDeleteMedia clears the node's media config.
+func (s *Server) handleDeleteMedia(c echo.Context) error {
+	id, err := s.nodeIDParam(c)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, errorBody{Error: err.Error()})
+	}
+	if err := s.nodes.ClearMedia(c.Request().Context(), id); err != nil {
+		if errors.Is(err, model.ErrUnknownNode) {
+			return c.JSON(http.StatusNotFound, errorBody{Error: "unknown node " + id.String()})
+		}
+		return c.JSON(http.StatusInternalServerError, errorBody{Error: err.Error()})
+	}
+	return c.NoContent(http.StatusNoContent)
 }

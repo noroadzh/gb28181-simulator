@@ -52,6 +52,42 @@ type NodeConfig struct {
 	// the default lifetime window; being a platform is what makes a node
 	// serve, so there is no way to say "do not serve".
 	Platform *NodePlatformConfig `mapstructure:"platform"`
+
+	// Media is the optional media-source declaration for this node. When
+	// present and the node is a device, the acceptor opens the source
+	// described here and pushes the resulting RTP to the peer that sent
+	// the matching INVITE. Absent on platforms — platforms don't originate
+	// video. Field changes to media do not require a process restart when
+	// applied through the HTTP API (PUT /v1/nodes/:id/media); the YAML
+	// value only seeds the running state at boot.
+	Media *NodeMediaConfig `mapstructure:"media"`
+}
+
+// NodeMediaConfig is the YAML shape of one node's media source. It mirrors
+// model.MediaConfig at the wire level: the YAML tag names match the field
+// names on the domain struct so the HTTP API can echo it back without
+// translation. The Loop field is unique to the file kind — RTSP/HLS wrap
+// streaming sources whose own server already loops, and synthetic has no
+// underlying file — so it is ignored outside `kind: file`.
+type NodeMediaConfig struct {
+	// Kind selects one of model.SourceKindFile / RTSP / HLS / Synthetic.
+	Kind string `mapstructure:"kind"`
+	// Path is the file path for kind=file, the RTSP URL for kind=rtsp,
+	// or the m3u8 URL for kind=hls. Ignored when kind=synthetic.
+	Path string `mapstructure:"path"`
+	// Loop, when true and Kind=file, causes the source to rewind and
+	// replay the file from the start instead of returning EOF.
+	Loop bool `mapstructure:"loop"`
+	// MTU is the maximum RTP payload size in bytes; 0 falls back to 1400.
+	MTU int `mapstructure:"mtu"`
+	// SSRC is the RTP synchronization source identifier; 0 means the
+	// RTPizer auto-generates one.
+	SSRC uint32 `mapstructure:"ssrc"`
+	// Clock is the RTP clock rate in Hz; 0 falls back to 90000.
+	Clock uint64 `mapstructure:"clock"`
+	// FPS is the synthetic source's frame rate; ignored for streaming
+	// sources, used for kind=synthetic and as a hint for kind=file.
+	FPS int `mapstructure:"fps"`
 }
 
 // NodePlatformConfig is the `platform:` sub-section of a node entry: the
@@ -151,6 +187,34 @@ func (c Config) ValidateNodes() error {
 				// cannot leak it either.
 				return fmt.Errorf("config: nodes[%d].registration: %w", i, err)
 			}
+		}
+		if n.Media != nil {
+			if err := validateNodeMedia(i, n.Media); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// validateNodeMedia checks one `media:` sub-section. The kind field must be
+// one of file/rtsp/hls/synthetic — anything else is a typo the operator
+// wants to know about. Path is required for the three streaming kinds and
+// ignored for synthetic. Numeric fields fall through to model.MediaConfig
+// normalization at the boundary, so we only catch kind+path here.
+func validateNodeMedia(index int, m *NodeMediaConfig) error {
+	switch m.Kind {
+	case string(model.SourceKindFile), string(model.SourceKindRTSP), string(model.SourceKindHLS), string(model.SourceKindSynthetic):
+	case "":
+		return fmt.Errorf("config: nodes[%d].media.kind: empty", index)
+	default:
+		return fmt.Errorf("config: nodes[%d].media.kind: unknown %q (want file|rtsp|hls|synthetic)", index, m.Kind)
+	}
+	if m.Kind == string(model.SourceKindFile) ||
+		m.Kind == string(model.SourceKindRTSP) ||
+		m.Kind == string(model.SourceKindHLS) {
+		if strings.TrimSpace(m.Path) == "" {
+			return fmt.Errorf("config: nodes[%d].media.path: empty for kind %q", index, m.Kind)
 		}
 	}
 	return nil

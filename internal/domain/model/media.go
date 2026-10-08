@@ -8,6 +8,7 @@
 package model
 
 import (
+	"encoding/binary"
 	"fmt"
 )
 
@@ -109,12 +110,34 @@ type RTPPacket struct {
 	Payload []byte
 }
 
+// boolToByte maps a bool to 0/1 for bitwise composition.
+func boolToByte(b bool) byte {
+	if b {
+		return 1
+	}
+	return 0
+}
+
 // Validate reports an RTP packet that cannot be fed to the reassembler.
 func (p RTPPacket) Validate() error {
 	if len(p.Payload) == 0 {
 		return fmt.Errorf("model: RTPPacket payload is empty")
 	}
 	return nil
+}
+
+// Bytes serialises the RTP packet to RFC 3550 wire format. The header is
+// 12 bytes (version 2, no CSRCs, no extensions); Payload follows.
+// The returned slice is owned by the caller.
+func (p RTPPacket) Bytes() []byte {
+	b := make([]byte, 12+len(p.Payload))
+	b[0] = 0x80                              // V=2, P=0, X=0, CC=0
+	b[1] = (boolToByte(p.Marker) << 7) | byte(p.PayloadType)
+	binary.BigEndian.PutUint16(b[2:4], uint16(p.Sequence))
+	binary.BigEndian.PutUint32(b[4:8], p.Timestamp)
+	binary.BigEndian.PutUint32(b[8:12], p.SSRC)
+	copy(b[12:], p.Payload)
+	return b
 }
 
 // MediaSourceKind names one of the four built-in sources. The value doubles
@@ -132,12 +155,13 @@ const (
 // lives, and the timing/limits it should honour. Values are validated by
 // the caller before Open is called; this struct only carries them.
 type MediaConfig struct {
-	Kind  MediaSourceKind
-	Path  string // file path, RTSP URL or HLS m3u8 URL
-	SSRC  uint32 // RTP SSRC used by the RTPizer, 0 means auto-generate
-	MTU   int    // max bytes per RTP payload; defaults to 1400
-	FPS   int    // synthetic source frame rate; defaults to 25
-	Clock uint64 // RTP clock rate (Hz); defaults to 90000
+	Kind  MediaSourceKind `json:"kind"`
+	Path  string          `json:"path"`   // file path, RTSP URL or HLS m3u8 URL
+	Loop  bool            `json:"loop"`   // for kind=file: restart from beginning when EOF is reached
+	SSRC  uint32          `json:"ssrc"`   // RTP SSRC used by the RTPizer, 0 means auto-generate
+	MTU   int             `json:"mtu"`    // max bytes per RTP payload; defaults to 1400
+	FPS   int             `json:"fps"`    // synthetic source frame rate; defaults to 25
+	Clock uint64          `json:"clock"`  // RTP clock rate (Hz); defaults to 90000
 }
 
 // Validate checks that a MediaConfig has the minimum fields for its kind.

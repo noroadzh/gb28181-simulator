@@ -29,6 +29,13 @@ log:
 storage:
   path: ""                # default: $XDG_STATE_HOME/.../data.db
 
+# Wire capture (Change 13). When enabled, SIP traffic is buffered per node
+# for the HTTP capture endpoint and pcap export. Disable to skip the
+# allocation cost on long-running deployments.
+capture:
+  enabled: true
+  capacity: 2048          # per-node ring size; 0 falls back to the adapter default
+
 tracing:
   enabled: true           # stdout exporter; set false to use a no-op tracer
   sample_ratio: 1.0       # 0.0..1.0; 1.0 samples everything (dev), 0.01 default
@@ -79,6 +86,31 @@ nodes:
                                          # must be shorter than the interval
       heartbeat_max_failures: 3          # unanswered beats tolerated before
                                          # the node falls back to fault
+    # 媒体源（Change 19）。device 节点才需要；platform 节点忽略此段。
+    # kind: synthetic | file | rtsp | hls
+    #   synthetic: 程序生成动态条纹图，无需外部文件（推荐用于快速测试）
+    #   file:     播放本地 PS/H.264 文件，支持 loop
+    #   rtsp:     从 RTSP 流拉取（需网络可达）
+    #   hls:      从 HLS m3u8 播放列表拉取
+    # path: 对于 file/rtsp/hls 必填；synthetic 可省略
+    # loop: 仅 kind=file 有效；true 则文件播完后从头重播
+    # fps: 每秒帧率；synthetic 必填，file 可省略（默认 25）
+    # mtu: RTP 包最大负载字节数；默认 1400
+    # ssrc: RTP SSRC 标识符；0 表示自动生成
+    # clock: RTP 时钟频率（Hz）；默认 90000
+    # media:
+    #   kind: synthetic
+    #   fps: 25
+    #   mtu: 1400
+    #   ssrc: 0
+    #   clock: 90000
+    # 示例（本地文件循环播放）：
+    # media:
+    #   kind: file
+    #   path: /path/to/video.ps
+    #   loop: true
+    #   fps: 25
+    #   mtu: 1400
   - id: "34020000012000000001"
     kind: platform-large
     domain: "3402000000"

@@ -120,6 +120,179 @@ nodes:
 	}
 }
 
+// TestLoad_MediaConfig_ValidKinds asserts each of the four legal media kinds
+// parses without error, and that absent media is tolerated (nil, not an error).
+func TestLoad_MediaConfig_ValidKinds(t *testing.T) {
+	clearEnv(t)
+	for _, kind := range []string{"file", "rtsp", "hls", "synthetic"} {
+		path := writeConfig(t, `
+nodes:
+  - id: "34020000011310000001"
+    kind: device
+    domain: "3402000000"
+    addr: "127.0.0.1:5060"
+    media:
+      kind: `+kind+`
+`+func() string {
+			if kind != "synthetic" {
+				return `      path: /tmp/test.` + kind + `
+`
+			}
+			return ``
+		}() + `      mtu: 1400
+      ssrc: 12345
+      fps: 25
+      clock: 90000
+`)
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("kind=%q: Load: %v", kind, err)
+		}
+		if cfg.Nodes[0].Media == nil {
+			t.Fatalf("kind=%q: Media is nil", kind)
+		}
+		if cfg.Nodes[0].Media.Kind != kind {
+			t.Errorf("kind=%q: Media.Kind = %q", kind, cfg.Nodes[0].Media.Kind)
+		}
+	}
+}
+
+// TestLoad_MediaConfig_Loop asserts the loop flag is parsed and preserved.
+func TestLoad_MediaConfig_Loop(t *testing.T) {
+	clearEnv(t)
+	path := writeConfig(t, `
+nodes:
+  - id: "34020000011310000001"
+    kind: device
+    domain: "3402000000"
+    addr: "127.0.0.1:5060"
+    media:
+      kind: file
+      path: /tmp/video.ps
+      loop: true
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Nodes[0].Media.Loop {
+		t.Error("Media.Loop = false, want true")
+	}
+}
+
+// TestLoad_MediaConfig_IllegalKind asserts an unknown kind fails with a
+// specific error naming the node index and field.
+func TestLoad_MediaConfig_IllegalKind(t *testing.T) {
+	clearEnv(t)
+	path := writeConfig(t, `
+nodes:
+  - id: "34020000011310000001"
+    kind: device
+    domain: "3402000000"
+    addr: "127.0.0.1:5060"
+    media:
+      kind: mp4
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load succeeded with unknown media kind, want error")
+	}
+	if !strings.Contains(err.Error(), "nodes[0].media.kind") {
+		t.Errorf("error = %q, want it to name nodes[0].media.kind", err.Error())
+	}
+}
+
+// TestLoad_MediaConfig_EmptyKind asserts an empty kind fails loading.
+func TestLoad_MediaConfig_EmptyKind(t *testing.T) {
+	clearEnv(t)
+	path := writeConfig(t, `
+nodes:
+  - id: "34020000011310000001"
+    kind: device
+    domain: "3402000000"
+    addr: "127.0.0.1:5060"
+    media:
+      kind: ""
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load succeeded with empty media.kind, want error")
+	}
+	if !strings.Contains(err.Error(), "nodes[0].media.kind") {
+		t.Errorf("error = %q, want it to name nodes[0].media.kind", err.Error())
+	}
+}
+
+// TestLoad_MediaConfig_MissingPathForFile asserts kind=file without a path
+// fails with a specific error.
+func TestLoad_MediaConfig_MissingPathForFile(t *testing.T) {
+	clearEnv(t)
+	path := writeConfig(t, `
+nodes:
+  - id: "34020000011310000001"
+    kind: device
+    domain: "3402000000"
+    addr: "127.0.0.1:5060"
+    media:
+      kind: file
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load succeeded without media.path for kind=file, want error")
+	}
+	if !strings.Contains(err.Error(), "nodes[0].media.path") {
+		t.Errorf("error = %q, want it to name nodes[0].media.path", err.Error())
+	}
+}
+
+// TestLoad_MediaConfig_MissingPathForRTSP asserts kind=rtsp without a path
+// fails.
+func TestLoad_MediaConfig_MissingPathForRTSP(t *testing.T) {
+	clearEnv(t)
+	path := writeConfig(t, `
+nodes:
+  - id: "34020000011310000001"
+    kind: device
+    domain: "3402000000"
+    addr: "127.0.0.1:5060"
+    media:
+      kind: rtsp
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load succeeded without media.path for kind=rtsp, want error")
+	}
+	if !strings.Contains(err.Error(), "nodes[0].media.path") {
+		t.Errorf("error = %q, want it to name nodes[0].media.path", err.Error())
+	}
+}
+
+// TestLoad_MediaConfig_SyntheticNoPath asserts kind=synthetic does not
+// require a path (it is generated procedurally).
+func TestLoad_MediaConfig_SyntheticNoPath(t *testing.T) {
+	clearEnv(t)
+	path := writeConfig(t, `
+nodes:
+  - id: "34020000011310000001"
+    kind: device
+    domain: "3402000000"
+    addr: "127.0.0.1:5060"
+    media:
+      kind: synthetic
+      fps: 30
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Nodes[0].Media == nil {
+		t.Fatal("Media is nil")
+	}
+	if cfg.Nodes[0].Media.FPS != 30 {
+		t.Errorf("Media.FPS = %d, want 30", cfg.Nodes[0].Media.FPS)
+	}
+}
+
 // TestLoad_NodesNotSilentlySkipped asserts a bad entry aborts the whole
 // load: the process must not start with fewer nodes than configured.
 func TestLoad_NodesNotSilentlySkipped(t *testing.T) {

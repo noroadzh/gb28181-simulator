@@ -40,6 +40,19 @@ export const api = {
   clearFault (id) {
     return fetch(`${BASE}/v1/nodes/${encodeURIComponent(id)}/faults`, { method: 'DELETE' }).then(ok)
   },
+  getMedia (id) {
+    return fetch(`${BASE}/v1/nodes/${encodeURIComponent(id)}/media`).then(ok)
+  },
+  putMedia (id, cfg) {
+    return fetch(`${BASE}/v1/nodes/${encodeURIComponent(id)}/media`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cfg)
+    }).then(ok)
+  },
+  deleteMedia (id) {
+    return fetch(`${BASE}/v1/nodes/${encodeURIComponent(id)}/media`, { method: 'DELETE' }).then(ok)
+  },
   listScenarios () {
     return fetch(`${BASE}/v1/scenarios`).then(ok)
   },

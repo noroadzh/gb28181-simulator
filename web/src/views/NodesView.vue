@@ -56,6 +56,12 @@ onMounted(refresh)
           <div style="margin-top:8px;display:flex;gap:8px">
             <el-button size="small" @click.stop="router.push({ name: 'capture', params: { id: node.id } })">抓包</el-button>
             <el-button size="small" @click.stop="router.push({ name: 'fault', params: { id: node.id } })">故障注入</el-button>
+            <el-button
+              v-if="node.kind === 'device'"
+              size="small"
+              type="success"
+              @click.stop="router.push({ name: 'media', params: { id: node.id } })"
+            >媒体源</el-button>
           </div>
         </el-card>
       </el-col>

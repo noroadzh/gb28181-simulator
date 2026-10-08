@@ -171,6 +171,12 @@ type NodeProfile struct {
 	// snapshots is an append-only log of SnapShot records emitted by this
 	// node.
 	snapshots []SnapShotRecord
+
+	// mediaConfig is the optional per-node media source. Nil means "no
+	// source configured" — the device responds to INVITE with no video.
+	// Mutable through SetMediaConfig so the HTTP API can flip it at
+	// runtime without touching the immutable rest of the profile.
+	mediaConfig *MediaConfig
 }
 
 // NewNodeProfile validates id with ParseNodeID and requires a non-empty
@@ -187,6 +193,52 @@ func NewNodeProfile(id, addr, domain, vendor string) (NodeProfile, error) {
 		return NodeProfile{}, fmt.Errorf("model: empty home domain for node %s", id)
 	}
 	return NodeProfile{id: nodeID, addr: addr, domain: domain, vendor: vendor}, nil
+}
+
+// NewNodeProfileWithMedia validates id with ParseNodeID and requires a non-empty
+// signalling address and home domain. Vendor is optional (empty allowed).
+// It seeds the media source from mediaCfg (nil means no source configured).
+func NewNodeProfileWithMedia(id, addr, domain, vendor string, mediaCfg *MediaConfig) (NodeProfile, error) {
+	p, err := NewNodeProfile(id, addr, domain, vendor)
+	if err != nil {
+		return p, err
+	}
+	if mediaCfg != nil {
+		p.SetMediaConfig(*mediaCfg)
+	}
+	return p, nil
+}
+
+// ParseNodeMediaConfig converts raw YAML/JSON fields into a validated
+// MediaConfig. Empty kind is treated as "not configured" and returns the
+// zero value with no error. For file/rtsp/hls, path must be non-empty.
+// The loop flag is preserved on the returned MediaConfig.Path behaviour by
+// callers that need it (e.g. FileSource), so it is returned via *bool.
+func ParseNodeMediaConfig(kind, path string, loop bool, mtu int, ssrc uint32, clock uint64, fps int) (MediaConfig, error) {
+	if kind == "" {
+		return MediaConfig{}, nil
+	}
+	switch MediaSourceKind(kind) {
+	case SourceKindFile, SourceKindRTSP, SourceKindHLS, SourceKindSynthetic:
+	default:
+		return MediaConfig{}, fmt.Errorf("model: unknown media kind %q", kind)
+	}
+	if MediaSourceKind(kind) != SourceKindSynthetic && strings.TrimSpace(path) == "" {
+		return MediaConfig{}, fmt.Errorf("model: media.path is empty for kind %q", kind)
+	}
+	cfg := MediaConfig{
+		Kind:  MediaSourceKind(kind),
+		Path:  path,
+		SSRC:  ssrc,
+		MTU:   mtu,
+		FPS:   fps,
+		Clock: clock,
+	}
+	cfg = cfg.Normalize()
+	if err := cfg.Validate(); err != nil {
+		return MediaConfig{}, err
+	}
+	return cfg, nil
 }
 
 // ID returns the node identity.
@@ -560,6 +612,28 @@ func (p NodeProfile) SnapShots() []SnapShotRecord {
 func (p NodeProfile) String() string {
 	return fmt.Sprintf("NodeProfile<id=%s kind=%s addr=%s domain=%s vendor=%q>",
 		p.id.String(), p.id.Kind(), p.addr, p.domain, p.vendor)
+}
+
+// SetMediaConfig stores cfg on the profile. Pass the zero MediaConfig (Kind
+// empty) to clear any previously set source — the device then answers INVITE
+// with no media. Other profile fields are untouched; the call is idempotent.
+func (p *NodeProfile) SetMediaConfig(cfg MediaConfig) {
+	cp := cfg
+	if cp.Kind == "" {
+		p.mediaConfig = nil
+		return
+	}
+	p.mediaConfig = &cp
+}
+
+// MediaConfig returns the configured source, or (zero, false) when none is
+// set. The returned value is a copy: mutating it does not affect the
+// profile's state.
+func (p NodeProfile) MediaConfig() (MediaConfig, bool) {
+	if p.mediaConfig == nil {
+		return MediaConfig{}, false
+	}
+	return *p.mediaConfig, true
 }
 
 // Node is an immutable node: an identity plus a lifecycle status. Status

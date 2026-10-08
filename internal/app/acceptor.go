@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"math/rand"
+	"net"
 	"net/http"
 	"slices"
 	"strconv"
@@ -106,7 +107,7 @@ type Acceptor struct {
 	subscribe    port.SubscribePort
 	mediaStatus  port.MediaStatusPort
 	mediaService *MediaService
-	pipelines    map[string]*InboundPipeline
+	pipelines    map[string]pipelineEntry
 
 	mu      sync.Mutex
 	serving map[string]*platform
@@ -260,7 +261,7 @@ func NewAcceptor(
 		newTicker:      newTicker,
 		log:            log.With("component", "internal/app", "subsystem", "sip_acceptor"),
 		serving:        make(map[string]*platform),
-		pipelines:      make(map[string]*InboundPipeline),
+		pipelines:      make(map[string]pipelineEntry),
 		inviteTimers:   make(map[string]*time.Timer),
 		inviteWatchers: make(map[string]chan struct{}),
 	}, nil
@@ -856,7 +857,7 @@ func (a *Acceptor) handleInvite(
 			a.log.Debug("INVITE dialog created", "node_id", p.id.String(), "call_id", callID)
 		}
 	}
-	mediaType, _, _, sdpErr := parseSDPMetadata(req.Body())
+	mediaType, portStr, _, sdpErr := parseSDPMetadata(req.Body())
 	switch {
 	case sdpErr != nil:
 		a.log.Warn("INVITE SDP unreadable", "node_id", p.id.String(),
@@ -869,7 +870,7 @@ func (a *Acceptor) handleInvite(
 		a.log.Debug("INVITE accepted without media section",
 			"node_id", p.id.String(), "call_id", callID)
 	default:
-		a.createInboundPipeline(ctx, p, callID, mediaType, req.Body())
+		a.createInboundPipeline(ctx, p, callID, mediaType, portStr, req.Body())
 		a.watchInviteExpiry(p, callID)
 	}
 	hdrs := []model.Header{
@@ -2577,46 +2578,159 @@ func extractMediaAddress(body string) string {
 	return ""
 }
 
-// createInboundPipeline asks the media service for an InboundPipeline for the
-// INVITE session. The resulting pipeline is tracked in a.pipelines and will
-// be closed when the dialog ends (via the DialogManager onDelete callback).
+// createInboundPipeline answers a SDP that names a media destination. The
+// path depends on the node's role:
+//   - device (with a configured MediaConfig): the SDP tells us where to
+//     push the configured media to, so we open a UDP socket to the peer
+//     and run PacketizeOutbound in a goroutine that emits RTP datagrams
+//     from the configured source (file/rtsp/hls/synthetic).
+//   - platform-large / platform-small (no media, or media-less device):
+//     keep the historical behaviour: build an InboundPipeline with a
+//     nullESWriter so the dialog lifecycle stays consistent. A future
+//     "record the inbound stream" change can swap the writer.
+//
+// The function never returns an error: any failure to open a sink is
+// logged and the call is treated as a no-op so a misconfigured SDP does
+// not break the dialog's 200 OK.
 func (a *Acceptor) createInboundPipeline(
-	_ context.Context,
-	_ *platform,
-	callID, mediaType, sdpBody string,
+	ctx context.Context,
+	p *platform,
+	callID, mediaType, portStr, sdpBody string,
 ) {
 	media := a.mediaService
 	if media == nil {
 		return
 	}
 	address := extractMediaAddress(sdpBody)
-	if address == "" {
+	if address == "" || portStr == "" {
+		a.log.Debug("INVITE without usable media section; skipping pipeline",
+			"node_id", p.id.String(), "call_id", callID, "media", mediaType,
+			"address", address, "port", portStr)
 		return
 	}
-	pl, plErr := media.NewInboundPipeline(uint32(0), nullESWriter{})
-	if plErr != nil {
-		a.log.Warn("cannot create inbound pipeline",
-			"call_id", callID, "error", plErr.Error())
+
+	// Look up the node's profile to decide whether to send or to receive.
+	// The acceptor already has a NodeRegistry attached (WithNodeRegistry);
+	// without one we fall back to the historical "receive and discard"
+	// behaviour so a platform without a registry still serves.
+	var (
+		haveMedia bool
+		mediaCfg  model.MediaConfig
+	)
+	if a.registry != nil {
+		if node, ok := a.registry.Get(ctx, p.id); ok {
+			if cfg, has := node.Profile().MediaConfig(); has {
+				haveMedia = true
+				mediaCfg = cfg
+			}
+		}
+	}
+
+	if !haveMedia {
+		pl, plErr := media.NewInboundPipeline(uint32(0), nullESWriter{})
+		if plErr != nil {
+			a.log.Warn("cannot create inbound pipeline",
+				"call_id", callID, "error", plErr.Error())
+			return
+		}
+		a.mu.Lock()
+		a.pipelines[callID] = inboundOnlyPipeline{pl: pl}
+		a.mu.Unlock()
+		a.log.Debug("inbound pipeline created (no media config)",
+			"node_id", p.id.String(), "call_id", callID,
+			"media", mediaType, "address", address)
 		return
 	}
+
+	// Device path: send the configured source to the peer's SDP address.
+	udpAddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(address, portStr))
+	if err != nil {
+		a.log.Warn("cannot resolve media peer",
+			"node_id", p.id.String(), "call_id", callID,
+			"address", address, "port", portStr, "error", err.Error())
+		return
+	}
+	udpConn, err := net.DialUDP("udp", nil, udpAddr)
+	if err != nil {
+		a.log.Warn("cannot dial media peer",
+			"node_id", p.id.String(), "call_id", callID,
+			"address", udpAddr.String(), "error", err.Error())
+		return
+	}
+	a.log.Info("media pipeline started (device → peer)",
+		"node_id", p.id.String(), "call_id", callID,
+		"peer", udpAddr.String(), "kind", mediaCfg.Kind, "path", mediaCfg.Path)
+	// PacketizeOutbound blocks until the source ends or the context
+	// closes. We give it a fresh context (derived from the call's) so
+	// closing the pipeline later can stop the goroutine without
+	// cancelling the caller's whole request tree.
+	pipelineCtx, cancel := context.WithCancel(ctx)
+	entry := outboundPipelineEntry{conn: udpConn, cancel: cancel, done: make(chan struct{})}
 	a.mu.Lock()
-	a.pipelines[callID] = pl
+	a.pipelines[callID] = entry
 	a.mu.Unlock()
-	a.log.Debug("inbound pipeline created",
-		"call_id", callID, "media", mediaType, "address", address)
+	go func() {
+		defer close(entry.done)
+		defer func() { _ = udpConn.Close() }()
+		_ = media.PacketizeOutbound(pipelineCtx, mediaCfg, func(pkt model.RTPPacket) error {
+			_, werr := udpConn.Write(pkt.Bytes())
+			return werr
+		})
+	}()
+}
+
+// pipelineEntry is the value the Acceptor's pipeline map stores. A device
+// INVITE triggers an outbound RTP push (outboundPipelineEntry); a platform
+// INVITE without a mediaConfig keeps the historical InboundPipeline with
+// a null writer. The interface unifies teardown so closePipeline stays
+// agnostic about which path was taken.
+type pipelineEntry interface {
+	Close() error
+}
+
+// inboundOnlyPipeline wraps a MediaService InboundPipeline with the
+// historical nullESWriter so the platform-large path can still answer an
+// INVITE without a configured media source.
+type inboundOnlyPipeline struct {
+	pl *InboundPipeline
+}
+
+func (e inboundOnlyPipeline) Close() error {
+	if e.pl == nil {
+		return nil
+	}
+	return e.pl.Close()
+}
+
+// outboundPipelineEntry holds the dial-up and the cancellation handle for
+// the goroutine that pumps RTP to a peer's SDP-described address.
+type outboundPipelineEntry struct {
+	conn   *net.UDPConn
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+func (e outboundPipelineEntry) Close() error {
+	if e.cancel != nil {
+		e.cancel()
+	}
+	if e.done != nil {
+		<-e.done
+	}
+	return nil
 }
 
 // closePipeline removes the pipeline entry from the map and closes it.
 // Safe to call multiple times for the same callID.
 func (a *Acceptor) closePipeline(callID string) {
 	a.mu.Lock()
-	pl, ok := a.pipelines[callID]
+	entry, ok := a.pipelines[callID]
 	if ok {
 		delete(a.pipelines, callID)
 	}
 	a.mu.Unlock()
-	if ok && pl != nil {
-		if err := pl.Close(); err != nil {
+	if ok && entry != nil {
+		if err := entry.Close(); err != nil {
 			slog.Warn("pipeline close", "call_id", callID, "error", err.Error())
 		}
 	}

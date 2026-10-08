@@ -129,6 +129,13 @@ func (s *Server) registerRoutes(e *echo.Echo) {
 	e.GET("/v1/nodes/:id/capture", s.handleQueryCapture)
 	e.GET("/v1/nodes/:id/capture.pcap", s.handleCapturePCAP)
 
+	// Media-source endpoints (media-source-config change): get, set, or clear
+	// the media source attached to a node. Only device nodes honour the source;
+	// platform nodes always take the no-media INVITE path.
+	e.GET("/v1/nodes/:id/media", s.handleGetMedia)
+	e.PUT("/v1/nodes/:id/media", s.handlePutMedia)
+	e.DELETE("/v1/nodes/:id/media", s.handleDeleteMedia)
+
 	// Legacy /healthz and /metrics for smoke tests (per §7.3)
 	e.GET("/healthz", s.handleHealth)
 	e.GET("/metrics", s.handleMetrics)

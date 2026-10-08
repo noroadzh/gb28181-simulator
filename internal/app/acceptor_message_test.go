@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"net"
 	"reflect"
 	"sort"
 	"strconv"
@@ -1080,6 +1081,12 @@ func TestAcceptor_MediaStatusFromStrangerAnswers200(t *testing.T) {
 // newMessageHarnessWithRegistry is like newMessageHarness but also registers
 // the platform node in a nodereg.Registry and attaches it to the acceptor.
 func newMessageHarnessWithRegistry(t *testing.T) (*messageHarness, *nodereg.Registry) {
+	return newMessageHarnessWithRegistryAndMedia(t, nil)
+}
+
+// newMessageHarnessWithRegistryAndMedia is like newMessageHarnessWithRegistry
+// but also attaches a media service. Pass nil for no media service.
+func newMessageHarnessWithRegistryAndMedia(t *testing.T, svc *MediaService) (*messageHarness, *nodereg.Registry) {
 	t.Helper()
 	h := newMessageHarness(t, defaultHarnessPolicy(t))
 	reg := nodereg.New()
@@ -1091,6 +1098,9 @@ func newMessageHarnessWithRegistry(t *testing.T) (*messageHarness, *nodereg.Regi
 		t.Fatalf("Register: %v", err)
 	}
 	h.acceptor.WithNodeRegistry(reg)
+	if svc != nil {
+		h.acceptor.WithMediaService(svc)
+	}
 	return h, reg
 }
 
@@ -1265,3 +1275,140 @@ func mustChannel(t *testing.T, id, name, parentID string, status model.ChannelSt
 	}
 	return ch
 }
+
+// ----------------------------------------------------------------------------
+// Media pipeline (createInboundPipeline)
+// ----------------------------------------------------------------------------
+
+// An INVITE with no MediaConfig on the node profile falls back to the
+// platform path: an inboundOnlyPipeline is stored and closePipeline closes it.
+func TestAcceptor_InviteWithoutMediaConfigCreatesInboundPipeline(t *testing.T) {
+	// The platform path calls NewInboundPipeline, which requires inbound
+	// factories to be wired. Wire no-op stubs so the call succeeds.
+	mediaSvc := NewMediaService(
+		func(model.MediaConfig) port.MediaSource { return nil },
+		func() port.PSPacketizer { return nil },
+		func(int) port.RTPizer { return nil },
+		discardLogger(),
+	)
+	mediaSvc.SetInboundFactories(
+		func(uint32) port.RTPDeizer { return &stubRTPDeizer{} },
+		func() port.PSDepacketizer { return &stubPSDePacketizer{} },
+	)
+	h, _ := newMessageHarnessWithRegistryAndMedia(t, mediaSvc)
+
+	// Node profile has no MediaConfig — platform path.
+	resp := h.tr.deliver(t, inviteRequest(t, "34020000011310000001", "inv-call-pipeline-1", validSDP))
+	if resp.StatusCode() != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode())
+	}
+
+	// The pipeline map must contain an inboundOnlyPipeline entry.
+	h.acceptor.mu.Lock()
+	entry, ok := h.acceptor.pipelines["inv-call-pipeline-1"]
+	h.acceptor.mu.Unlock()
+	if !ok {
+		t.Fatal("no pipeline entry for call-id after INVITE")
+	}
+	if _, ok := entry.(inboundOnlyPipeline); !ok {
+		t.Errorf("pipeline entry type = %T, want inboundOnlyPipeline", entry)
+	}
+
+	// closePipeline must not fail.
+	h.acceptor.closePipeline("inv-call-pipeline-1")
+}
+
+// An INVITE with a MediaConfig on the node profile follows the device path:
+// an outboundPipelineEntry is stored and the peer UDP socket receives RTP
+// bytes.
+func TestAcceptor_InviteWithMediaConfigCreatesOutboundPipeline(t *testing.T) {
+	// Build a real MediaService with stub factories so the outbound goroutine
+	// actually emits RTP frames.
+	stub := newStubRTP(1400)
+	svc := NewMediaService(
+		func(c model.MediaConfig) port.MediaSource {
+			return newStubSource(c, frameWithNAL([]byte{0x01, 0x02, 0x03, 0x04}))
+		},
+		func() port.PSPacketizer { return &stubPS{} },
+		func(mtu int) port.RTPizer { return stub },
+		discardLogger(),
+	)
+	h, reg := newMessageHarnessWithRegistryAndMedia(t, svc)
+
+	// Add MediaConfig to the node profile.
+	mediaCfg := model.MediaConfig{
+		Kind:  model.SourceKindSynthetic,
+		FPS:   25,
+		Clock: 90000,
+	}
+	_, _ = reg.MutateProfile(context.Background(), h.nodeID, func(np model.NodeProfile) (model.NodeProfile, error) {
+		np.SetMediaConfig(mediaCfg)
+		return np, nil
+	})
+
+	// Set up a real UDP listener so the outbound goroutine can connect.
+	bindAddr := &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0}
+	ln, err := net.ListenUDP("udp", bindAddr)
+	if err != nil {
+		t.Fatalf("ListenUDP: %v", err)
+	}
+	defer ln.Close()
+	_ = ln.SetReadDeadline(time.Now().Add(3 * time.Second))
+	localPort := ln.LocalAddr().(*net.UDPAddr).Port
+
+	// Build SDP that points at the real listener.
+	sdpBody := fmt.Sprintf(`v=0
+o=34020000011310000001 0 0 IN IP4 127.0.0.1
+s=Play
+c=IN IP4 127.0.0.1
+t=0 0
+m=video %d RTP/AVP 96
+a=rtpmap:96 PS/90000
+`, localPort)
+
+	resp := h.tr.deliver(t, inviteRequest(t, "34020000011310000001", "inv-call-pipeline-2", sdpBody))
+	if resp.StatusCode() != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode())
+	}
+
+	// The pipeline map must contain an outboundPipelineEntry.
+	h.acceptor.mu.Lock()
+	entry, ok := h.acceptor.pipelines["inv-call-pipeline-2"]
+	h.acceptor.mu.Unlock()
+	if !ok {
+		t.Fatal("no pipeline entry for call-id after INVITE with media config")
+	}
+	if _, ok := entry.(outboundPipelineEntry); !ok {
+		t.Errorf("pipeline entry type = %T, want outboundPipelineEntry", entry)
+	}
+
+	// The peer socket should have received at least one RTP datagram.
+	buf := make([]byte, 2048)
+	n, _, err := ln.ReadFromUDP(buf)
+	if err != nil {
+		t.Fatalf("ReadFromUDP (no data received): %v", err)
+	}
+	if n < 12 {
+		t.Errorf("received %d bytes, want ≥12 (RTP header only)", n)
+	}
+	// First byte must have V=2 (bits 0b10xxxxxx → 0xC0 mask).
+	if buf[0]&0xC0 != 0x80 {
+		t.Errorf("first byte = 0x%02X, want RTP version 2 marker bits", buf[0])
+	}
+
+	// closePipeline must stop the goroutine without error.
+	h.acceptor.closePipeline("inv-call-pipeline-2")
+}
+
+// stubRTPDeizer is a no-op RTPDeizer for tests that only verify the pipeline
+// is created and torn down, without sending actual RTP.
+type stubRTPDeizer struct{}
+
+func (s *stubRTPDeizer) Write(model.RTPPacket) (model.PSFrame, error) { return model.PSFrame{}, nil }
+func (s *stubRTPDeizer) Close() error                                 { return nil }
+
+// stubPSDePacketizer is a no-op PS depacketizer for tests.
+type stubPSDePacketizer struct{}
+
+func (s *stubPSDePacketizer) Write([]byte) ([]model.ESFrame, error) { return nil, nil }
+func (s *stubPSDePacketizer) Close() error                          { return nil }

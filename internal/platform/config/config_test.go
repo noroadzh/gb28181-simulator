@@ -136,3 +136,83 @@ func clearEnv(t *testing.T) {
 		_ = os.Unsetenv(k)
 	}
 }
+
+// TestConfig_NodeMediaConfig_Decode verifies the media: sub-section is
+// decoded into NodeMediaConfig and surfaces on NodeConfig.Media. Other
+// tests in this package ensure Load rejects bad id/kind; here we only
+// need to confirm the YAML shape is wired.
+func TestConfig_NodeMediaConfig_Decode(t *testing.T) {
+	dir := t.TempDir()
+	yamlPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(yamlPath, []byte(`
+http:
+  host: 127.0.0.1
+  port: 8080
+nodes:
+  - id: "34020000001110000001"
+    kind: "device"
+    domain: "3402000000"
+    addr: "127.0.0.1:5060"
+    media:
+      kind: "synthetic"
+      fps: 30
+      mtu: 1300
+      clock: 90000
+  - id: "34020000001110000002"
+    kind: "device"
+    domain: "3402000000"
+    addr: "127.0.0.1:5061"
+    media:
+      kind: "file"
+      path: "/tmp/clip.mp4"
+      loop: true
+`), 0o600); err != nil {
+		t.Fatalf("write yaml: %v", err)
+	}
+	cfg, err := Load(yamlPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.Nodes) != 2 {
+		t.Fatalf("nodes = %d, want 2", len(cfg.Nodes))
+	}
+	if cfg.Nodes[0].Media == nil {
+		t.Fatalf("node[0] media missing")
+	}
+	if cfg.Nodes[0].Media.Kind != "synthetic" || cfg.Nodes[0].Media.FPS != 30 || cfg.Nodes[0].Media.MTU != 1300 {
+		t.Errorf("synthetic media decode wrong: %+v", cfg.Nodes[0].Media)
+	}
+	if cfg.Nodes[1].Media == nil {
+		t.Fatalf("node[1] media missing")
+	}
+	if cfg.Nodes[1].Media.Kind != "file" || cfg.Nodes[1].Media.Path != "/tmp/clip.mp4" || !cfg.Nodes[1].Media.Loop {
+		t.Errorf("file media decode wrong: %+v", cfg.Nodes[1].Media)
+	}
+}
+
+// TestConfig_NodeMediaConfig_Absent covers the case where nodes: exists
+// but the optional media: sub-section is absent — the loader must not
+// synthesise a media struct.
+func TestConfig_NodeMediaConfig_Absent(t *testing.T) {
+	dir := t.TempDir()
+	yamlPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(yamlPath, []byte(`
+http:
+  host: 127.0.0.1
+  port: 8080
+nodes:
+  - id: "34020000001110000003"
+    kind: "device"
+    domain: "3402000000"
+    addr: "127.0.0.1:5062"
+`), 0o600); err != nil {
+		t.Fatalf("write yaml: %v", err)
+	}
+	cfg, err := Load(yamlPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.Nodes) != 1 || cfg.Nodes[0].Media != nil {
+		t.Fatalf("absent media should be nil, got %+v", cfg.Nodes[0].Media)
+	}
+}

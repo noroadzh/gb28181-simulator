@@ -330,6 +330,47 @@ func (f *fakeNodeView) SetChannelStatus(_ context.Context, id model.NodeID, chan
 	return nil
 }
 
+func (f *fakeNodeView) GetMedia(_ context.Context, id model.NodeID) (model.MediaConfig, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n, ok := f.nodes[id.String()]
+	if !ok {
+		return model.MediaConfig{}, false, model.ErrUnknownNode
+	}
+	cfg, ok := n.Profile().MediaConfig()
+	return cfg, ok, nil
+}
+
+func (f *fakeNodeView) SetMedia(_ context.Context, id model.NodeID, cfg model.MediaConfig) error {
+	cfg = cfg.Normalize()
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n, ok := f.nodes[id.String()]
+	if !ok {
+		return model.ErrUnknownNode
+	}
+	np := n.Profile()
+	np.SetMediaConfig(cfg)
+	f.nodes[id.String()] = n.WithProfile(np)
+	return nil
+}
+
+func (f *fakeNodeView) ClearMedia(_ context.Context, id model.NodeID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n, ok := f.nodes[id.String()]
+	if !ok {
+		return model.ErrUnknownNode
+	}
+	np := n.Profile()
+	np.SetMediaConfig(model.MediaConfig{})
+	f.nodes[id.String()] = n.WithProfile(np)
+	return nil
+}
+
 func newNodesServer(t *testing.T, view httpapi.NodeView) *httptest.Server {
 	t.Helper()
 	s := httpapi.NewServer(platformconfig.Config{}, logging.NewHub(4), httpapi.Version{Version: "x"}, view, nil)
@@ -410,6 +451,154 @@ func bytesReader(b []byte) io.Reader {
 		return nil
 	}
 	return bytes.NewReader(b)
+}
+
+// ----------------------------------------------------------------------------
+// /v1/nodes/:id/media (media-source-config change)
+// ----------------------------------------------------------------------------
+
+// GET on a node with no media returns 204 No Content so a UI can distinguish
+// "no config" from "config has zero values".
+func TestHandleGetMedia_NoConfig(t *testing.T) {
+	view := newFakeNodeView()
+	view.seed(t, "34020000011310000001", "127.0.0.1:5060", model.StatusIdle)
+	srv := newNodesServer(t, view)
+	defer srv.Close()
+
+	code, body := getJSON(t, srv.URL+"/v1/nodes/34020000011310000001/media")
+	if code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204 (body %s)", code, body)
+	}
+}
+
+// GET on a node with media returns the stored config as JSON.
+func TestHandleGetMedia_ReturnsConfig(t *testing.T) {
+	view := newFakeNodeView()
+	view.seed(t, "34020000011310000001", "127.0.0.1:5060", model.StatusIdle)
+	_ = view.SetMedia(context.Background(), mustNodeID(t, "34020000011310000001"),
+		model.MediaConfig{Kind: model.SourceKindSynthetic, FPS: 30})
+	srv := newNodesServer(t, view)
+	defer srv.Close()
+
+	code, body := getJSON(t, srv.URL+"/v1/nodes/34020000011310000001/media")
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", code, body)
+	}
+	var got model.MediaConfig
+	if err := json.Unmarshal([]byte(body), &got); err != nil {
+		t.Fatalf("decode body %q: %v", body, err)
+	}
+	if got.Kind != model.SourceKindSynthetic {
+		t.Errorf("kind = %q, want synthetic", got.Kind)
+	}
+	if got.FPS != 30 {
+		t.Errorf("fps = %d, want 30", got.FPS)
+	}
+	if got.MTU != 1400 {
+		t.Errorf("mtu = %d, want 1400 (normalize default)", got.MTU)
+	}
+	if got.Clock != 90000 {
+		t.Errorf("clock = %d, want 90000 (normalize default)", got.Clock)
+	}
+}
+
+// GET on an unknown node returns 404.
+func TestHandleGetMedia_UnknownNode(t *testing.T) {
+	srv := newNodesServer(t, newFakeNodeView())
+	defer srv.Close()
+
+	code, _ := getJSON(t, srv.URL+"/v1/nodes/34020000002000000001/media")
+	if code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", code)
+	}
+}
+
+// PUT stores the config and returns the normalized version.
+func TestHandlePutMedia_StoresConfig(t *testing.T) {
+	view := newFakeNodeView()
+	view.seed(t, "34020000011310000001", "127.0.0.1:5060", model.StatusIdle)
+	srv := newNodesServer(t, view)
+	defer srv.Close()
+
+	body := []byte(`{"kind":"file","path":"/tmp/a.ps","loop":true}`)
+	code, resp := putJSON(t, srv.URL+"/v1/nodes/34020000011310000001/media", body)
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", code, resp)
+	}
+	var got model.MediaConfig
+	if err := json.Unmarshal([]byte(resp), &got); err != nil {
+		t.Fatalf("decode body %q: %v", resp, err)
+	}
+	if got.Kind != model.SourceKindFile || got.Path != "/tmp/a.ps" || !got.Loop {
+		t.Errorf("stored config = %+v, want {file /tmp/a.ps Loop:true}", got)
+	}
+
+	// Verify the config is persisted (subsequent GET returns it).
+	cfg, ok, err := view.GetMedia(context.Background(), mustNodeID(t, "34020000011310000001"))
+	if err != nil || !ok {
+		t.Fatalf("GetMedia after PUT: ok=%v err=%v", ok, err)
+	}
+	if cfg.Kind != model.SourceKindFile || cfg.Path != "/tmp/a.ps" {
+		t.Errorf("persisted = %+v", cfg)
+	}
+}
+
+// PUT with an invalid body returns 400.
+func TestHandlePutMedia_InvalidBody(t *testing.T) {
+	view := newFakeNodeView()
+	view.seed(t, "34020000011310000001", "127.0.0.1:5060", model.StatusIdle)
+	srv := newNodesServer(t, view)
+	defer srv.Close()
+
+	// file kind without path → Validate fails.
+	body := []byte(`{"kind":"file"}`)
+	code, _ := putJSON(t, srv.URL+"/v1/nodes/34020000011310000001/media", body)
+	if code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", code)
+	}
+}
+
+// PUT on an unknown node returns 404.
+func TestHandlePutMedia_UnknownNode(t *testing.T) {
+	srv := newNodesServer(t, newFakeNodeView())
+	defer srv.Close()
+
+	body := []byte(`{"kind":"synthetic"}`)
+	code, _ := putJSON(t, srv.URL+"/v1/nodes/34020000002000000001/media", body)
+	if code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", code)
+	}
+}
+
+// DELETE removes any stored config and returns 204.
+func TestHandleDeleteMedia_RemovesConfig(t *testing.T) {
+	view := newFakeNodeView()
+	view.seed(t, "34020000011310000001", "127.0.0.1:5060", model.StatusIdle)
+	_ = view.SetMedia(context.Background(), mustNodeID(t, "34020000011310000001"),
+		model.MediaConfig{Kind: model.SourceKindSynthetic})
+	srv := newNodesServer(t, view)
+	defer srv.Close()
+
+	code, _ := deleteJSON(t, srv.URL+"/v1/nodes/34020000011310000001/media")
+	if code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", code)
+	}
+	// GET should now return 204 (no config).
+	code, body := getJSON(t, srv.URL+"/v1/nodes/34020000011310000001/media")
+	if code != http.StatusNoContent {
+		t.Fatalf("GET after DELETE = %d, want 204 (body %s)", code, body)
+	}
+}
+
+// DELETE on an unknown node returns 404.
+func TestHandleDeleteMedia_UnknownNode(t *testing.T) {
+	srv := newNodesServer(t, newFakeNodeView())
+	defer srv.Close()
+
+	code, _ := deleteJSON(t, srv.URL+"/v1/nodes/34020000002000000001/media")
+	if code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", code)
+	}
 }
 
 // TestNodes_ListEmpty asserts an empty inventory renders as a JSON array,

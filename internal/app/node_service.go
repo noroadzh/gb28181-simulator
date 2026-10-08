@@ -836,6 +836,41 @@ func (s *NodeService) ChangedAt(id model.NodeID) (time.Time, bool) {
 // are built.
 func (s *NodeService) TransportFactory() TransportFactory { return s.factory }
 
+// GetMedia returns the node's configured media source, or (zero, false) when
+// the node has no media attached. An unknown node yields ErrUnknownNode.
+func (s *NodeService) GetMedia(ctx context.Context, id model.NodeID) (model.MediaConfig, bool, error) {
+	n, ok := s.registry.Get(ctx, id)
+	if !ok {
+		return model.MediaConfig{}, false, model.ErrUnknownNode
+	}
+	cfg, has := n.Profile().MediaConfig()
+	return cfg, has, nil
+}
+
+// SetMedia validates the supplied config and stores it on the node's
+// profile. The change is visible to the acceptor's INVITE path immediately.
+func (s *NodeService) SetMedia(ctx context.Context, id model.NodeID, cfg model.MediaConfig) error {
+	cfg = cfg.Normalize()
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	_, err := s.registry.MutateProfile(ctx, id, func(p model.NodeProfile) (model.NodeProfile, error) {
+		p.SetMediaConfig(cfg)
+		return p, nil
+	})
+	return err
+}
+
+// ClearMedia removes any configured media from the node's profile. The next
+// INVITE against this node takes the platform (no-media) path.
+func (s *NodeService) ClearMedia(ctx context.Context, id model.NodeID) error {
+	_, err := s.registry.MutateProfile(ctx, id, func(p model.NodeProfile) (model.NodeProfile, error) {
+		p.SetMediaConfig(model.MediaConfig{})
+		return p, nil
+	})
+	return err
+}
+
 func (s *NodeService) stamp(id model.NodeID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

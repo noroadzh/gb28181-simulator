@@ -372,17 +372,67 @@ func run() error {
 			}()
 
 			mediaService = app.NewMediaService(
-				func(cfg model.MediaConfig) port.MediaSource { return media.NewFileSource(cfg) },
+				func(cfg model.MediaConfig) port.MediaSource {
+					switch cfg.Kind {
+					case model.SourceKindFile:
+						return media.NewFileSource(cfg)
+					case model.SourceKindRTSP:
+						return media.NewRTSPSource(cfg)
+					case model.SourceKindHLS:
+						return media.NewHLSSource(cfg)
+					case model.SourceKindSynthetic:
+						return media.NewSyntheticSource(cfg)
+					default:
+						return nil
+					}
+				},
 				func() port.PSPacketizer { return media.NewPSPacketizer(mediaAgg) },
 				func(mtu int) port.RTPizer { return media.NewRTPizer(defaultSSRC, mtu, mediaAgg) },
 				logging.L(),
 			)
+			// Wire the inbound (RTP-deizer + PS-depacketizer) factories so a
+			// platform-small node can answer INVITE-based PS streams. Without
+			// this, MediaService.NewInboundPipeline returns "inbound
+			// factories not wired" and any incoming INVITE fails closed.
+			mediaService.SetInboundFactories(
+				func(ssrc uint32) port.RTPDeizer { return media.NewRTPDeizer(ssrc) },
+				func() port.PSDepacketizer { return media.NewPSDepacketizer() },
+			)
+			// Attach the media service to the acceptor so handleInvite can
+			// build an inbound pipeline for an INVITE/SDP the platform
+			// answers. WithMediaService is optional and idempotent; we
+			// ignore the return value because the method is fluent.
+			acceptor.WithMediaService(mediaService)
 			defer func() { _ = mediaService.Close() }()
 
 			// Register every configured node; starting them is an explicit
 			// operation (design D9), so an empty list costs nothing.
 			for i, nc := range cfg.Nodes {
-				profile, err := model.NewNodeProfile(nc.ID, nc.Addr, nc.Domain, nc.Vendor)
+				// Seed the profile's media slot from YAML when present.
+				// platforms don't originate video, so we silently drop
+				// media on platform kinds — the field is meaningful only
+				// for devices. Validation in NodeMediaConfig rejects bad
+				// kinds and missing paths, surfacing here as a config
+				// load error (consistent with registration:).
+				var seedMedia *model.MediaConfig
+				if nc.Media != nil {
+					converted, mcErr := model.ParseNodeMediaConfig(
+						nc.Media.Kind,
+						nc.Media.Path,
+						nc.Media.Loop,
+						nc.Media.MTU,
+						nc.Media.SSRC,
+						nc.Media.Clock,
+						nc.Media.FPS,
+					)
+					if mcErr != nil {
+						return nil, fmt.Errorf("node[%d].media: %w", i, mcErr)
+					}
+					if nc.Kind == "device" {
+						seedMedia = &converted
+					}
+				}
+				profile, err := model.NewNodeProfileWithMedia(nc.ID, nc.Addr, nc.Domain, nc.Vendor, seedMedia)
 				if err != nil {
 					return nil, fmt.Errorf("node[%d]: %w", i, err)
 				}
