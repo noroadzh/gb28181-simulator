@@ -1,6 +1,6 @@
 # Spec: media-sources delta (local_file alias)
 
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: 媒体源 kind 接受 `local_file` 别名
 
