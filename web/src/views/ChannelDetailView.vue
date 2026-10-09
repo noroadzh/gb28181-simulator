@@ -81,7 +81,10 @@ function startFlv () {
     hasAudio: false,
     isLive: true
   }, {
-    enableWorker: true,
+    // flv.js 1.6.2 + Vite 5 组合下 enableWorker:true 会导致 Web Worker 内
+    // importScripts 模块解析失败, 抛出 "Class extends value undefined" 后
+    // 整个播放器直接崩溃。关闭 worker 即可消除该错误, 对单路直播性能无感知。
+    enableWorker: false,
     enableStashBuffer: false,
     stashInitialSize: 128
   })

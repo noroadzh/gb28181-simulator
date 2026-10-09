@@ -81,8 +81,9 @@ export const api = {
   // ─── Flv stream URL ─────────────────────────────────────────────────────────
 
   flvUrl (nodeId, ch) {
-    const proto = location.protocol === 'https:' ? 'https' : 'http'
-    return `${proto}://${location.hostname}:18090/flv/${encodeURIComponent(nodeId)}/${encodeURIComponent(ch)}/live.flv`
+    // 相对路径：自动跟随当前页面的 host + port 与后端主 HTTP 监听地址，
+    // 避免与后端实际端口/路径不匹配导致 404。
+    return `${BASE}/v1/flv/${encodeURIComponent(nodeId)}/${encodeURIComponent(ch)}`
   },
 
   // ─── Existing API ───────────────────────────────────────────────────────────

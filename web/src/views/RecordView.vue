@@ -58,7 +58,8 @@ function playRecord (rec) {
     url: rec.playback_url,
     isLive: false
   }, {
-    enableWorker: true,
+    // 同 ChannelDetailView，关闭 worker 避免 flv.js + Vite 5 的模块继承链崩溃。
+    enableWorker: false,
     stashInitialSize: 256
   })
   player.attachMediaElement(playerRef.value)
