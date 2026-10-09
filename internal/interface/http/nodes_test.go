@@ -373,7 +373,7 @@ func (f *fakeNodeView) ClearMedia(_ context.Context, id model.NodeID) error {
 
 func newNodesServer(t *testing.T, view httpapi.NodeView) *httptest.Server {
 	t.Helper()
-	s := httpapi.NewServer(platformconfig.Config{}, logging.NewHub(4), httpapi.Version{Version: "x"}, view, nil)
+	s := httpapi.NewServer(platformconfig.Config{}, logging.NewHub(4), httpapi.Version{Version: "x"}, view, nil, nil, nil)
 	return httptest.NewServer(s.Echo())
 }
 

@@ -177,6 +177,11 @@ type NodeProfile struct {
 	// Mutable through SetMediaConfig so the HTTP API can flip it at
 	// runtime without touching the immutable rest of the profile.
 	mediaConfig *MediaConfig
+	// mediaConfigByChannel is the per-channel media source map. When
+	// non-empty it takes precedence over mediaConfig for the channel
+	// it covers. An entry with zero Kind means "this channel has no
+	// source". This field is the multi-channel extension (Change 14).
+	mediaConfigByChannel map[string]*MediaConfig
 }
 
 // NewNodeProfile validates id with ParseNodeID and requires a non-empty
@@ -634,6 +639,87 @@ func (p NodeProfile) MediaConfig() (MediaConfig, bool) {
 		return MediaConfig{}, false
 	}
 	return *p.mediaConfig, true
+}
+
+// SetChannelMediaConfig stores cfg on the profile for the given channelID.
+// Pass the zero MediaConfig (Kind empty) to clear that channel's source —
+// the channel then answers INVITE with no media. A previously empty
+// mediaConfigByChannel is created lazily; the call is idempotent.
+func (p *NodeProfile) SetChannelMediaConfig(channelID string, cfg MediaConfig) {
+	channelID = strings.TrimSpace(channelID)
+	if channelID == "" {
+		return
+	}
+	if p.mediaConfigByChannel == nil {
+		p.mediaConfigByChannel = make(map[string]*MediaConfig)
+	}
+	if cfg.Kind == "" {
+		delete(p.mediaConfigByChannel, channelID)
+		if len(p.mediaConfigByChannel) == 0 {
+			p.mediaConfigByChannel = nil
+		}
+		return
+	}
+	cp := cfg
+	p.mediaConfigByChannel[channelID] = &cp
+}
+
+// ClearChannelMediaConfig removes the media source for the given channelID.
+// Removing a non-existent channel is a no-op.
+func (p *NodeProfile) ClearChannelMediaConfig(channelID string) {
+	channelID = strings.TrimSpace(channelID)
+	if channelID == "" {
+		return
+	}
+	delete(p.mediaConfigByChannel, channelID)
+	if len(p.mediaConfigByChannel) == 0 {
+		p.mediaConfigByChannel = nil
+	}
+}
+
+// ChannelMediaConfig returns the configured source for the given channelID
+// and whether one was set. The second result is false when no per-channel
+// source was configured for that channel — callers MUST fall back to
+// MediaConfig() in that case.
+func (p NodeProfile) ChannelMediaConfig(channelID string) (MediaConfig, bool) {
+	channelID = strings.TrimSpace(channelID)
+	if channelID == "" || len(p.mediaConfigByChannel) == 0 {
+		return MediaConfig{}, false
+	}
+	cfg, ok := p.mediaConfigByChannel[channelID]
+	if !ok || cfg == nil {
+		return MediaConfig{}, false
+	}
+	return *cfg, true
+}
+
+// ChannelMediaConfigs returns a copy of the per-channel media source map
+// (channel id → MediaConfig). Nil when no per-channel source was configured.
+func (p NodeProfile) ChannelMediaConfigs() map[string]MediaConfig {
+	if len(p.mediaConfigByChannel) == 0 {
+		return nil
+	}
+	out := make(map[string]MediaConfig, len(p.mediaConfigByChannel))
+	for k, v := range p.mediaConfigByChannel {
+		if v == nil {
+			continue
+		}
+		out[k] = *v
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// MediaConfigForChannel returns the effective media source for the given
+// channelID: a per-channel entry takes precedence over the node-level
+// config. The bool is false only when neither is set.
+func (p NodeProfile) MediaConfigForChannel(channelID string) (MediaConfig, bool) {
+	if cfg, ok := p.ChannelMediaConfig(channelID); ok {
+		return cfg, true
+	}
+	return p.MediaConfig()
 }
 
 // Node is an immutable node: an identity plus a lifecycle status. Status

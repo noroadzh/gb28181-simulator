@@ -48,6 +48,8 @@ func newServer(t *testing.T) (*httptest.Server, *logging.Hub) {
 		httpapi.Version{Version: "smoke", Commit: "test", BuiltAt: "now"},
 		nil, // NodeView - nil is allowed; node endpoints return 501
 		nil, // ScenarioRunner - same
+		nil, // ChannelView - same
+		nil, // *StreamingServer - tests don't use streaming
 	)
 	ts := httptest.NewServer(srv.Echo())
 	t.Cleanup(func() {

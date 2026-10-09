@@ -78,5 +78,5 @@ func TestE2E_HubPushedToWebSocketWithRedaction(t *testing.T) {
 	}
 
 	// Sanity check: httpapi.NewServer wires the same hub.
-	_ = httpapi.NewServer(platformconfig.Config{}, hub, httpapi.Version{Version: "t"}, nil, nil)
+	_ = httpapi.NewServer(platformconfig.Config{}, hub, httpapi.Version{Version: "t"}, nil, nil, nil, nil)
 }

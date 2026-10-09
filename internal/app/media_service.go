@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"sync"
 
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
 	"github.com/your-org/gb28181-simulator/internal/domain/port"
@@ -278,4 +279,78 @@ func (p *outboundPipeline) run(ctx context.Context, onRTP func(model.RTPPacket) 
 // encountered while closing sources.
 func (m *MediaService) Close() error {
 	return nil
+}
+
+// SubscribePS opens the media source for cfg, reads ES frames, and feeds them
+// through the PS packetizer, emitting PS frames onto the returned channel.
+// The channel is closed when the source ends, ctx is cancelled, or onPS returns
+// an error. The source is closed when the channel is drained or cancelled.
+//
+// This method is the PS-only variant of PacketizeOutbound, intended for the
+// HTTP-FLV streaming gateway which needs raw PS frames (not RTP datagrams).
+// The caller is responsible for closing the returned cleanup function.
+func (m *MediaService) SubscribePS(ctx context.Context, cfg model.MediaConfig) (psCh <-chan model.PSFrame, cleanup func(), err error) {
+	cfg = cfg.Normalize()
+	if err := cfg.Validate(); err != nil {
+		return nil, nil, fmt.Errorf("app: invalid media config: %w", err)
+	}
+	if m.factory == nil {
+		return nil, nil, fmt.Errorf("app: no media source factory wired")
+	}
+	if m.psFactory == nil {
+		return nil, nil, fmt.Errorf("app: no PS factory wired")
+	}
+
+	src := m.factory(cfg)
+	if src == nil {
+		return nil, nil, fmt.Errorf("app: no media source factory for kind %q", cfg.Kind)
+	}
+
+	rc, err := src.Open(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("app: open source: %w", err)
+	}
+
+	psPktz := m.psFactory()
+	if psPktz == nil {
+		_ = src.Close()
+		return nil, nil, fmt.Errorf("app: no PS packetizer factory wired")
+	}
+
+	psChRaw := make(chan model.PSFrame) // unbuffered: back-pressure on reader
+	reader := readerFor(rc, cfg)
+
+	var once sync.Once
+	cleanup = func() {
+		once.Do(func() {
+			_ = src.Close()
+			close(psChRaw)
+		})
+	}
+
+	go func() {
+		defer close(psChRaw)
+		for {
+			frame, err := reader.Read(ctx)
+			if err != nil {
+				if err == io.EOF {
+					return
+				}
+				// Context cancelled or read error — both mean stop.
+				return
+			}
+			ps, err := psPktz.Packetize(frame)
+			if err != nil {
+				m.logger.Debug("media: PS packetize error, skipping frame", "error", err.Error())
+				continue
+			}
+			select {
+			case psChRaw <- ps:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	return psChRaw, cleanup, nil
 }

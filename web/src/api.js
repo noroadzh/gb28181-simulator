@@ -12,6 +12,69 @@ async function ok (resp) {
 }
 
 export const api = {
+
+  // ─── Channels ────────────────────────────────────────────────────────────────
+
+  listChannels (nodeId) {
+    return fetch(`${BASE}/v1/nodes/${encodeURIComponent(nodeId)}/channels`).then(ok)
+  },
+  getChannelMedia (nodeId, ch) {
+    return fetch(`${BASE}/v1/nodes/${encodeURIComponent(nodeId)}/channels/${encodeURIComponent(ch)}/media`).then(ok)
+  },
+  putChannelMedia (nodeId, ch, cfg) {
+    return fetch(`${BASE}/v1/nodes/${encodeURIComponent(nodeId)}/channels/${encodeURIComponent(ch)}/media`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cfg)
+    }).then(ok)
+  },
+  deleteChannelMedia (nodeId, ch) {
+    return fetch(`${BASE}/v1/nodes/${encodeURIComponent(nodeId)}/channels/${encodeURIComponent(ch)}/media`, { method: 'DELETE' }).then(ok)
+  },
+
+  // ─── PTZ ────────────────────────────────────────────────────────────────────
+
+  ptzControl (nodeId, ch, cmd) {
+    return fetch(`${BASE}/v1/nodes/${encodeURIComponent(nodeId)}/channels/${encodeURIComponent(ch)}/ptz`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cmd)
+    }).then(ok)
+  },
+
+  // ─── Records ────────────────────────────────────────────────────────────────
+
+  listRecords (nodeId, ch, start, end) {
+    const u = new URL(`${BASE}/v1/nodes/${encodeURIComponent(nodeId)}/channels/${encodeURIComponent(ch)}/records`, location.href)
+    if (start) u.searchParams.set('start', start)
+    if (end) u.searchParams.set('end', end)
+    return fetch(u).then(ok)
+  },
+
+  // ─── Talk ───────────────────────────────────────────────────────────────────
+
+  startTalk (nodeId, ch) {
+    return fetch(`${BASE}/v1/nodes/${encodeURIComponent(nodeId)}/channels/${encodeURIComponent(ch)}/talk/start`, { method: 'POST' }).then(ok)
+  },
+  stopTalk (nodeId, ch) {
+    return fetch(`${BASE}/v1/nodes/${encodeURIComponent(nodeId)}/channels/${encodeURIComponent(ch)}/talk/stop`, { method: 'POST' }).then(ok)
+  },
+
+  // ─── Snapshot ───────────────────────────────────────────────────────────────
+
+  getSnapshot (nodeId, ch) {
+    return fetch(`${BASE}/v1/nodes/${encodeURIComponent(nodeId)}/channels/${encodeURIComponent(ch)}/snapshot`)
+  },
+
+  // ─── Flv stream URL ─────────────────────────────────────────────────────────
+
+  flvUrl (nodeId, ch) {
+    const proto = location.protocol === 'https:' ? 'https' : 'http'
+    return `${proto}://${location.hostname}:18090/flv/${encodeURIComponent(nodeId)}/${encodeURIComponent(ch)}/live.flv`
+  },
+
+  // ─── Existing API ───────────────────────────────────────────────────────────
+
   listNodes () {
     return fetch(`${BASE}/v1/nodes`).then(ok)
   },

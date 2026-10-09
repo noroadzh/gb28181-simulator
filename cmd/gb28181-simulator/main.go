@@ -30,6 +30,7 @@ import (
 	"github.com/your-org/gb28181-simulator/internal/adapter/siptransport"
 	"github.com/your-org/gb28181-simulator/internal/adapter/subscribe"
 	"github.com/your-org/gb28181-simulator/internal/app"
+	"github.com/your-org/gb28181-simulator/internal/app/streaming"
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
 	"github.com/your-org/gb28181-simulator/internal/domain/port"
 	httpapi "github.com/your-org/gb28181-simulator/internal/interface/http"
@@ -512,12 +513,21 @@ func run() error {
 		}).
 		Provide(serverKey, func() (any, error) {
 			hub := logging.DefaultHub()
+			// Wire the HTTP-FLV streaming gateway: MediaServiceBridge adapts
+			// *app.MediaService + NodeService to the gateway's supplier interface.
+			var flvServer *httpapi.StreamingServer
+			if mediaService != nil && nodeSvc != nil {
+				bridge := streaming.NewMediaServiceBridge(mediaService, nodeSvc)
+				gw := streaming.NewGateway(bridge, nodeSvc, logging.L())
+				flvServer = httpapi.NewStreamingServer(gw, logging.L())
+				logging.L().Info("streaming gateway ready")
+			}
 			return httpapi.NewServer(*cfg, hub, httpapi.Version{
 				Version: version,
 				Commit:  commit,
 				BuiltAt: builtAt,
-			}, nodeSvc, scenarioRunner), nil
-		})
+			}, nodeSvc, scenarioRunner, nodeSvc, flvServer), nil
+			})
 
 	cancel, err := c.Build()
 	if err != nil {

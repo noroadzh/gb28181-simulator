@@ -59,6 +59,12 @@ onMounted(refresh)
             <el-button
               v-if="node.kind === 'device'"
               size="small"
+              type="primary"
+              @click.stop="router.push({ name: 'channels', params: { id: node.id } })"
+            >通道</el-button>
+            <el-button
+              v-if="node.kind === 'device'"
+              size="small"
               type="success"
               @click.stop="router.push({ name: 'media', params: { id: node.id } })"
             >媒体源</el-button>

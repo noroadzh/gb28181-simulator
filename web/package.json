@@ -9,10 +9,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "vue": "^3.4.38",
-    "vue-router": "^4.4.5",
+    "element-plus": "^2.7.7",
+    "flv.js": "^1.6.2",
     "pinia": "^2.2.6",
-    "element-plus": "^2.7.7"
+    "vue": "^3.4.38",
+    "vue-router": "^4.4.5"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.1.2",

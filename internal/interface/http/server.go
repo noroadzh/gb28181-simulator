@@ -34,9 +34,14 @@ type Server struct {
 	ver       Version
 	nodes     NodeView
 	scenarios ScenarioRunner
+	channels  ChannelView
 	echo      *echo.Echo
 	http      *http.Server
 	log       *slog.Logger
+
+	// streaming is the HTTP-FLV streaming gateway. It may be nil when the
+	// streaming feature is not configured (e.g. in minimal builds).
+	streaming *StreamingServer
 }
 
 var upgrader = websocket.Upgrader{
@@ -50,8 +55,10 @@ var upgrader = websocket.Upgrader{
 // be nil, in which case the /v1/nodes endpoints report an empty inventory
 // (the process was started without any configured node). scenarios may be
 // nil, in which case the /v1/scenarios endpoints report 501 and preserve the
-// prior Change 14 placeholder behavior.
-func NewServer(cfg platformconfig.Config, hub *logging.Hub, ver Version, nodes NodeView, scenarios ScenarioRunner) *Server {
+// prior Change 14 placeholder behavior. channels may be nil, in which case
+// the channel endpoints report 501. streaming may be nil when the streaming
+// feature is not configured.
+func NewServer(cfg platformconfig.Config, hub *logging.Hub, ver Version, nodes NodeView, scenarios ScenarioRunner, channels ChannelView, streaming *StreamingServer) *Server {
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
@@ -71,8 +78,10 @@ func NewServer(cfg platformconfig.Config, hub *logging.Hub, ver Version, nodes N
 		ver:       ver,
 		nodes:     nodes,
 		scenarios: scenarios,
+		channels:  channels,
 		echo:      e,
 		log:       slog.Default(),
+		streaming: streaming,
 	}
 	s.registerRoutes(e)
 	return s
@@ -135,6 +144,28 @@ func (s *Server) registerRoutes(e *echo.Echo) {
 	e.GET("/v1/nodes/:id/media", s.handleGetMedia)
 	e.PUT("/v1/nodes/:id/media", s.handlePutMedia)
 	e.DELETE("/v1/nodes/:id/media", s.handleDeleteMedia)
+
+	// Channel-level endpoints (multi-channel-and-web-player). With no
+	// ChannelView wired in (channels == nil) the handlers report 501.
+	e.GET("/v1/nodes/:id/channels", s.handleChannelList)
+	e.GET("/v1/nodes/:id/channels/:ch", s.handleChannelDetail)
+	e.GET("/v1/nodes/:id/channels/:ch/media", s.handleGetChannelMedia)
+	e.PUT("/v1/nodes/:id/channels/:ch/media", s.handlePutChannelMedia)
+	e.DELETE("/v1/nodes/:id/channels/:ch/media", s.handleDeleteChannelMedia)
+	e.POST("/v1/nodes/:id/channels/:ch/ptz", s.handleChannelPTZ)
+	e.GET("/v1/nodes/:id/channels/:ch/records", s.handleChannelRecords)
+	e.POST("/v1/nodes/:id/channels/:ch/playback", s.handleChannelPlayback)
+	e.POST("/v1/nodes/:id/channels/:ch/talk/start", s.handleTalkStart)
+	e.POST("/v1/nodes/:id/channels/:ch/talk/stop", s.handleTalkStop)
+	e.GET("/v1/nodes/:id/channels/:ch/snapshot", s.handleChannelSnapshot)
+
+	// HTTP-FLV streaming endpoint (multi-channel-and-web-player). The
+	// handler is registered only when a streaming server was wired in.
+	// The path is GET /v1/flv/:nodeID/:channelID and returns a chunked
+	// video/x-flv response.
+	if s.streaming != nil {
+		e.GET("/v1/flv/:nodeID/:channelID", s.streaming.HandleFLV)
+	}
 
 	// Legacy /healthz and /metrics for smoke tests (per §7.3)
 	e.GET("/healthz", s.handleHealth)

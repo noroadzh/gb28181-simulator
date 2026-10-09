@@ -871,6 +871,232 @@ func (s *NodeService) ClearMedia(ctx context.Context, id model.NodeID) error {
 	return err
 }
 
+// GetChannelMedia returns the configured media source for a specific channel.
+// Returns (zero, false, nil) when the node is unknown.
+// Returns (zero, false, nil) when the channel has no media source configured
+// (falls back to the node-level media source via MediaConfigForChannel).
+func (s *NodeService) GetChannelMedia(ctx context.Context, id model.NodeID, channelID string) (model.MediaConfig, bool, error) {
+	n, ok := s.registry.Get(ctx, id)
+	if !ok {
+		return model.MediaConfig{}, false, model.ErrUnknownNode
+	}
+	cfg, has := n.Profile().ChannelMediaConfig(channelID)
+	return cfg, has, nil
+}
+
+// SetChannelMedia validates cfg and stores it as the media source for channelID.
+func (s *NodeService) SetChannelMedia(ctx context.Context, id model.NodeID, channelID string, cfg model.MediaConfig) error {
+	cfg = cfg.Normalize()
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	_, err := s.registry.MutateProfile(ctx, id, func(p model.NodeProfile) (model.NodeProfile, error) {
+		p.SetChannelMediaConfig(channelID, cfg)
+		return p, nil
+	})
+	return err
+}
+
+// ClearChannelMedia removes the media source for the given channelID.
+// The channel then falls back to the node-level media source.
+func (s *NodeService) ClearChannelMedia(ctx context.Context, id model.NodeID, channelID string) error {
+	_, err := s.registry.MutateProfile(ctx, id, func(p model.NodeProfile) (model.NodeProfile, error) {
+		p.ClearChannelMediaConfig(channelID)
+		return p, nil
+	})
+	return err
+}
+
+// ListChannels returns the channels declared in the node's profile.
+// An empty/nil slice means the node has no channels.
+func (s *NodeService) ListChannels(ctx context.Context, id model.NodeID) []model.Channel {
+	node, ok := s.registry.Get(ctx, id)
+	if !ok {
+		return nil
+	}
+	return node.Profile().Channels()
+}
+
+// Channel returns one channel by id, or (zero, false) when not found.
+func (s *NodeService) Channel(ctx context.Context, id model.NodeID, channelID string) (model.Channel, bool) {
+	node, ok := s.registry.Get(ctx, id)
+	if !ok {
+		return model.Channel{}, false
+	}
+	return node.Profile().ChannelByID(channelID)
+}
+
+// PTZ sends a device-control command for the channel. direction ∈
+// {"up","down","left","right","upleft","upright","downleft","downright","in","out"};
+// speed ∈ [0,255]; durationMs ≥ 0.
+//
+// Currently returns nil (no-op) because sending outbound MANSCDP device
+// control requires access to the device's active Registration object. Full
+// implementation: look up device registration → build PTZControl XML → send
+// MESSAGE via transport → wait for response.
+func (s *NodeService) PTZ(ctx context.Context, id model.NodeID, channelID, direction string, speed, durationMs int) error {
+	_ = id
+	_ = channelID
+	_ = direction
+	_ = speed
+	_ = durationMs
+	return nil
+}
+
+// Records returns the recording list for the channel in [start, end].
+// start/end 为零值时返回空切片。
+//
+// Currently returns nil (empty list) because device-side recording metadata
+// is populated via inbound RecordInfo NOTIFY messages handled by the
+// acceptor. A future enhancement would cache those notifications in
+// NodeService and return them here.
+func (s *NodeService) Records(ctx context.Context, id model.NodeID, channelID string, start, end time.Time) ([]model.RecordInfoItem, error) {
+	_ = id
+	_ = channelID
+	_ = start
+	_ = end
+	return nil, nil
+}
+
+// Playback issues a PLAY/PAUSE/TEARDOWN command for the channel.
+// action ∈ {"play","pause","teardown"}；scale ∈ {-4,-2,1,2,4}.
+//
+// Currently returns ErrPlaybackUnsupported. Full implementation: look up
+// device registration → send playback control XML → manage playback session.
+func (s *NodeService) Playback(ctx context.Context, id model.NodeID, channelID, action string, scale int) error {
+	_ = id
+	_ = channelID
+	_ = action
+	_ = scale
+	return port.ErrPlaybackUnsupported
+}
+
+// TalkStart opens a voice-talk session for the channel. The returned
+// sessionID is empty and wsURL is empty because the TalkAcceptor is not yet
+// wired. Returns ErrTalkUnsupported until the talk port is integrated.
+func (s *NodeService) TalkStart(ctx context.Context, id model.NodeID, channelID string) (string, string, error) {
+	_ = id
+	_ = channelID
+	return "", "", port.ErrTalkUnsupported
+}
+
+// TalkStop closes the talk session identified by sessionID.
+func (s *NodeService) TalkStop(ctx context.Context, id model.NodeID, channelID, sessionID string) error {
+	_ = id
+	_ = channelID
+	_ = sessionID
+	return port.ErrTalkUnsupported
+}
+
+// SendPTZ sends a PTZ command to the device channel.
+// Returns ErrPTZUnsupported when the node is not a device.
+func (s *NodeService) SendPTZ(ctx context.Context, id model.NodeID, channelID string, cmd model.PTZCommand) error {
+	n, ok := s.registry.Get(ctx, id)
+	if !ok {
+		return model.ErrUnknownNode
+	}
+	if n.Profile().ID().Kind() != model.NodeKindDevice {
+		return port.PTZUnsupported(id, channelID, "not a device")
+	}
+	// TODO(#15-scenario-engine): implement actual PTZ MANSCDP control send
+	s.log.Warn("PTZ: not yet implemented",
+		"node_id", id.String(), "channel_id", channelID,
+		"command", fmt.Sprintf("%+v", cmd))
+	return nil
+}
+
+// ListRecords returns available playback sessions for the given channel.
+// Returns ErrRecordUnsupported when the node is not a device or has no
+// playback sessions.
+func (s *NodeService) ListRecords(ctx context.Context, id model.NodeID, channelID string, start, end time.Time) ([]model.RecordInfo, error) {
+	n, ok := s.registry.Get(ctx, id)
+	if !ok {
+		return nil, model.ErrUnknownNode
+	}
+	if n.Profile().ID().Kind() != model.NodeKindDevice {
+		return nil, port.RecordUnsupported(id, channelID, "not a device")
+	}
+	// TODO(#15-scenario-engine): return actual record list from device catalog
+	s.log.Warn("ListRecords: not yet implemented",
+		"node_id", id.String(), "channel_id", channelID,
+		"start", start, "end", end)
+	return nil, nil
+}
+
+// StartPlayback starts a playback session for the channel.
+// Returns ErrPlaybackUnsupported when the node is not a device.
+func (s *NodeService) StartPlayback(ctx context.Context, id model.NodeID, channelID string, req model.PlaybackRequest) (model.PlaybackHandle, error) {
+	n, ok := s.registry.Get(ctx, id)
+	if !ok {
+		return model.PlaybackHandle{}, model.ErrUnknownNode
+	}
+	if n.Profile().ID().Kind() != model.NodeKindDevice {
+		return model.PlaybackHandle{}, port.ErrPlaybackUnsupported
+	}
+	// TODO(#15-scenario-engine): implement playback via device dialog + RTP
+	s.log.Warn("StartPlayback: not yet implemented",
+		"node_id", id.String(), "channel_id", channelID,
+		"start", req.StartTime, "end", req.EndTime, "speed", req.Speed)
+	return model.PlaybackHandle{}, nil
+}
+
+// ControlPlayback sends a control command to an active playback session.
+// Returns ErrPlaybackUnsupported when the handle is invalid.
+func (s *NodeService) ControlPlayback(ctx context.Context, id model.NodeID, channelID string, handle model.PlaybackHandle, cmd model.PlaybackCommand) error {
+	if handle.SessionID == "" {
+		return port.ErrPlaybackUnsupported
+	}
+	// TODO(#15-scenario-engine): implement playback control
+	return nil
+}
+
+// StartTalk initiates a two-way audio session with the device channel.
+// Returns ErrTalkUnsupported when the node is not a device or talk is not
+// available.
+func (s *NodeService) StartTalk(ctx context.Context, id model.NodeID, channelID string) (model.TalkSession, error) {
+	n, ok := s.registry.Get(ctx, id)
+	if !ok {
+		return model.TalkSession{}, model.ErrUnknownNode
+	}
+	if n.Profile().ID().Kind() != model.NodeKindDevice {
+		return model.TalkSession{}, port.ErrTalkUnsupported
+	}
+	// TODO: wire talk port (TalkAcceptor) via NodeService
+	s.log.Warn("StartTalk: not yet wired",
+		"node_id", id.String(), "channel_id", channelID)
+	return model.TalkSession{}, fmt.Errorf("port: talk not wired for node %s channel %s: %w", id, channelID, port.ErrTalkUnsupported)
+}
+
+// StopTalk ends the active two-way audio session.
+func (s *NodeService) StopTalk(ctx context.Context, id model.NodeID, channelID string) error {
+	n, ok := s.registry.Get(ctx, id)
+	if !ok {
+		return model.ErrUnknownNode
+	}
+	if n.Profile().ID().Kind() != model.NodeKindDevice {
+		return fmt.Errorf("port: talk unsupported for node %s channel %s: %w", id, channelID, port.ErrTalkUnsupported)
+	}
+	// TODO: implement talk stop
+	return nil
+}
+
+// Snapshot captures the current frame from the device channel.
+// Returns ErrSnapshotUnsupported when the node is not a device or capture
+// fails.
+func (s *NodeService) Snapshot(ctx context.Context, id model.NodeID, channelID string) ([]byte, string, error) {
+	n, ok := s.registry.Get(ctx, id)
+	if !ok {
+		return nil, "", model.ErrUnknownNode
+	}
+	if n.Profile().ID().Kind() != model.NodeKindDevice {
+		return nil, "", port.SnapshotUnsupported(id, channelID, "not a device")
+	}
+	// TODO(#15-scenario-engine): implement snapshot via device catalog/screenshot
+	s.log.Warn("Snapshot: not yet implemented",
+		"node_id", id.String(), "channel_id", channelID)
+	return nil, "", port.SnapshotUnsupported(id, channelID, "not yet implemented")
+}
+
 func (s *NodeService) stamp(id model.NodeID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
