@@ -49,6 +49,7 @@ func newServer(t *testing.T) (*httptest.Server, *logging.Hub) {
 		nil, // NodeView - nil is allowed; node endpoints return 501
 		nil, // ScenarioRunner - same
 		nil, // ChannelView - same
+		nil, // AccountAdmin - nil is allowed; account endpoints return 501
 		nil, // *StreamingServer - tests don't use streaming
 	)
 	ts := httptest.NewServer(srv.Echo())

@@ -18,6 +18,18 @@ export const api = {
   listChannels (nodeId) {
     return fetch(`${BASE}/v1/nodes/${encodeURIComponent(nodeId)}/channels`).then(ok)
   },
+  addChannel (nodeId, { id, name, parentId, status }) {
+    return fetch(`${BASE}/v1/nodes/${encodeURIComponent(nodeId)}/channels`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, name, parent_id: parentId || '', status: status || 'ON' })
+    }).then(ok)
+  },
+  removeChannel (nodeId, ch) {
+    return fetch(`${BASE}/v1/nodes/${encodeURIComponent(nodeId)}/channels/${encodeURIComponent(ch)}`, {
+      method: 'DELETE'
+    }).then(ok)
+  },
   getChannelMedia (nodeId, ch) {
     return fetch(`${BASE}/v1/nodes/${encodeURIComponent(nodeId)}/channels/${encodeURIComponent(ch)}/media`).then(ok)
   },
@@ -151,5 +163,41 @@ export const api = {
     }
     ws.onclose = () => { if (onClose) onClose() }
     return ws
+  },
+
+  // ─── Accounts (platform SIP registration) ───────────────────────────────────
+
+  listAccounts (nodeId) {
+    return fetch(`${BASE}/v1/platforms/${encodeURIComponent(nodeId)}/accounts`).then(ok)
+  },
+  addAccount (nodeId, username, password) {
+    return fetch(`${BASE}/v1/platforms/${encodeURIComponent(nodeId)}/accounts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    }).then(ok)
+  },
+  removeAccount (nodeId, username) {
+    return fetch(`${BASE}/v1/platforms/${encodeURIComponent(nodeId)}/accounts/${encodeURIComponent(username)}`, {
+      method: 'DELETE'
+    }).then(ok)
+  },
+  setAccountPassword (nodeId, username, password) {
+    return fetch(`${BASE}/v1/platforms/${encodeURIComponent(nodeId)}/accounts/${encodeURIComponent(username)}/password`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password })
+    }).then(ok)
+  },
+
+  // ─── Media upload ───────────────────────────────────────────────────────────
+
+  uploadMedia (nodeId, file) {
+    const fd = new FormData()
+    fd.append('file', file)
+    return fetch(`${BASE}/v1/nodes/${encodeURIComponent(nodeId)}/media/upload`, {
+      method: 'POST',
+      body: fd
+    }).then(ok)
   }
 }

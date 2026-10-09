@@ -17,9 +17,10 @@ import (
 
 	"github.com/your-org/gb28181-simulator/internal/adapter/audit"
 	sipauth "github.com/your-org/gb28181-simulator/internal/adapter/auth"
+	"github.com/your-org/gb28181-simulator/internal/adapter/accountsql"
 	"github.com/your-org/gb28181-simulator/internal/adapter/capture"
 	"github.com/your-org/gb28181-simulator/internal/adapter/cascade"
-	"github.com/your-org/gb28181-simulator/internal/adapter/credstore"
+	"github.com/your-org/gb28181-simulator/internal/adapter/channelsql"
 	"github.com/your-org/gb28181-simulator/internal/adapter/devicereg"
 	"github.com/your-org/gb28181-simulator/internal/adapter/manscdp"
 	"github.com/your-org/gb28181-simulator/internal/adapter/media"
@@ -100,10 +101,18 @@ func bindTransport(addr string, nodeID model.NodeID) (port.SIPTransport, error) 
 // accepts. It is separate from the loop that calls it so the wiring — where
 // a configured password becomes a credential — can be tested without
 // starting a process.
+// startupAccountStore is the slice of AccountAdmin the applyPlatformSection
+// startup path needs: both Seed (YAML idempotent insert) and the management
+// methods the HTTP plane uses later.
+type startupAccountStore interface {
+	port.AccountAdmin
+	port.AccountSeeder
+}
+
 func applyPlatformSection(
 	profile model.NodeProfile,
 	pc *platformconfig.NodePlatformConfig,
-	accounts *credstore.Store,
+	accounts startupAccountStore,
 ) (model.NodeProfile, error) {
 	policy, err := model.NewExpiresPolicy(pc.Min, pc.Default, pc.Max)
 	if err != nil {
@@ -136,7 +145,7 @@ func applyPlatformSection(
 		if pc.AllowNoAuth {
 			cred = cred.WithNoAuth()
 		}
-		if err := accounts.Add(profile.ID(), cred); err != nil {
+		if err := accounts.Seed(profile.ID(), cred); err != nil {
 			return model.NodeProfile{}, fmt.Errorf("accounts[%d]: %w", j, err)
 		}
 	}
@@ -183,15 +192,16 @@ func run() error {
 	// service provider; the scenario engine's inject-fault steps reuse it so
 	// injected faults behave exactly like HTTP-installed ones.
 	var faultStore *app.FaultStoreAdapter
-	// nodeAccounts is the per-process credential store populated from YAML
-	// platform.accounts and wired into the scenario engine so create-node
-	// steps can pre-load a platform's downstream credentials.
-	var nodeAccounts *credstore.Store
+	// accountAdmin is the sqlite-backed platform-account store: YAML seeds
+	// it once, the HTTP management plane mutates it at runtime, and the
+	// scenario engine reuses it for create-node steps.
+	var accountAdmin *accountsql.Store
 	// scenarioRunner is the Change 15 scenario engine: a store+executor
 	// runner decorated by the app-level ScenarioService (last-run tracking).
 	var scenarioRunner port.ScenarioRunner
 
-	c := servicectx.NewContainer().
+	var c *servicectx.Container
+	c = servicectx.NewContainer().
 		Provide(configKey, func() (any, error) {
 			var err error
 			cfg, err = platformconfig.Load(*cfgPath)
@@ -305,8 +315,16 @@ func run() error {
 			// adapters, the UAS use case lives in app, and the app never
 			// sees either concrete type.
 			devices := devicereg.New()
-			accounts := credstore.New()
-			nodeAccounts = accounts
+			portSt := servicectx.MustGet[port.Storage](c, servicectx.StorageKey)
+			rawSt, _ := portSt.(*storage.Store)
+			if rawSt == nil {
+				return nil, fmt.Errorf("storage provider produced no store")
+			}
+			accountSQL, err := accountsql.NewE(rawSt.DB())
+			if err != nil {
+				return nil, fmt.Errorf("account sqlite init: %w", err)
+			}
+			accountAdmin = accountSQL
 			authenticator, err := sipauth.NewAuthenticatorAdapter(sipauth.NewResponder(nil))
 			if err != nil {
 				return nil, fmt.Errorf("authenticator: %w", err)
@@ -315,8 +333,12 @@ func run() error {
 			if err != nil {
 				return nil, fmt.Errorf("challenger: %w", err)
 			}
+			// The acceptor still needs a CredentialStore to answer auth
+			// challenges. The sqlite adapter implements that interface, so we
+			// pass it directly — the same store serves both real-time auth
+			// and the management API.
 			acceptor, err := app.NewAcceptor(processCtx, clock.Real(), challenger, authenticator,
-				accounts, devices, manscdp.NewMANSCDPCodec(), clock.RealTicker(), logging.L())
+				accountSQL, devices, manscdp.NewMANSCDPCodec(), clock.RealTicker(), logging.L())
 			if err != nil {
 				return nil, fmt.Errorf("acceptor: %w", err)
 			}
@@ -325,6 +347,13 @@ func run() error {
 				return nil, fmt.Errorf("node service: %w", err)
 			}
 			nodeAcceptor = acceptor
+			// channelStore persists channel and media definitions for device
+			// nodes; svc.WithChannelStore wires it into the node service so
+			// runtime changes survive restarts.
+			chSt := channelsql.New(rawSt.DB())
+			if _, err := svc.WithChannelStore(chSt); err != nil {
+				return nil, fmt.Errorf("channel store: %w", err)
+			}
 
 			// Fault injection: one store shared by the acceptor (request
 			// gate) and the node service (HTTP fault API).
@@ -408,6 +437,7 @@ func run() error {
 
 			// Register every configured node; starting them is an explicit
 			// operation (design D9), so an empty list costs nothing.
+			var createdIDs []model.NodeID
 			for i, nc := range cfg.Nodes {
 				// Seed the profile's media slot from YAML when present.
 				// platforms don't originate video, so we silently drop
@@ -471,7 +501,7 @@ func run() error {
 				// grants, and the accounts it accepts. Without one it still
 				// serves, in its own domain with the default window.
 				if nc.Platform != nil {
-					profile, err = applyPlatformSection(profile, nc.Platform, accounts)
+					profile, err = applyPlatformSection(profile, nc.Platform, accountAdmin)
 					if err != nil {
 						return nil, fmt.Errorf("node[%d].platform: %w", i, err)
 					}
@@ -481,9 +511,18 @@ func run() error {
 				if _, err := svc.Create(context.Background(), profile); err != nil {
 					return nil, fmt.Errorf("register node[%d]: %w", i, err)
 				}
+				createdIDs = append(createdIDs, profile.ID())
 			}
 			if len(cfg.Nodes) > 0 {
 				logging.L().Info("nodes registered", "count", len(cfg.Nodes))
+			}
+			// Restore runtime-created channels and media definitions that
+			// outlive the process. YAML accounts are re-seeded idempotently
+			// by applyPlatformSection above (AddAccount ignores duplicates).
+			for _, id := range createdIDs {
+				if err := svc.RestorePersistedState(context.Background(), id); err != nil {
+					return nil, fmt.Errorf("restore persisted state for node %s: %w", id.String(), err)
+				}
 			}
 			nodeSvc = svc
 			faultStore = faults
@@ -501,7 +540,7 @@ func run() error {
 				logging.L().Info("scenario dir loaded", "dir", cfg.Scenario.Dir)
 			}
 			exec := scenario.NewExecutor()
-			scenario.RegisterNodeSteps(exec, nodeSvc, nodeAccounts)
+			scenario.RegisterNodeSteps(exec, nodeSvc, accountAdmin)
 			scenario.RegisterCommandSteps(exec, nodeSvc)
 			scenario.RegisterWaitSteps(exec)
 			scenario.RegisterExpectSteps(exec, nodeSvc)
@@ -526,7 +565,7 @@ func run() error {
 				Version: version,
 				Commit:  commit,
 				BuiltAt: builtAt,
-			}, nodeSvc, scenarioRunner, nodeSvc, flvServer), nil
+			}, nodeSvc, scenarioRunner, nodeSvc, accountAdmin, flvServer), nil
 			})
 
 	cancel, err := c.Build()

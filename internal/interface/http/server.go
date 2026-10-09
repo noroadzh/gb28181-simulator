@@ -15,6 +15,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 
+	"github.com/your-org/gb28181-simulator/internal/domain/port"
 	"github.com/your-org/gb28181-simulator/internal/interface/webui"
 	platformconfig "github.com/your-org/gb28181-simulator/internal/platform/config"
 	"github.com/your-org/gb28181-simulator/internal/platform/observability/logging"
@@ -35,6 +36,7 @@ type Server struct {
 	nodes     NodeView
 	scenarios ScenarioRunner
 	channels  ChannelView
+	accounts  port.AccountAdmin
 	echo      *echo.Echo
 	http      *http.Server
 	log       *slog.Logger
@@ -58,7 +60,7 @@ var upgrader = websocket.Upgrader{
 // prior Change 14 placeholder behavior. channels may be nil, in which case
 // the channel endpoints report 501. streaming may be nil when the streaming
 // feature is not configured.
-func NewServer(cfg platformconfig.Config, hub *logging.Hub, ver Version, nodes NodeView, scenarios ScenarioRunner, channels ChannelView, streaming *StreamingServer) *Server {
+func NewServer(cfg platformconfig.Config, hub *logging.Hub, ver Version, nodes NodeView, scenarios ScenarioRunner, channels ChannelView, accounts port.AccountAdmin, streaming *StreamingServer) *Server {
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
@@ -79,6 +81,7 @@ func NewServer(cfg platformconfig.Config, hub *logging.Hub, ver Version, nodes N
 		nodes:     nodes,
 		scenarios: scenarios,
 		channels:  channels,
+		accounts:  accounts,
 		echo:      e,
 		log:       slog.Default(),
 		streaming: streaming,
@@ -144,6 +147,24 @@ func (s *Server) registerRoutes(e *echo.Echo) {
 	e.GET("/v1/nodes/:id/media", s.handleGetMedia)
 	e.PUT("/v1/nodes/:id/media", s.handlePutMedia)
 	e.DELETE("/v1/nodes/:id/media", s.handleDeleteMedia)
+	// Upload endpoint (channel-account-management-and-help-doc change):
+	// upload a media file (MP4/TS/...) and get back the container-internal
+	// path it was stored at, ready to bind as node-level or channel-level
+	// media source.
+	e.POST("/v1/nodes/:id/media/upload", s.handleMediaUpload)
+
+	// Platform account management (channel-account-management-and-help-doc
+	// change): CRUD for a platform node's SIP registration accounts,
+	// backed by sqlite for persistence across restarts.
+	e.GET("/v1/platforms/:id/accounts", s.handleAccountList)
+	e.POST("/v1/platforms/:id/accounts", s.handleAccountAdd)
+	e.DELETE("/v1/platforms/:id/accounts/:username", s.handleAccountRemove)
+	e.PUT("/v1/platforms/:id/accounts/:username/password", s.handleAccountSetPassword)
+
+	// Dynamic channel management: create or delete a channel on a device
+	// node at runtime; changes persist through the channel store.
+	e.POST("/v1/nodes/:id/channels", s.handleChannelAdd)
+	e.DELETE("/v1/nodes/:id/channels/:ch", s.handleChannelRemove)
 
 	// Channel-level endpoints (multi-channel-and-web-player). With no
 	// ChannelView wired in (channels == nil) the handlers report 501.

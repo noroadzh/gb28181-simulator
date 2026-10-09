@@ -59,6 +59,7 @@ type NodeService struct {
 	keepaliveCodec port.KeepaliveCodec
 	faults         port.FaultStore
 	captures       port.CaptureStore
+	channels       port.ChannelStore
 
 	// splits holds the message splitter of every node that is both halves
 	// of a cascade. A platform-small serves and registers over one
@@ -226,6 +227,19 @@ func (s *NodeService) CapturePCAP(ctx context.Context, id model.NodeID) ([]byte,
 // defaultCaptureQueryLimit caps an unbounded capture query so one caller
 // cannot drain the whole ring in a single response.
 const defaultCaptureQueryLimit = 256
+
+// WithChannelStore attaches the durable channel store backing the dynamic
+// channel and media persistence. Without one AddChannel / RemoveChannel and
+// the media setters still mutate the in-memory profile — the store only
+// makes the change survive a restart — so tests that do not exercise
+// persistence need no substitute.
+func (s *NodeService) WithChannelStore(cs port.ChannelStore) (*NodeService, error) {
+	if cs == nil {
+		return nil, fmt.Errorf("app: NodeService requires a non-nil ChannelStore")
+	}
+	s.channels = cs
+	return s, nil
+}
 
 // WithKeeper attaches the keepalive and renewal use case. Without one a
 // registered node still comes online — its registration simply is not held
@@ -854,21 +868,35 @@ func (s *NodeService) SetMedia(ctx context.Context, id model.NodeID, cfg model.M
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
-	_, err := s.registry.MutateProfile(ctx, id, func(p model.NodeProfile) (model.NodeProfile, error) {
+	if _, err := s.registry.MutateProfile(ctx, id, func(p model.NodeProfile) (model.NodeProfile, error) {
 		p.SetMediaConfig(cfg)
 		return p, nil
-	})
-	return err
+	}); err != nil {
+		return err
+	}
+	if s.channels != nil {
+		if err := s.channels.SaveNodeMedia(ctx, id, cfg); err != nil {
+			return fmt.Errorf("app: persist node media for node %s: %w", id, err)
+		}
+	}
+	return nil
 }
 
 // ClearMedia removes any configured media from the node's profile. The next
 // INVITE against this node takes the platform (no-media) path.
 func (s *NodeService) ClearMedia(ctx context.Context, id model.NodeID) error {
-	_, err := s.registry.MutateProfile(ctx, id, func(p model.NodeProfile) (model.NodeProfile, error) {
+	if _, err := s.registry.MutateProfile(ctx, id, func(p model.NodeProfile) (model.NodeProfile, error) {
 		p.SetMediaConfig(model.MediaConfig{})
 		return p, nil
-	})
-	return err
+	}); err != nil {
+		return err
+	}
+	if s.channels != nil {
+		if err := s.channels.ClearNodeMedia(ctx, id); err != nil {
+			return fmt.Errorf("app: unpersist node media for node %s: %w", id, err)
+		}
+	}
+	return nil
 }
 
 // GetChannelMedia returns the configured media source for a specific channel.
@@ -890,21 +918,161 @@ func (s *NodeService) SetChannelMedia(ctx context.Context, id model.NodeID, chan
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
-	_, err := s.registry.MutateProfile(ctx, id, func(p model.NodeProfile) (model.NodeProfile, error) {
+	if _, err := s.registry.MutateProfile(ctx, id, func(p model.NodeProfile) (model.NodeProfile, error) {
 		p.SetChannelMediaConfig(channelID, cfg)
 		return p, nil
-	})
-	return err
+	}); err != nil {
+		return err
+	}
+	if s.channels != nil {
+		if err := s.channels.SaveChannelMedia(ctx, id, channelID, cfg); err != nil {
+			return fmt.Errorf("app: persist channel media for %s on node %s: %w", channelID, id, err)
+		}
+	}
+	return nil
 }
 
 // ClearChannelMedia removes the media source for the given channelID.
 // The channel then falls back to the node-level media source.
 func (s *NodeService) ClearChannelMedia(ctx context.Context, id model.NodeID, channelID string) error {
-	_, err := s.registry.MutateProfile(ctx, id, func(p model.NodeProfile) (model.NodeProfile, error) {
+	if _, err := s.registry.MutateProfile(ctx, id, func(p model.NodeProfile) (model.NodeProfile, error) {
 		p.ClearChannelMediaConfig(channelID)
 		return p, nil
-	})
-	return err
+	}); err != nil {
+		return err
+	}
+	if s.channels != nil {
+		if err := s.channels.ClearChannelMedia(ctx, id, channelID); err != nil {
+			return fmt.Errorf("app: unpersist channel media for %s on node %s: %w", channelID, id, err)
+		}
+	}
+	return nil
+}
+
+// AddChannel adds a dynamic channel to a device node's profile and
+// persists it. The channel id must be unique on the node (the registry is
+// the live authority); the persisted row is what makes the channel survive
+// a restart.
+//
+// The profile is mutated first — the registry is what the SIP signalling
+// reads — and the row is written second. A failed write leaves the live
+// state consistent and reports the error; the operator can retry, and on
+// restart the channel is simply absent.
+func (s *NodeService) AddChannel(ctx context.Context, id model.NodeID, channelID, name, parentID string, status model.ChannelStatus) (model.Channel, error) {
+	ch, err := model.NewChannel(channelID, name, parentID, status)
+	if err != nil {
+		return model.Channel{}, fmt.Errorf("app: add channel on node %s: %w", id, err)
+	}
+	if _, err := s.registry.MutateProfile(ctx, id, func(p model.NodeProfile) (model.NodeProfile, error) {
+		return p.WithChannelAdded(ch)
+	}); err != nil {
+		return model.Channel{}, fmt.Errorf("app: add channel %s on node %s: %w", ch.ID(), id, err)
+	}
+	if s.channels != nil {
+		if err := s.channels.SaveChannel(ctx, id, ch); err != nil {
+			return model.Channel{}, fmt.Errorf("app: persist channel %s on node %s: %w", ch.ID(), id, err)
+		}
+	}
+	s.log.Info("channel added",
+		"node_id", id.String(), "channel_id", ch.ID(),
+		"name", ch.Name(), "parent_id", ch.ParentID(), "status", ch.Status().String())
+	return ch, nil
+}
+
+// RemoveChannel removes a dynamic channel from a device node's profile and
+// deletes its persisted row together with its per-channel media
+// configuration (the cascade: a channel that is gone carries no media).
+// An unknown channel id is an error, not a silent no-op.
+func (s *NodeService) RemoveChannel(ctx context.Context, id model.NodeID, channelID string) error {
+	if channelID == "" {
+		return fmt.Errorf("app: remove channel on node %s: empty channel id", id)
+	}
+	if _, err := s.registry.MutateProfile(ctx, id, func(p model.NodeProfile) (model.NodeProfile, error) {
+		return p.WithChannelRemoved(channelID)
+	}); err != nil {
+		return fmt.Errorf("app: remove channel %s on node %s: %w", channelID, id, err)
+	}
+	if s.channels != nil {
+		if err := s.channels.RemoveChannel(ctx, id, channelID); err != nil {
+			return fmt.Errorf("app: unpersist channel %s on node %s: %w", channelID, id, err)
+		}
+	}
+	s.log.Info("channel removed", "node_id", id.String(), "channel_id", channelID)
+	return nil
+}
+
+// RestorePersistedState re-applies the channels, per-channel media configs
+// and node-level media config a previous run persisted for the node. Rows
+// in the store win over what the in-memory profile already carries: the
+// store records what the operator changed at runtime, the profile only what
+// the YAML seeded.
+//
+// It is called by the composition root after the node is created and before
+// (or right after) it starts, so a restarted device comes back with the
+// channels it had. A node with nothing persisted is a no-op, which makes
+// first-run indistinguishable from an empty store.
+func (s *NodeService) RestorePersistedState(ctx context.Context, id model.NodeID) error {
+	if s.channels == nil {
+		return nil
+	}
+	if _, ok := s.registry.Get(ctx, id); !ok {
+		return fmt.Errorf("app: restore node %s: %w", id, model.ErrUnknownNode)
+	}
+
+	// Channels: merge persisted rows over what the profile carries.
+	stored, err := s.channels.ListChannels(ctx, id)
+	if err != nil {
+		return fmt.Errorf("app: restore channels of node %s: %w", id, err)
+	}
+	if len(stored) > 0 {
+		if _, err := s.registry.MutateProfile(ctx, id, func(p model.NodeProfile) (model.NodeProfile, error) {
+			return p.WithChannels(stored)
+		}); err != nil {
+			return fmt.Errorf("app: restore channels of node %s: %w", id, err)
+		}
+	}
+
+	// Per-channel media: apply each stored config onto the profile.
+	media, err := s.channels.ListChannelMedia(ctx, id)
+	if err != nil {
+		return fmt.Errorf("app: restore channel media of node %s: %w", id, err)
+	}
+	for _, pm := range media {
+		cfg := model.MediaConfig{
+			Kind:  model.MediaSourceKind(pm.Kind),
+			Path:  pm.Path,
+			Loop:  pm.Loop,
+			MTU:   pm.MTU,
+			FPS:   pm.FPS,
+			Clock: pm.Clock,
+		}
+		cfg = cfg.Normalize()
+		if _, err := s.registry.MutateProfile(ctx, id, func(p model.NodeProfile) (model.NodeProfile, error) {
+			p.SetChannelMediaConfig(pm.ChannelID, cfg)
+			return p, nil
+		}); err != nil {
+			return fmt.Errorf("app: restore channel media %s of node %s: %w", pm.ChannelID, id, err)
+		}
+	}
+
+	// Node-level media: the stored config replaces the seeded one.
+	if cfg, has, err := s.channels.LoadNodeMedia(ctx, id); err != nil {
+		return fmt.Errorf("app: restore node media of node %s: %w", id, err)
+	} else if has {
+		cfg = cfg.Normalize()
+		if _, err := s.registry.MutateProfile(ctx, id, func(p model.NodeProfile) (model.NodeProfile, error) {
+			p.SetMediaConfig(cfg)
+			return p, nil
+		}); err != nil {
+			return fmt.Errorf("app: restore node media of node %s: %w", id, err)
+		}
+	}
+
+	if len(stored) > 0 || len(media) > 0 {
+		s.log.Info("persisted state restored",
+			"node_id", id.String(), "channels", len(stored), "channel_media", len(media))
+	}
+	return nil
 }
 
 // ListChannels returns the channels declared in the node's profile.

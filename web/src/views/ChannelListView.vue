@@ -61,6 +61,110 @@ async function setMedia (ch) {
   }
 }
 
+// ─── 上传媒体文件 ─────────────────────────────────────────────────────────────
+
+const uploadDialogVisible = ref(false)
+const uploadTarget = ref(null) // 上传后要绑定媒体源的通道
+const uploadFile = ref(null)
+const uploading = ref(false)
+
+function openUpload (ch) {
+  uploadTarget.value = ch
+  uploadFile.value = null
+  uploadDialogVisible.value = true
+}
+
+function onUploadChange (file) {
+  uploadFile.value = file.raw || file
+}
+
+async function submitUpload () {
+  if (!uploadFile.value) {
+    ElMessage.warning('请先选择文件')
+    return
+  }
+  uploading.value = true
+  try {
+    const j = await api.uploadMedia(nodeId.value, uploadFile.value)
+    ElMessage.success(`已上传：${j.path}`)
+    uploadDialogVisible.value = false
+    // 若从通道卡片进入，自动绑定为该通道的媒体源
+    if (uploadTarget.value) {
+      await api.putChannelMedia(nodeId.value, uploadTarget.value.id, { kind: 'local_file', path: j.path })
+      ElMessage.success(`已绑定为通道 ${uploadTarget.value.id} 的媒体源`)
+    }
+    refresh()
+  } catch (e) {
+    ElMessage.error(`上传失败：${e.message}`)
+  } finally {
+    uploading.value = false
+  }
+}
+
+// ─── 新增 / 删除通道 ─────────────────────────────────────────────────────────
+
+const addChDialogVisible = ref(false)
+const addChForm = ref({ id: '', name: '', status: 'ON' })
+const addChFormRef = ref(null)
+
+const chIdRule = (rule, value, callback) => {
+  if (!/^\d{20}$/.test(value)) callback(new Error('必须是 20 位数字国标编码'))
+  else callback()
+}
+
+const addChRules = {
+  id: [
+    { required: true, message: '请输入通道 ID', trigger: 'blur' },
+    { validator: chIdRule, trigger: 'blur' }
+  ],
+  name: [{ required: true, message: '请输入通道名称', trigger: 'blur' }]
+}
+
+function openAddChannel () {
+  addChForm.value = { id: '', name: '', status: 'ON' }
+  addChDialogVisible.value = true
+}
+
+async function submitAddChannel () {
+  try {
+    await addChFormRef.value.validate()
+  } catch (_) {
+    return
+  }
+  try {
+    await api.addChannel(nodeId.value, addChForm.value)
+    ElMessage.success('通道已添加')
+    addChDialogVisible.value = false
+    refresh()
+  } catch (e) {
+    ElMessage.error(`添加失败：${e.message}`)
+  }
+}
+
+async function removeChannel (ch) {
+  try {
+    await ElMessageBox.confirm(`确定删除通道 ${ch.id} 吗？删除后不可恢复。`, '删除确认', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消'
+    })
+  } catch (_) {
+    return
+  }
+  try {
+    await api.removeChannel(nodeId.value, ch.id)
+    ElMessage.success('通道已删除')
+    refresh()
+  } catch (e) {
+    ElMessage.error(`删除失败：${e.message}`)
+  }
+}
+
+function handleMediaCommand (cmd, ch) {
+  if (cmd === 'input') setMedia(ch)
+  else if (cmd === 'upload') openUpload(ch)
+}
+
 function parseMediaInput (s) {
   if (s.startsWith('rtsp://') || s.startsWith('rtsps://')) return { kind: 'rtsp', url: s }
   if (s.startsWith('http://') || s.startsWith('https://')) {
@@ -97,7 +201,10 @@ onMounted(refresh)
           <el-tag v-if="node" :type="statusType(node.status)" size="small" style="margin-left:8px">{{ node.status }}</el-tag>
           <el-tag v-if="node" size="small" type="info" style="margin-left:4px">{{ node.kind }}</el-tag>
         </div>
-        <el-button @click="refresh" size="small" :loading="loading">刷新</el-button>
+        <div style="display:flex;gap:8px">
+          <el-button @click="refresh" size="small" :loading="loading">刷新</el-button>
+          <el-button type="primary" size="small" @click="openAddChannel">新增通道</el-button>
+        </div>
       </div>
     </template>
 
@@ -118,11 +225,69 @@ onMounted(refresh)
           </div>
           <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
             <el-button size="small" type="primary" @click.stop="enter(ch)">播放</el-button>
-            <el-button size="small" @click.stop="setMedia(ch)">媒体源</el-button>
+            <el-dropdown split-button type="default" size="small" @click="setMedia(ch)" @command="(cmd) => handleMediaCommand(cmd, ch)">
+              <span>媒体源</span>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="input">手动输入地址</el-dropdown-item>
+                  <el-dropdown-item command="upload">上传文件</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+            <el-button size="small" type="danger" plain @click.stop="removeChannel(ch)">删除</el-button>
             <el-button size="small" @click.stop="copyFlv(ch)">复制FLV</el-button>
           </div>
         </el-card>
       </el-col>
     </el-row>
+
+    <!-- 上传媒体文件对话框 -->
+    <el-dialog
+      v-model="uploadDialogVisible"
+      :title="uploadTarget ? `上传媒体文件并绑定到通道 ${uploadTarget.id}` : '上传媒体文件'"
+      width="480px"
+    >
+      <el-upload
+        drag
+        :auto-upload="false"
+        :on-change="onUploadChange"
+        :limit="1"
+        accept=".mp4,.ts,.mkv,.flv,.h264,.h265"
+      >
+        <el-icon style="font-size:40px;color:#909399;display:flex;justify-content:center;width:100%">+</el-icon>
+        <div style="margin-top:8px;color:#606266">拖拽文件到此处，或 <em>点击选择</em></div>
+        <template #tip>
+          <div style="font-size:12px;color:#909399;margin-top:6px">
+            支持 mp4 / ts / mkv / flv / h264 / h265，单文件不超过 2GB
+          </div>
+        </template>
+      </el-upload>
+      <template #footer>
+        <el-button @click="uploadDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="uploading" @click="submitUpload">上传{{ uploadTarget ? '并绑定' : '' }}</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 新增通道对话框 -->
+    <el-dialog v-model="addChDialogVisible" title="新增通道" width="460px">
+      <el-form ref="addChFormRef" :model="addChForm" :rules="addChRules" label-width="90px">
+        <el-form-item label="通道 ID" prop="id">
+          <el-input v-model="addChForm.id" placeholder="20 位数字国标编码，如 34020000001320000001" maxlength="20" />
+        </el-form-item>
+        <el-form-item label="通道名称" prop="name">
+          <el-input v-model="addChForm.name" placeholder="如：大门摄像头" maxlength="64" />
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-radio-group v-model="addChForm.status">
+            <el-radio label="ON">在线（ON）</el-radio>
+            <el-radio label="OFF">离线（OFF）</el-radio>
+          </el-radio-group>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="addChDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="submitAddChannel">添加</el-button>
+      </template>
+    </el-dialog>
   </el-card>
 </template>

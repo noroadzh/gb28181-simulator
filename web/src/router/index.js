@@ -8,10 +8,14 @@ import MediaView from '../views/MediaView.vue'
 import ChannelListView from '../views/ChannelListView.vue'
 import ChannelDetailView from '../views/ChannelDetailView.vue'
 import RecordView from '../views/RecordView.vue'
+import AccountsView from '../views/AccountsView.vue'
+import HelpView from '../views/HelpView.vue'
 
 const routes = [
   { path: '/', redirect: '/nodes' },
   { path: '/nodes', name: 'nodes', component: NodesView, meta: { title: '节点概览' } },
+  { path: '/accounts/:id?', name: 'accounts', component: AccountsView, meta: { title: '账号管理' } },
+  { path: '/help', name: 'help', component: HelpView, meta: { title: '帮助' } },
   { path: '/capture/:id?', name: 'capture', component: CaptureView, meta: { title: '抓包面板' } },
   { path: '/fault/:id?', name: 'fault', component: FaultView, meta: { title: '故障注入' } },
   { path: '/scenarios', name: 'scenarios', component: ScenarioView, meta: { title: '场景管理' } },

@@ -58,6 +58,12 @@ type NodeView interface {
 	// SetChannelStatus updates the online/offline status of one dynamic channel.
 	SetChannelStatus(ctx context.Context, id model.NodeID, channelID string, status model.ChannelStatus) error
 
+	// AddChannel adds a new dynamic channel to a device node. Returns the
+	// created channel.
+	AddChannel(ctx context.Context, id model.NodeID, channelID, name, parentID string, status model.ChannelStatus) (model.Channel, error)
+	// RemoveChannel removes a dynamic channel from a device node.
+	RemoveChannel(ctx context.Context, id model.NodeID, channelID string) error
+
 	// InstallFault arms the node with the supplied fault profile. A zero
 	// profile is accepted but callers prefer ClearFault when clearing.
 	InstallFault(ctx context.Context, id model.NodeID, p model.FaultProfile) error

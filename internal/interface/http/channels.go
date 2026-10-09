@@ -129,6 +129,71 @@ func (s *Server) handleChannelList(c echo.Context) error {
 	return c.JSON(http.StatusOK, out)
 }
 
+// channelAddRequest is the JSON shape for POST /v1/nodes/:id/channels.
+type channelAddRequest struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	ParentID string `json:"parent_id,omitempty"`
+	Status   string `json:"status,omitempty"` // ON / OFF，缺省 ON
+}
+
+// handleChannelAdd creates a new dynamic channel on a device node.
+// Path: POST /v1/nodes/:id/channels
+func (s *Server) handleChannelAdd(c echo.Context) error {
+	if s.channels == nil {
+		return c.JSON(http.StatusNotImplemented, errorBody{Error: "channels not implemented"})
+	}
+	id, err := s.nodeIDParam(c)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, errorBody{Error: err.Error()})
+	}
+	if !s.nodeExists(c.Request().Context(), id) {
+		return c.JSON(http.StatusNotFound, errorBody{Error: "unknown node " + id.String()})
+	}
+	var req channelAddRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, errorBody{Error: "invalid request body"})
+	}
+	req.ID = strings.TrimSpace(req.ID)
+	req.Name = strings.TrimSpace(req.Name)
+	req.ParentID = strings.TrimSpace(req.ParentID)
+	if req.ID == "" || req.Name == "" {
+		return c.JSON(http.StatusBadRequest, errorBody{Error: "id and name are required"})
+	}
+	status := model.ChannelStatusOnline
+	if req.Status != "" && !strings.EqualFold(req.Status, "ON") {
+		status = model.ChannelStatusOffline
+	}
+	ch, err := s.nodes.AddChannel(c.Request().Context(), id, req.ID, req.Name, req.ParentID, status)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, errorBody{Error: err.Error()})
+	}
+	return c.JSON(http.StatusCreated, newChannelResponse(ch))
+}
+
+// handleChannelRemove deletes a dynamic channel from a device node.
+// Path: DELETE /v1/nodes/:id/channels/:ch
+func (s *Server) handleChannelRemove(c echo.Context) error {
+	if s.channels == nil {
+		return c.JSON(http.StatusNotImplemented, errorBody{Error: "channels not implemented"})
+	}
+	id, err := s.nodeIDParam(c)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, errorBody{Error: err.Error()})
+	}
+	if !s.nodeExists(c.Request().Context(), id) {
+		return c.JSON(http.StatusNotFound, errorBody{Error: "unknown node " + id.String()})
+	}
+	channelID := strings.TrimSpace(c.Param("ch"))
+	if channelID == "" {
+		return c.JSON(http.StatusBadRequest, errorBody{Error: "channel id is required"})
+	}
+	if err := s.nodes.RemoveChannel(c.Request().Context(), id, channelID); err != nil {
+		return c.JSON(http.StatusBadRequest, errorBody{Error: err.Error()})
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
 // handleChannelDetail returns one channel.
 func (s *Server) handleChannelDetail(c echo.Context) error {
 	if s.channels == nil {

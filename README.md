@@ -21,6 +21,15 @@ open http://127.0.0.1:18080
 
 使用 `-config /path/to/config.yaml` 或环境变量 `GB28181_SIMULATOR_CONFIG` 覆盖。
 
+## Web 管理界面
+
+内嵌 Web UI（任意节点的 HTTP 端口）提供以下页面：
+
+- **节点概览**：节点生命周期管理；device 节点可进入通道/媒体源，platform 节点可进入账号管理
+- **通道管理**：device 节点子通道列表，支持运行时新增/删除通道（sqlite 持久化，重启恢复）、为通道配置媒体源（RTSP/HLS/文件路径/上传）
+- **账号管理**：platform 节点的 SIP 注册账号维护（新增/删除/改密码），YAML `platform.accounts` 首次启动幂等 seed 入库，之后以 sqlite 为准
+- **帮助**：业务系统对接本模拟器的完整流程说明（REGISTER 注册 → CATALOG 拉设备列表 → INVITE 预览 → RTP/RTSP 拉流）
+
 ## 端点
 
 - `GET /v1/health` — `{"status":"ok"}`
@@ -39,6 +48,13 @@ open http://127.0.0.1:18080
 - `POST /v1/nodes/{id}/channels/{ch}/talk/stop` — 停止语音对讲
 - `GET /v1/nodes/{id}/channels/{ch}/snapshot` — 快照抓图（返回 JPEG）
 - `GET /v1/flv/{id}/{ch}` — HTTP-FLV 实时流（flv.js 播放）
+- `POST /v1/nodes/{id}/channels` — 动态新增子通道（落库持久化，重启恢复）
+- `DELETE /v1/nodes/{id}/channels/{ch}` — 删除子通道
+- `POST /v1/nodes/{id}/media/upload` — 上传媒体文件（multipart，≤2GB），返回容器内路径
+- `GET /v1/platforms/{id}/accounts` — 平台 SIP 注册账号列表
+- `POST /v1/platforms/{id}/accounts` — 新增账号（sqlite 持久化，即时生效）
+- `DELETE /v1/platforms/{id}/accounts/{username}` — 删除账号
+- `PUT /v1/platforms/{id}/accounts/{username}/password` — 修改账号密码
 
 非法状态转换返回 `409`，并携带节点当前状态：
 

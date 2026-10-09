@@ -479,6 +479,41 @@ func (p NodeProfile) WithChannelStatus(id string, status ChannelStatus) (NodePro
 	return cp, nil
 }
 
+// WithChannelAdded returns a copy with ch appended to the channel list.
+// A duplicate id or empty id is an error; the original profile is unchanged.
+func (p NodeProfile) WithChannelAdded(ch Channel) (NodeProfile, error) {
+	if ch.ID() == "" {
+		return p, fmt.Errorf("model: channel without id for node %s", p.id)
+	}
+	for _, existing := range p.channels {
+		if existing.ID() == ch.ID() {
+			return p, fmt.Errorf("model: duplicate channel %s for node %s", ch.ID(), p.id)
+		}
+	}
+	cp := p
+	cp.channels = append(append([]Channel(nil), p.channels...), ch)
+	return cp, nil
+}
+
+// WithChannelRemoved returns a copy with the channel id removed. An unknown
+// id is an error, not a silent no-op.
+func (p NodeProfile) WithChannelRemoved(id string) (NodeProfile, error) {
+	idx := -1
+	for i, ch := range p.channels {
+		if ch.ID() == id {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return p, fmt.Errorf("model: unknown channel %s for node %s", id, p.id)
+	}
+	cp := p
+	cp.channels = append([]Channel(nil), p.channels...)
+	cp.channels = append(cp.channels[:idx], cp.channels[idx+1:]...)
+	return cp, nil
+}
+
 // AppendAlarm returns a copy with snap added to the alarm log. Snap must be
 // constructed via NewAlarmSnapshot; duplicates by id are refused.
 func (p NodeProfile) AppendAlarm(snap AlarmSnapshot) (NodeProfile, error) {

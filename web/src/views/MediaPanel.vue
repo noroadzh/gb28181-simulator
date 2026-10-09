@@ -9,6 +9,7 @@ const props = defineProps({
 })
 
 const loading = ref(false)
+const uploading = ref(false)
 const state = reactive({
   hasConfig: false,
   config: {
@@ -36,6 +37,21 @@ const sourceKinds = [
   { label: 'HLS 拉流 (hls)', value: 'hls' },
   { label: '合成图 (synthetic)', value: 'synthetic' }
 ]
+
+async function onUploadFile (uploadFile) {
+  if (!uploadFile || !uploadFile.raw) return
+  uploading.value = true
+  try {
+    const res = await api.uploadMedia(props.nodeId, uploadFile.raw)
+    form.path = res.path
+    form.kind = 'file'
+    ElMessage.success('上传成功，路径已回填')
+  } catch (e) {
+    ElMessage.error('上传失败：' + (e.message || e))
+  } finally {
+    uploading.value = false
+  }
+}
 
 async function load () {
   if (!props.nodeId) return
@@ -181,11 +197,26 @@ async function clear () {
           </el-select>
         </el-form-item>
         <el-form-item label="路径">
-          <el-input
-            v-model="form.path"
-            :disabled="form.kind === 'synthetic'"
-            placeholder="synthetic 无需路径；file/RTSP/HLS 必填"
-          />
+          <div style="display:flex;gap:8px;width:100%">
+            <el-input
+              v-model="form.path"
+              :disabled="form.kind === 'synthetic'"
+              placeholder="synthetic 无需路径；file/RTSP/HLS 必填"
+              style="flex:1"
+            />
+            <el-upload
+              v-if="form.kind === 'file'"
+              :show-file-list="false"
+              :auto-upload="false"
+              :on-change="onUploadFile"
+              accept=".mp4,.ts,.mkv,.flv,.h264,.h265,.avi,.mov,.webm"
+            >
+              <el-button :loading="uploading">上传</el-button>
+            </el-upload>
+          </div>
+          <div v-if="form.kind === 'file'" style="font-size:12px;color:#909399;margin-top:4px">
+            可手动填写容器内路径，或点击"上传"选择本地 MP4 等文件（≤2GB），上传后自动回填路径
+          </div>
         </el-form-item>
         <el-form-item label="循环播放">
           <el-switch v-model="form.loop" :disabled="form.kind !== 'file'" />

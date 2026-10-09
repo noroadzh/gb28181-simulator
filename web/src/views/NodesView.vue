@@ -53,11 +53,10 @@ onMounted(refresh)
             <div><b>地址：</b>{{ node.addr }}</div>
             <div><b>故障计数：</b>{{ Object.values(node.fault_counters || {}).reduce((a, b) => a + b, 0) || 0 }}</div>
           </div>
-          <div style="margin-top:8px;display:flex;gap:8px">
+          <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
             <el-button size="small" @click.stop="router.push({ name: 'capture', params: { id: node.id } })">抓包</el-button>
             <el-button size="small" @click.stop="router.push({ name: 'fault', params: { id: node.id } })">故障注入</el-button>
             <el-button
-              v-if="node.kind === 'device'"
               size="small"
               type="primary"
               @click.stop="router.push({ name: 'channels', params: { id: node.id } })"
@@ -68,6 +67,12 @@ onMounted(refresh)
               type="success"
               @click.stop="router.push({ name: 'media', params: { id: node.id } })"
             >媒体源</el-button>
+            <el-button
+              v-if="node.kind && node.kind.startsWith('platform')"
+              size="small"
+              type="warning"
+              @click.stop="router.push({ name: 'accounts', params: { id: node.id } })"
+            >账号</el-button>
           </div>
         </el-card>
       </el-col>

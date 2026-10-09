@@ -371,9 +371,45 @@ func (f *fakeNodeView) ClearMedia(_ context.Context, id model.NodeID) error {
 	return nil
 }
 
+func (f *fakeNodeView) AddChannel(_ context.Context, id model.NodeID, channelID, name, parentID string, status model.ChannelStatus) (model.Channel, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n, ok := f.nodes[id.String()]
+	if !ok {
+		return model.Channel{}, model.ErrUnknownNode
+	}
+	np := n.Profile()
+	ch, err := model.NewChannel(channelID, name, parentID, status)
+	if err != nil {
+		return model.Channel{}, err
+	}
+	np, err = np.WithChannelAdded(ch)
+	if err != nil {
+		return model.Channel{}, err
+	}
+	f.nodes[id.String()] = n.WithProfile(np)
+	return ch, nil
+}
+
+func (f *fakeNodeView) RemoveChannel(_ context.Context, id model.NodeID, channelID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n, ok := f.nodes[id.String()]
+	if !ok {
+		return model.ErrUnknownNode
+	}
+	np := n.Profile()
+	updated, err := np.WithChannelRemoved(channelID)
+	if err != nil {
+		return err
+	}
+	f.nodes[id.String()] = n.WithProfile(updated)
+	return nil
+}
+
 func newNodesServer(t *testing.T, view httpapi.NodeView) *httptest.Server {
 	t.Helper()
-	s := httpapi.NewServer(platformconfig.Config{}, logging.NewHub(4), httpapi.Version{Version: "x"}, view, nil, nil, nil)
+	s := httpapi.NewServer(platformconfig.Config{}, logging.NewHub(4), httpapi.Version{Version: "x"}, view, nil, nil, nil, nil)
 	return httptest.NewServer(s.Echo())
 }
 
