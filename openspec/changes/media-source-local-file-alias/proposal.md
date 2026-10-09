@@ -1,5 +1,13 @@
 # Proposal: media-source-local-file-alias
 
+## Why
+
+前端 `ChannelListView` 上传文件并自动绑定为通道媒体源时发送 `kind: "local_file"`，但后端 `MediaSourceFactory`（main.go:405）只注册了 `file`/`rtsp`/`hls`/`synthetic` 四种。`MediaConfig.Normalize()` 未处理该别名，导致通道媒体源无法打开，FLV 流端点 /v1/flv/:nodeID/:channelID 返回 404。
+
+## What Changes
+
+在 `internal/domain/model/media.go` 的 `MediaConfig.Normalize()` 方法中，将 `Kind == "local_file"` 替换为 `SourceKindFile ("file")`。一次归一化覆盖所有写入路径（`SetMedia` / `SetChannelMedia` / 数据库恢复），无需修改前端或工厂注册代码。新增 `TestMediaConfigNormalizeLocalFileAlias` 单元测试。
+
 ## Summary
 
 修复前端上传文件后自动绑定媒体源时使用的 kind 值与后端 MediaSourceFactory 不匹配的问题。根因是前端 `ChannelListView` 上传文件后发送 `kind: "local_file"`，但后端 `MediaSourceFactory` 仅认识 `file`/`rtsp`/`hls`/`synthetic` 四种，导致 FLV 流媒体端点 404。修复方案：在 `MediaConfig.Normalize()` 中将 `local_file` 归一化为 `file`，使前端别名与后端工厂无缝对接。
