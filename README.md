@@ -31,6 +31,14 @@ open http://127.0.0.1:18080
 - `GET /v1/nodes/{id}` — 单节点；未知 id 返回 `404` 与 `{"error":...}`
 - `POST /v1/nodes/{id}/start` — 绑定监听口，状态 → `registering`
 - `POST /v1/nodes/{id}/stop` — 释放监听口，状态 → `offline`
+- `GET /v1/nodes/{id}/channels` — 通道列表（device 节点）
+- `POST /v1/nodes/{id}/channels/{ch}/ptz` — PTZ 云台控制
+- `GET /v1/nodes/{id}/channels/{ch}/records` — 录像查询
+- `POST /v1/nodes/{id}/channels/{ch}/playback` — 录像回放控制
+- `POST /v1/nodes/{id}/channels/{ch}/talk/start` — 开始语音对讲
+- `POST /v1/nodes/{id}/channels/{ch}/talk/stop` — 停止语音对讲
+- `GET /v1/nodes/{id}/channels/{ch}/snapshot` — 快照抓图（返回 JPEG）
+- `GET /v1/flv/{id}/{ch}` — HTTP-FLV 实时流（flv.js 播放）
 
 非法状态转换返回 `409`，并携带节点当前状态：
 
@@ -184,6 +192,7 @@ make smoke          # 冒烟基线：单元测试 + 5 平台编译 + 前端构�
 - [冒烟测试](docs/smoke-test.md) — 测试矩阵、本地/CI 执行、结果解读、失败排查
 - [Linux 单机部署](docs/deploy-linux.md) — systemd 安装、升级与回滚
 - [Docker Compose 部署](docs/deploy-docker-compose.md) — 多节点容器化部署
+- [Web 管理界面操作手册](docs/web-ui-guide.md) — Dashboard / 通道列表 / PTZ / 回放 / 对讲 / 抓图
 
 仪表盘源码位于 `web/`；生产构建产物写入 `internal/interface/webui/embed/dist/`，并通过 `//go:embed` 内嵌进 Go 二进制。
 

@@ -1,17 +1,20 @@
 # Web 管理界面操作手册
 
-> 版本：8e55379（2026-10-08）。本手册基于 Web 前端实际源码（`web/src/views/`）编写，以代码行为为准，不臆测。
+> 版本：b17cd81（2026-10-09）。本手册基于 Web 前端实际源码（`web/src/views/`）编写，以代码行为准，不臆测。
 
 ## 目录
 
 - [1. 打开界面](#1-打开界面)
 - [2. 侧边栏导航](#2-侧边栏导航)
 - [3. 节点概览（/nodes）](#3-节点概览nodes)
-- [4. 抓包面板（/capture）](#4-抓包面板capture)
-- [5. 故障注入（/fault）](#5-故障注入fault)
-- [6. 场景管理（/scenarios）](#6-场景管理scenarios)
-- [7. 仪表盘（/dashboard）](#7-仪表盘dashboard)
-- [8. 常见问题排查](#8-常见问题排查)
+- [4. 通道列表（/nodes/:id/channels）](#4-通道列表nodesidchannels)
+- [5. 通道详情与实时播放（/nodes/:id/channels/:ch）](#5-通道详情与实时播放nodesidchannelsch)
+- [6. 录像回放（/nodes/:id/channels/:ch/record）](#6-录像回放nodesidchannelschrecord)
+- [7. 抓包面板（/capture）](#7-抓包面板capture)
+- [8. 故障注入（/fault）](#8-故障注入fault)
+- [9. 场景管理（/scenarios）](#9-场景管理scenarios)
+- [10. 仪表盘（/dashboard）](#10-仪表盘dashboard)
+- [11. 常见问题排查](#11-常见问题排查)
 
 ---
 
@@ -25,7 +28,7 @@ Device  Web UI：http://<宿主机IP>:18081
 ```
 
 - 当前 Docker 部署使用端口偏移：Platform `18080`，Device `18081`（原默认 `8080` 端口被宿主机服务占用）。
-- 根路径 `/` 自动重定向到 `/nodes`。
+- 根路径 `/` 自动重定向到 `/nodes`（含自动跳转至 Dashboard）。
 - 无需认证，打开即用。
 
 ### 直接运行（本地）
@@ -52,16 +55,11 @@ npm ci && npm run build
 
 | 菜单项 | 路径 | 对应 Vue 组件 |
 |--------|------|---------------|
+| Dashboard | `/`（重定向至 `/dashboard`） | `DashboardView.vue` |
 | 节点概览 | `/nodes` | `NodesView.vue` |
-| 抓包面板 | `/capture` | `CaptureView.vue` |
-| 故障注入 | `/fault` | `FaultView.vue` |
 | 场景管理 | `/scenarios` | `ScenarioView.vue` |
-| 仪表盘 | `/dashboard` | `DashboardView.vue` |
 
-当前菜单项中没有「媒体源」或「节点启停」的独立页面入口。
-
-- 页面切换无需刷新，Vue Router 前端路由控制。
-- 顶部 Header 显示当前面包屑、服务状态（绿/红标签）和版本号。
+页面切换无需刷新，Vue Router 前端路由控制。顶部 Header 显示当前面包屑、服务状态（绿/红标签）和版本号。
 
 ---
 
@@ -72,11 +70,7 @@ npm ci && npm run build
 ### 功能
 
 1. **刷新**：右上角「刷新」按钮，调用 `GET /v1/nodes` 重新拉取节点列表。
-2. **筛选**：顶部分类筛选下拉框，可选：
-   - 全部
-   - `device`
-   - `platform-small`
-   - `platform-large`
+2. **筛选**：顶部分类筛选下拉框，可选：全部 / `device` / `platform-small` / `platform-large`。
 3. **节点卡片**：每个节点以卡片形式展示：
 
 | 字段 | 说明 |
@@ -88,14 +82,15 @@ npm ci && npm run build
 | 故障计数 | 累计触发的 fault 总数（来自 `node.fault_counters`） |
 
 4. **快捷操作按钮**：
-   - 「抓包」→ 跳转到 `/capture/:id`
-   - 「故障注入」→ 跳转到 `/fault/:id`
+   - device 类型：显示「通道」和「媒体源」快捷按钮
+   - 「通道」→ 跳转 `/nodes/:id/channels` 查看通道列表
+   - 「媒体源」→ 弹出框快速配置节点级媒体源
 
 ### 操作示例
 
 1. 在浏览器打开 `http://<宿主机IP>:18080/nodes`
 2. 在筛选下拉框选择 `device`，只显示设备节点。
-3. 点击某个节点卡片的「抓包」按钮进入抓包面板。
+3. 点击某个节点卡片的「通道」按钮，进入通道列表。
 
 ### 注意事项
 
@@ -104,7 +99,87 @@ npm ci && npm run build
 
 ---
 
-## 4. 抓包面板（/capture）
+## 4. 通道列表（/nodes/:id/channels）
+
+**代码位置**：`web/src/views/ChannelListView.vue`
+
+device 节点可展开查看所有通道。该页面从 `GET /v1/nodes/:id/channels` 拉取通道列表，每张卡片显示通道 ID、名称、在线状态、是否已配媒体源。
+
+### 操作
+
+1. 在 `/nodes` 节点概览页面点击 device 节点卡片上的「通道」按钮，或直接访问 `/nodes/<device-id>/channels`。
+2. 列表加载完成后显示所有通道卡片，支持：
+   - **播放**：跳转至通道详情 `/nodes/:id/channels/:ch`，进入 flv.js 实时播放。
+   - **复制FLV**：将拉流地址 `http://<host>/v1/flv/<id>/<ch>` 写入剪贴板，可分享给其他客户端。
+   - **设置媒体源**：弹窗输入媒体源类型与 URL（合成图 / 本地文件 / RTSP / HLS），对应 `PUT /v1/nodes/:id/channels/:ch/media`。
+
+### 注意事项
+
+- 通道未配置媒体源时点击播放会看到「无媒体源」提示或黑屏，需先配置。
+- 通道级媒体源优先于节点级，回退逻辑参见 `internal/app/node_service.go` 的 `MediaConfig`。
+
+---
+
+## 5. 通道详情与实时播放（/nodes/:id/channels/:ch）
+
+**代码位置**：`web/src/views/ChannelDetailView.vue`
+
+该页面是 Web 端的「实时监控」入口，集成了播放器、PTZ 控制面板、对讲按钮、快照抓图与拉流地址分享。
+
+### 5.1 实时播放
+
+- 使用 `flv.js`（BSD 协议）通过 HTTP-FLV 拉取后端流媒体网关 `/v1/flv/:id/:ch`，自动处理浏览器 MSE 兼容。
+- 播放器下方显示当前连接状态。
+
+### 5.2 PTZ 云台控制
+
+- **方向按钮**：八方向（上/下/左/右/左上/右上/左下/右下），按住持续发送指令（每 500ms 轮询一次），松开停止。
+- **辅助功能**：变倍（zoom in/out）、变焦（focus near/far）、光圈（iris open/close）。
+- **速度滑块**：控制转动速度（1–10），默认 5。
+- **预置位**：输入预置位号（1–255），点击「预设」保存当前位置，「调用」触发定位。
+- **抓图**：点击「抓图」按钮调用 `GET /v1/nodes/:id/channels/:ch/snapshot`，返回 JPEG 并自动下载。
+- 后端对应 `POST /v1/nodes/:id/channels/:ch/ptz`，基于 MANSCDP DeviceControl 指令。
+
+### 5.3 语音对讲
+
+- 点击「开始对讲」：浏览器请求麦克风权限，采集 PCM 通过 WebSocket 上行到 `/v1/talk/ws/:session_id`。
+- 后端基于 SIP INVITE 建立音频 RTP 会话（PCMU 编码），下行音频通过 WebSocket 推回浏览器播放。
+- 点击「停止对讲」：关闭 WebSocket，发送 SIP BYE 结束会话。
+- 后端对应 `POST /v1/nodes/:id/channels/:ch/talk/start` 与 `.../talk/stop`。
+
+### 5.4 录像列表抽屉
+
+- 点击「录像」按钮展开抽屉：从 `GET /v1/nodes/:id/channels/:ch/records` 查询录像列表。
+- 每条录像显示开始/结束时间；点击「回放」跳转到录像回放页面。
+
+### 5.5 拉流地址复制
+
+- 页面右上角「复制 FLV 地址」按钮：将 `http://<host>/v1/flv/<id>/<ch>` 写入剪贴板，方便分享给 VLC、ffmpeg 等外部播放器。
+
+---
+
+## 6. 录像回放（/nodes/:id/channels/:ch/record）
+
+**代码位置**：`web/src/views/RecordView.vue`
+
+### 功能
+
+1. **录像列表**：页面加载时从 `GET /v1/nodes/:id/channels/:ch/records?start=&end=` 查询时间段内的录像。
+2. **时间筛选**：可输入起止时间（ISO 8601 格式）精确查询某一时间窗。
+3. **回放播放器**：选中录像后，使用 `flv.js` 通过 HTTP-FLV 拉取回放流（与实时播放共用网关）。
+4. **倍速控制**：支持 0.5× / 1× / 1.5× / 2× / 4× / 8× 倍速切换。
+5. **暂停 / 继续**：暂停按钮暂停当前回放流。
+6. **进度条拖动**：可拖动至任意时间点（基于 flv.js 的 seek 能力）。
+
+### 操作示例
+
+1. 在通道详情页面点击「录像」打开抽屉，或直接访问 `/nodes/<id>/channels/<ch>/record`。
+2. 选择起止时间后点击「查询」，下方列出录像列表。
+3. 点击某条录像切换到播放器，按需调节倍速或暂停。
+
+---
+
+## 7. 抓包面板（/capture）
 
 **代码位置**：`web/src/views/CaptureView.vue`
 
@@ -137,7 +212,7 @@ npm ci && npm run build
 
 ### 常见问题
 
-**报错 "app: capture store not configured"**：该错误说明服务端 `capture.enabled` 未启用。在 `config.yaml` 中添加：
+**报错 "app: capture store not configured"**：在 `config.yaml` 中添加：
 
 ```yaml
 capture:
@@ -149,7 +224,7 @@ capture:
 
 ---
 
-## 5. 故障注入（/fault）
+## 8. 故障注入（/fault）
 
 **代码位置**：`web/src/views/FaultView.vue`
 
@@ -189,7 +264,7 @@ capture:
 
 ---
 
-## 6. 场景管理（/scenarios）
+## 9. 场景管理（/scenarios）
 
 **代码位置**：`web/src/views/ScenarioView.vue`
 
@@ -232,58 +307,62 @@ capture:
 
 ---
 
-## 7. 仪表盘（/dashboard）
+## 10. 仪表盘（/dashboard）
 
 **代码位置**：`web/src/views/DashboardView.vue`
 
 ### 功能
 
-1. **Version 卡片**：展示服务版本信息。
-2. **实时日志流**：通过 WebSocket 实时推送日志到前端表格。
-3. **健康状态**：顶部 Header 绿色/红色标签反映服务健康状态。
-
-### Version 卡片字段
-
-| 字段 | 说明 |
-|------|------|
-| Version | 版本号 |
-| Commit | Git 短 commit |
-| Go | Go 版本 |
-| Platform | 操作系统 / 架构 |
-
-### 日志流
-
-- 通过 WebSocket 连接 `ws://<host>/v1/logs/stream` 实时推送。
-- 表格最多保留 200 条日志，新日志从顶部插入。
-- 日志级别：trace / debug / info / warn / error。
-- 服务端日志级别可在 `config.yaml` 的 `log.level` 中配置，也支持通过 `PATCH /v1/config/log` 动态调整（非持久化，重启后恢复文件配置）。
+1. **统计卡片**：顶部四张卡片显示设备节点数、通道总数、在线/离线数、已配媒体源数。
+2. **通道列表**：device 节点的通道卡片，可点击进入播放详情，或复制 FLV 拉流地址。
+3. **实时日志流**：通过 WebSocket 实时推送日志到前端表格，最多保留 200 条，新日志从顶部插入。
+4. **健康状态**：顶部 Header 绿色/红色标签反映服务健康状态。
 
 ### 操作示例
 
-1. 进入 `/dashboard`。
-2. 查看 Version 卡片确认版本和运行环境。
-3. 观察日志表格的实时滚动，调试时重点关注 `internal/app` 和 `internal/adapter/media` 模块的日志。
+1. 进入 `/dashboard`（首页自动跳转）。
+2. 查看统计卡片了解当前系统运行状态。
+3. 点击通道卡片进入实时播放，或点击「复制FLV」分享拉流地址。
+4. 观察日志表格的实时滚动，调试时重点关注 `internal/app` 和 `internal/adapter/media` 模块的日志。
 
 ---
 
-## 8. 常见问题排查
+## 11. 常见问题排查
 
-### 8.1 页面打不开 / 404
+### 11.1 页面打不开 / 404
 
 | 现象 | 排查 |
 |------|------|
 | 连接被拒绝 | 检查容器/进程是否在运行，端口是否正确 |
-| 404 页面 | 确认 URL 路径正确：`/nodes`、`/capture`、`/fault`、`/scenarios`、`/dashboard` |
+| 404 页面 | 确认 URL 路径正确 |
 
-### 8.2 节点列表为空
+### 11.2 节点列表为空
 
 - 确认 `config.yaml` 的 `nodes:` 段配置了节点，且节点 ID 格式正确（20 位国标 ID）。
 - 确认服务已启动且 HTTP 端口可访问。
 - 查看 `/dashboard` 的日志流，查找配置加载错误。
 
-### 8.3 抓包面板报错 "capture store not configured"
+### 11.3 通道列表为空
 
-见第 4 节末尾的配置说明。在 `config.yaml` 中添加：
+- 确认该节点类型为 `device`（platform 节点无通道）。
+- 确认节点已启动并注册成功（状态为 `online`）。
+- 查看日志中是否有 Catalog 响应错误。
+
+### 11.4 播放无画面（黑屏）
+
+- 确认通道已配置媒体源（通道卡片显示「✓ 已配置」）。
+- 确认 flv.js 是否正常加载（浏览器控制台无报错）。
+- 检查 `/v1/flv/:id/:ch` 在新标签页直接访问是否返回 FLV 流。
+
+### 11.5 PTZ 不生效
+
+- 确认设备支持云台控制（模拟器中合成图媒体源支持 PTZ 指令）。
+- 检查日志中 `DeviceControl` 是否被正确解析。
+- 确认 `handleDeviceControl` 中对应的 command_type 是 `DeviceControl`（而非 `TeleBoot` 等）。
+
+### 11.6 抓包面板报错 "capture store not configured"
+
+在 `config.yaml` 中添加：
 
 ```yaml
 capture:
@@ -293,24 +372,18 @@ capture:
 
 重启服务。注意 Docker 部署时若只修改了 bind mount 的 config 文件，需要 `docker compose restart` 而非 `up -d`。
 
-### 8.4 故障注入不生效
+### 11.7 故障注入不生效
 
 - 确认节点已启动并在线（状态为 `online`）。
 - 确认安装时表单填写正确（Canned 状态码 400–699，Delay 非负，Drop 在 0–1 之间）。
 - 查看 `/dashboard` 日志流，确认 acceptor 是否读到 fault profile。
 
-### 8.5 场景执行 501
+### 11.8 场景执行 501
 
 - 确认 `scenario engine` 已装配：`cmd/gb28181-simulator/main.go` 中 `scenarioRunner` 非 nil。
 - 如果未装配，`POST /v1/scenarios/run` 返回 `{"error":"scenario engine not configured"}`。
 
-### 8.6 日志不刷新
-
-- 确认 WebSocket 连接未断开：`/dashboard` 的日志表格底部应持续有新日志。
-- 若显示 `ws-closed`，尝试刷新页面。
-- 检查浏览器控制台是否有 WebSocket 错误。
-
-### 8.7 节点状态始终不是 online
+### 11.9 节点状态始终不是 online
 
 - device 节点需要正确配置 `registration.server` 指向 platform 地址。
 - Docker 部署中 device 的 `registration.server` 应使用 Compose 服务名：`gbsim-platform:5060`。

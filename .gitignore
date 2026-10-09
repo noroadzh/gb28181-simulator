@@ -1,5 +1,8 @@
 # Build artifacts
 bin/
+
+# Server deployment artefacts (uploaded to /slow2/gb28181-simulator on 10.96.1.125)
+release/
 # NOTE: `dist/` is intentionally NOT ignored at the repo root.
 # internal/interface/webui/embed/dist/ holds the Vite SPA bundle that is
 # pulled into the Go binary via `//go:embed all:embed/dist`. Keeping the
