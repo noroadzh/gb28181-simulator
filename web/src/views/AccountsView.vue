@@ -56,8 +56,8 @@ const addRules = {
     { required: true, message: '请输入用户名（20 位国标编码）', trigger: 'blur' },
     { validator: validateUsername, trigger: 'blur' }
   ],
-  password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
-  confirm: [{ required: true, message: '请再次输入密码', trigger: 'blur' }, { validator: validateAddConfirm, trigger: 'blur' }]
+  password: [{ required: false }],
+  confirm: [{ required: false }, { validator: validateAddConfirm, trigger: 'blur' }]
 }
 
 const pwdRules = {
@@ -197,12 +197,13 @@ onMounted(loadNodes)
       账号用于第三方设备/系统通过 SIP REGISTER 注册到本平台。此处新增的账号保存在
       SQLite 中，重启后仍然生效；运行时改动即时生效，无需重启。
     </el-alert>
+    <el-alert v-if="!isPlatform" title="提示：账号管理仅对 Platform 节点生效，当前节点为 Device 类型。" type="warning" :closable="false" show-icon style="margin-bottom:12px" />
 
     <el-table :data="accounts" v-loading="loading" style="width:100%" empty-text="暂无账号">
-      <el-table-column prop="Username" label="用户名（20 位国标编码）" min-width="240" />
-      <el-table-column prop="CreatedAt" label="创建时间" width="200">
+      <el-table-column prop="username" label="用户名（20 位国标编码）" min-width="240" />
+      <el-table-column prop="created_at" label="创建时间" width="200">
         <template #default="{ row }">
-          {{ (row.CreatedAt || row.created_at || '').replace('T', ' ').slice(0, 19) || '—' }}
+          {{ (row.created_at || row.CreatedAt || '').replace('T', ' ').slice(0, 19) || '—' }}
         </template>
       </el-table-column>
       <el-table-column label="操作" width="160">

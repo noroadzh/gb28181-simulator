@@ -38,8 +38,8 @@ type CredentialStore interface {
 // AccountInfo is the non-sensitive view of one account, returned by List.
 // It MUST NOT carry the password.
 type AccountInfo struct {
-	Username  string
-	CreatedAt string
+	Username  string `json:"username"`
+	CreatedAt string `json:"created_at"`
 }
 
 // AccountAdmin is the management interface for a platform node's downstream

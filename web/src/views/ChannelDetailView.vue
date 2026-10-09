@@ -86,15 +86,31 @@ function startFlv () {
     stashInitialSize: 128
   })
   player.attachMediaElement(playerRef.value)
+  // 在 flv.js 解析完 metadata 之后再触发 play(), 避免 load→play 竞态导致
+  // "The play() request was interrupted by a call to pause()" 报错。
+  let startedPlay = false
+  const safePlay = () => {
+    if (startedPlay || !player) return
+    startedPlay = true
+    player.play().then(() => {
+      playing.value = true
+      playerError.value = ''
+    }).catch(e => {
+      // AbortError 是 destroy 过程中触发的预期行为, 静默吞掉。
+      if (e && e.name === 'AbortError') return
+      playerError.value = `播放失败：${e.message || e}`
+      playing.value = false
+    })
+  }
+  player.on(flvjs.Events.METADATA_PARSED, safePlay)
   player.load()
-  player.play().then(() => {
-    playing.value = true
-    playerError.value = ''
-  }).catch(e => {
-    playerError.value = `播放失败：${e.message}`
-    playing.value = false
-  })
   player.on(flvjs.Events.ERROR, (e, _, info) => {
+    if (e === flvjs.ErrorTypes.MEDIA_ERROR &&
+        info === flvjs.ErrorDetails.MEDIA_METADATA_PARSE_ERROR) {
+      // 某些本地文件 metadata 解析会失败, 直接尝试播放
+      safePlay()
+      return
+    }
     playerError.value = `解码错误：${info || e}`
     playing.value = false
   })

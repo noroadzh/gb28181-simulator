@@ -66,8 +66,8 @@ func (s *Server) handleAccountAdd(c echo.Context) error {
 	}
 	req.Username = strings.TrimSpace(req.Username)
 	req.Password = strings.TrimSpace(req.Password)
-	if req.Username == "" || req.Password == "" {
-		return c.JSON(http.StatusBadRequest, errorBody{Error: "username and password are required"})
+	if req.Username == "" {
+		return c.JSON(http.StatusBadRequest, errorBody{Error: "username is required"})
 	}
 	if len(req.Username) != 20 {
 		return c.JSON(http.StatusBadRequest, errorBody{Error: "username must be a 20-digit GB/T 28181 device id"})
@@ -126,9 +126,7 @@ func (s *Server) handleAccountSetPassword(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, errorBody{Error: "invalid request body"})
 	}
 	req.Password = strings.TrimSpace(req.Password)
-	if req.Password == "" {
-		return c.JSON(http.StatusBadRequest, errorBody{Error: "password is required"})
-	}
+	// 允许空密码（方便通过界面清空密码）
 	if err := s.accounts.SetAccountPassword(nodeID, username, req.Password); err != nil {
 		if errors.Is(err, port.ErrAccountNotFound) {
 			return c.JSON(http.StatusNotFound, errorBody{Error: "account not found"})

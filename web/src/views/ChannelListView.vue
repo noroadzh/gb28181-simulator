@@ -225,15 +225,8 @@ onMounted(refresh)
           </div>
           <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
             <el-button size="small" type="primary" @click.stop="enter(ch)">播放</el-button>
-            <el-dropdown split-button type="default" size="small" @click="setMedia(ch)" @command="(cmd) => handleMediaCommand(cmd, ch)">
-              <span>媒体源</span>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item command="input">手动输入地址</el-dropdown-item>
-                  <el-dropdown-item command="upload">上传文件</el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
+            <el-button size="small" @click.stop="setMedia(ch)">媒体源</el-button>
+            <el-button size="small" @click.stop="openUpload(ch)">上传</el-button>
             <el-button size="small" type="danger" plain @click.stop="removeChannel(ch)">删除</el-button>
             <el-button size="small" @click.stop="copyFlv(ch)">复制FLV</el-button>
           </div>

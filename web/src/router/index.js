@@ -12,7 +12,7 @@ import AccountsView from '../views/AccountsView.vue'
 import HelpView from '../views/HelpView.vue'
 
 const routes = [
-  { path: '/', redirect: '/nodes' },
+  { path: '/', redirect: '/dashboard' },
   { path: '/nodes', name: 'nodes', component: NodesView, meta: { title: '节点概览' } },
   { path: '/accounts/:id?', name: 'accounts', component: AccountsView, meta: { title: '账号管理' } },
   { path: '/help', name: 'help', component: HelpView, meta: { title: '帮助' } },
