@@ -182,9 +182,16 @@ func (c MediaConfig) Validate() error {
 }
 
 // Normalize returns a copy with zero-valued timing/limit fields replaced by
-// their defaults (MTU 1400, FPS 25, Clock 90000). Kind and Path are left
-// untouched; the caller should Validate before or after Normalize.
+// their defaults (MTU 1400, FPS 25, Clock 90000). It also collapses the
+// "local_file" kind alias to "file" so the front-end's human-readable kind
+// (introduced with the upload/media-source-config change) round-trips through
+// the same MediaSourceFactory branch as the legacy "file" kind. Path and any
+// other kind are left untouched; the caller should Validate before or after
+// Normalize.
 func (c MediaConfig) Normalize() MediaConfig {
+	if c.Kind == "local_file" {
+		c.Kind = SourceKindFile
+	}
 	if c.MTU <= 0 {
 		c.MTU = 1400
 	}

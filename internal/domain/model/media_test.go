@@ -113,3 +113,16 @@ func TestSourceKindsAreStableStrings(t *testing.T) {
 		t.Error("source kind constants drifted from their configuration strings")
 	}
 }
+
+func TestMediaConfigNormalizeLocalFileAlias(t *testing.T) {
+	c := MediaConfig{Kind: "local_file", Path: "/data/v.mp4"}.Normalize()
+	if c.Kind != SourceKindFile {
+		t.Errorf("Normalize kind = %q, want %q", c.Kind, SourceKindFile)
+	}
+	if c.Path != "/data/v.mp4" {
+		t.Errorf("Normalize path = %q, want unchanged", c.Path)
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("normalized local_file should pass Validate: %v", err)
+	}
+}
