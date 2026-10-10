@@ -36,6 +36,6 @@
 
 ## 7. Git 提交与 openspec 归档
 
-- [ ] 7.1 `git add internal/app/device_registrar.go internal/app/device_registrar_peer_test.go openspec/changes/fix-device-registration-peer-matching/` 后提交；`git log -1 --format='%H %s'` 确认新提交
-- [ ] 7.2 `openspec archive fix-device-registration-peer-matching --yes`；验证 `ls openspec/changes/archive/2026-10-10-fix-device-registration-peer-matching/` 含 `proposal.md design.md tasks.md specs/`
-- [ ] 7.3 `grep -n "对端\|peer\|samePeer\|主机名" openspec/specs/device-node/spec.md` 验证 MODIFIED requirement 已出现在 main spec（由 openspec sync 自动或手动合并）
+- [x] 7.1 `git add ...` 后提交；commit `e42bebd fix(device): samePeer address-semantic matching for registar response filtering`
+- [x] 7.2 `openspec archive fix-device-registration-peer-matching --yes`；归档至 `openspec/changes/archive/2026-10-10-fix-device-registration-peer-matching/`
+- [x] 7.3 主 spec `openspec/specs/device-node/spec.md` 第 328 行已出现 `### Requirement: 注册事务的对端匹配使用地址语义等价`，由 openspec archive 自动 merge
