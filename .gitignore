@@ -1,5 +1,6 @@
 # Build artifacts
 bin/
+gb28181-simulator-linux-amd64
 
 # Server deployment artefacts (uploaded to /slow2/gb28181-simulator on 10.96.1.125)
 release/

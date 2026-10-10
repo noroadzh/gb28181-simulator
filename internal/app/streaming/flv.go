@@ -14,19 +14,51 @@ const (
 
 // FLV video frame types.
 const (
-	flvFrameKey     = 1 // keyframe (IDR)
-	flvFrameInter   = 2 // inter frame
-	flvFrameDispo   = 3 // disposable inter (deprecated)
-	flvFrameGenKey  = 4 // generated keyframe
+	flvFrameKey       = 1 // keyframe (IDR)
+	flvFrameInter     = 2 // inter frame
+	flvFrameDispo     = 3 // disposable inter (deprecated)
+	flvFrameGenKey    = 4 // generated keyframe
 	flvFrameVideoInfo = 5
 )
 
-// FLV AVC packet types.
+// FLV AVC/HEVC packet types.
 const (
 	flvAVCSequenceHeader = 0 // AVC sequence header (SPS/PPS)
 	flvAVCNALU           = 1 // AVC NALU
 	flvAVCEOS            = 2 // AVC end of sequence
+	flvHEVCSequenceHeader = 0
+	flvHEVCDecoderConfigRecord = 0
+	flvHEVCNALU           = 1 // HEVC NALU
+	flvHEVCEOS            = 2 // HEVC end of sequence
 )
+
+// FLV codec IDs (lower 4 bits of frame-type byte).
+const (
+	flvCodecAVC = 7
+	flvCodecHEVC = 12 // HEVC in FLV
+)
+
+// VideoCodec distinguishes the video coding format so the muxer knows how to
+// frame FLV tags and which sequence-header format to emit.
+type VideoCodec int
+
+const (
+	CodecUnknown VideoCodec = iota
+	CodecAVC               // H.264
+	CodecHEVC              // H.265 / HEVC
+)
+
+// String returns a stable lowercase name for log/metric keys.
+func (c VideoCodec) String() string {
+	switch c {
+	case CodecAVC:
+		return "avc"
+	case CodecHEVC:
+		return "hevc"
+	default:
+		return "unknown"
+	}
+}
 
 // FLVMuxer encodes PS frames (MPEG-2 Program Stream) into FLV tags for
 // browser playback via flv.js. It is stateful per subscriber: one instance
@@ -77,11 +109,11 @@ func NewFLVMuxer(channelKey string) *FLVMuxer {
 // FLVHeader is the standard FLV file header (9 bytes) + First PreviousTagSize (4 bytes).
 // This is prepended to every HTTP-FLV stream.
 var FLVHeader = []byte{
-	// FLV header
-	0x46, 0x4C, 0x56, // "FLV"
-	0x01,             // version 1
-	0x01,             // flags: 0x01 = video present (no audio in basic streaming)
-	0x00, 0x00, 0x00, // header size (big-endian, usually 9)
+	// FLV header (9 bytes)
+	0x46, 0x4C, 0x56,       // "FLV"
+	0x01,                   // version 1
+	0x01,                   // flags: 0x01 = video present (no audio in basic streaming)
+	0x00, 0x00, 0x00, 0x09, // DataOffset = 9 (4 bytes, big-endian)
 	// PreviousTagSize0 (must be 0)
 	0x00, 0x00, 0x00, 0x00,
 }
@@ -109,15 +141,19 @@ func ParsePS(psPayload []byte) (nalus [][]byte, timestampMS uint32, ok bool) {
 		return nil, 0, false
 	}
 
-	// Find PES header start: scan for 00 00 01 E0 after the pack header.
-	// Pack header is: 00 00 01 BA + 12 bytes. PES follows at offset 16.
-	// Safer: scan for 00 00 01 Ex pattern.
+	// Find PES header start: scan for 00 00 01 E0 (video) or 00 00 01 C0
+	// (audio) after the pack header. Pack header is 00 00 01 BA + 12 bytes,
+	// so PES follows at offset 16 in the common case; we still scan because
+	// some pack headers can be longer in future extensions.
 	pi := 0
 	for pi < len(psPayload)-4 {
 		if psPayload[pi] == 0x00 && psPayload[pi+1] == 0x00 &&
-			psPayload[pi+2] == 0x01 && (psPayload[pi+3]&0xF0) == 0xE0 {
-			pi += 4
-			break
+			psPayload[pi+2] == 0x01 {
+			b3 := psPayload[pi+3]
+			if (b3 & 0xF0) == 0xE0 || (b3 & 0xE0) == 0xC0 {
+				pi += 4
+				break
+			}
 		}
 		pi++
 	}
@@ -126,7 +162,8 @@ func ParsePS(psPayload []byte) (nalus [][]byte, timestampMS uint32, ok bool) {
 	}
 
 	// PES header: skip PES_packet_length (2 bytes), then parse PES header structure.
-	if pi+3 > len(psPayload) {
+	// 需要 5 字节：PES_packet_length(2) + flags(1) + flags(1) + PES_header_data_length(1)。
+	if pi+5 > len(psPayload) {
 		return nil, 0, false
 	}
 	pi += 2 // skip PES_packet_length (not reliable, use remaining bytes)
@@ -219,13 +256,21 @@ func ParsePS(psPayload []byte) (nalus [][]byte, timestampMS uint32, ok bool) {
 			}
 
 			naluType := psPayload[naluStart] & 0x1F
+			// HEVC NALU type: upper 7 bits of byte[1] (encoded as (byte[1] & 0x7E) >> 1)
+			hevcNaluType := byte(0)
+			if videoStart+1 < naluStart+naluStart+1 && nextStart-naluStart >= 2 {
+				hevcNaluType = (psPayload[naluStart+1] & 0x7E) >> 1
+			}
 			nal := make([]byte, 4+nextStart-naluStart)
-			// FLV AVC format: 4-byte NALU length (big-endian) + NALU data (no start code)
+			// FLV AVC/HEVC format: 4-byte NALU length (big-endian) + NALU data (no start code)
 			binary.BigEndian.PutUint32(nal, uint32(nextStart-naluStart))
 			copy(nal[4:], psPayload[naluStart:nextStart])
 
-			// Only keep video NALUs (5-23 are H.264 types; 7=SPS, 8=PPS, 5=IDR, 1=non-IDR).
-			if naluType >= 1 && naluType <= 23 {
+			// Keep video NALUs. H.264 types 1..23 (1=non-IDR, 5=IDR, 7=SPS, 8=PPS).
+			// HEVC types 0..47 (32=VPS, 33=SPS, 34=PPS, 19/20=IDR, 1=non-IDR).
+			isAVC := naluType >= 1 && naluType <= 23
+			isHEVC := hevcNaluType <= 47 && (hevcNaluType == 0 || (hevcNaluType >= 1 && hevcNaluType <= 40) || hevcNaluType == 32 || hevcNaluType == 33 || hevcNaluType == 34)
+			if isAVC || isHEVC {
 				nalus = append(nalus, nal)
 			}
 
@@ -256,13 +301,21 @@ func BuildAVCSequenceHeader(sps, pps []byte) []byte {
 	// - pictureParameterSetLength: len(pps)
 	// - pictureParameterSetNALUnit: pps
 
-	recordLen := 5 + 2 + len(sps) + 2 + len(pps)
-	tag := make([]byte, 11+recordLen) // 11 bytes tag header + body
-
-	// Tag header (11 bytes):
-	tag[0] = flvTagTypeVideo
-	// DataSize (3 bytes, big-endian) = 1 (frame type/codec) + 1 (AVC packet type) + 6 (conf) + sps + pps
-	dataSize := 1 + 1 + recordLen
+	// AVCDecoderConfigurationRecord layout (ISO/IEC 14496-15):
+	//   configurationVersion      1 byte
+	//   AVCProfileIndication      1 byte
+	//   profileCompatibility      1 byte
+	//   AVCLevelIndication        1 byte
+	//   6-bit reserved + lengthSizeMinusOne (2 bits)  1 byte
+	//   1-bit reserved + numOfSequenceParameterSets   1 byte
+	//   SPS: 16-bit length + NALU data
+	//   1-bit reserved + numOfPictureParameterSets    1 byte
+	//   PPS: 16-bit length + NALU data
+	recordLen := 5 + 1 + (2 + len(sps)) + 1 + (2 + len(pps))
+	// 11 bytes tag header + body (1 frameType + 1 avcType + 3 compTime + recordLen) + 4 bytes PreviousTagSize
+	dataSize := 1 + 1 + 3 + recordLen
+	tag := make([]byte, 11+dataSize+4)
+	tag[0] = flvTagTypeVideo // TagType = 9 (video)
 	tag[1] = byte(dataSize >> 16)
 	tag[2] = byte(dataSize >> 8)
 	tag[3] = byte(dataSize)
@@ -293,12 +346,20 @@ func BuildAVCSequenceHeader(sps, pps []byte) []byte {
 	// AVCDecoderConfigurationRecord
 	tag[offset] = 1 // version
 	offset++
-	tag[offset] = sps[1] // AVCProfileIndication
-	offset++
-	tag[offset] = sps[2] // profileCompatibility
-	offset++
-	tag[offset] = sps[3] // AVCLevelIndication
-	offset++
+	// ISO/IEC 14496-15: SPS bytes 1-3 are profile/level fields.
+	// Guard against malformed SPS (needs at least 4 bytes total).
+	if len(sps) >= 4 {
+		tag[offset] = sps[1] // AVCProfileIndication
+		offset++
+		tag[offset] = sps[2] // profileCompatibility
+		offset++
+		tag[offset] = sps[3] // AVCLevelIndication
+		offset++
+	} else {
+		// Fallback: zero out the fields so the record is well-formed.
+		tag[offset], tag[offset+1], tag[offset+2] = 0, 0, 0
+		offset += 3
+	}
 	tag[offset] = 0xFF // lengthSizeMinusOne = 3 (means 4 bytes NALU length)
 	offset++
 
@@ -318,18 +379,19 @@ func BuildAVCSequenceHeader(sps, pps []byte) []byte {
 	copy(tag[offset:], pps)
 	offset += len(pps)
 
-	// PreviousTagSize (4 bytes, big-endian)
+	// PreviousTagSize (4 bytes, big-endian) — allocated in make([]byte, …+4)
 	prevSize := uint32(dataSize + 11)
 	binary.BigEndian.PutUint32(tag[offset:], prevSize)
 
 	return tag
 }
 
-// BuildVideoTag builds one FLV video tag from an H.264 NALU.
+// BuildVideoTag builds one FLV video tag from an H.264 / HEVC NALU.
 // nalu must be in length-prefixed format (4-byte length + data).
 // isKey should be true for IDR frames.
 // timestamp is in milliseconds.
-func BuildVideoTag(nalu []byte, isKey bool, timestampMS uint32) []byte {
+// codec selects whether to write an AVC (7) or HEVC (12) tag.
+func BuildVideoTag(nalu []byte, isKey bool, timestampMS uint32, codec VideoCodec) []byte {
 	naluLen := len(nalu)
 	dataSize := 1 + 1 + 3 + naluLen // frameType/codec + AVCType + compTime + NALU
 
@@ -348,14 +410,27 @@ func BuildVideoTag(nalu []byte, isKey bool, timestampMS uint32) []byte {
 	tag[10] = 0
 
 	offset := 11
-	// Frame type + codec: keyframe(1)/inter(2) + AVC(7) => 0x17 or 0x27
-	if isKey {
-		tag[offset] = 0x17
+	// Frame type + codec: keyframe(1)/inter(2) + AVC(7) => 0x17/0x27
+	//                          keyframe(1)/inter(2) + HEVC(12) => 0x1C/0x2C
+	if codec == CodecHEVC {
+		if isKey {
+			tag[offset] = 0x1C
+		} else {
+			tag[offset] = 0x2C
+		}
 	} else {
-		tag[offset] = 0x27
+		if isKey {
+			tag[offset] = 0x17
+		} else {
+			tag[offset] = 0x27
+		}
 	}
 	offset++
-	tag[offset] = flvAVCNALU // AVC NALU
+	if codec == CodecHEVC {
+		tag[offset] = flvHEVCNALU
+	} else {
+		tag[offset] = flvAVCNALU
+	}
 	offset++
 	// CompositionTime offset (for B-frame compatibility)
 	tag[offset] = 0
@@ -372,6 +447,21 @@ func BuildVideoTag(nalu []byte, isKey bool, timestampMS uint32) []byte {
 	return tag
 }
 
+// CodecFromFLVTagHeader extracts the codec from the first byte of an FLV
+// video tag body (the byte that combines FrameType and CodecID). Returns
+// CodecAVC for AVC, CodecHEVC for HEVC, CodecUnknown otherwise.
+func CodecFromFLVTagHeader(b byte) VideoCodec {
+	codec := VideoCodec(b & 0x0F)
+	switch codec {
+	case flvCodecAVC:
+		return CodecAVC
+	case flvCodecHEVC:
+		return CodecHEVC
+	default:
+		return CodecUnknown
+	}
+}
+
 // IsKeyframe returns true if the NALU type is IDR (5).
 func IsKeyframe(naluType byte) bool {
 	return naluType == 5
@@ -385,8 +475,50 @@ func NALUType(nalu []byte) byte {
 	return nalu[4] & 0x1F
 }
 
+// HEVCNALUType returns the HEVC NALU type from a length-prefixed NALU.
+// HEVC uses byte[4] & 0x7E (upper 7 bits of second byte), shifted right 1.
+func HEVCNALUType(nalu []byte) byte {
+	if len(nalu) < 6 {
+		return 0
+	}
+	return (nalu[4] & 0x7E) >> 1
+}
+
+// IsHEVCSPSPPS returns true for HEVC VPS(32)/SPS(33)/PPS(34) NALUs.
+func IsHEVCSPSPPS(nalu []byte) bool {
+	t := HEVCNALUType(nalu)
+	return t == 32 || t == 33 || t == 34
+}
+
+// IsHEVCKeyframe returns true for HEVC IDR_W_RADL / IDR_N_LP (type 19/20).
+func IsHEVCKeyframe(nalu []byte) bool {
+	t := HEVCNALUType(nalu)
+	return t == 19 || t == 20
+}
+
+// DetectCodec infers the VideoCodec from a list of NALUs by their length-prefixed
+// header byte(s). It returns CodecUnknown if the list is empty.
+func DetectCodec(nalus [][]byte) VideoCodec {
+	for _, nalu := range nalus {
+		if len(nalu) >= 5 {
+			// H.264: byte[4] & 0x1F in 1..23
+			if t := NALUType(nalu); t >= 1 && t <= 23 {
+				return CodecAVC
+			}
+		}
+		if len(nalu) >= 6 {
+			// HEVC: byte[4] upper 7 bits shifted right 1, in 0..63
+			if t := HEVCNALUType(nalu); t <= 63 {
+				return CodecHEVC
+			}
+		}
+	}
+	return CodecUnknown
+}
+
 // ExtractSPSPPS extracts SPS and PPS NALUs from a slice of NALUs.
-// SPS = NALU type 7, PPS = NALU type 8.
+// SPS = NALU type 7, PPS = NALU type 8. The returned bytes have their
+// 4-byte length prefix stripped (FLV AVC format stores NALUs without it).
 func ExtractSPSPPS(nalus [][]byte) (sps, pps []byte) {
 	for _, nalu := range nalus {
 		t := NALUType(nalu)
@@ -400,6 +532,164 @@ func ExtractSPSPPS(nalus [][]byte) (sps, pps []byte) {
 		}
 	}
 	return
+}
+
+// ExtractHEVCDecoderConfig extracts VPS, SPS and PPS NALUs from a slice
+// of NALUs (HEVC NALU types 32/33/34). Returns nil fields if absent.
+func ExtractHEVCDecoderConfig(nalus [][]byte) (vps, sps, pps []byte) {
+	for _, nalu := range nalus {
+		t := HEVCNALUType(nalu)
+		switch t {
+		case 32:
+			if vps == nil {
+				vps = nalu[4:]
+			}
+		case 33:
+			if sps == nil {
+				sps = nalu[4:]
+			}
+		case 34:
+			if pps == nil {
+				pps = nalu[4:]
+			}
+		}
+		if vps != nil && sps != nil && pps != nil {
+			break
+		}
+	}
+	return
+}
+
+// BuildHEVCSequenceHeader builds the FLV HEVCDecoderConfigurationRecord
+// (a.k.a. HEVC sequence header) from the three parameter set NALUs.
+func BuildHEVCSequenceHeader(vps, sps, pps []byte) []byte {
+	// HEVCDecoderConfigurationRecord layout (ISO/IEC 14496-15 + flv.js extension):
+	//   configurationVersion         (8) = 1
+	//   general_profile_space        (2) | general_tier_flag (1) | general_profile_idc (5)
+	//   general_profile_compatibility_flags (32) — read from SPS[2..5]
+	//   general_constraint_indicator_flags    (48)
+	//   general_level_idc                      (8)
+	//   min_spatial_segmentation_idc           (16, 0xF000 reserved)
+	//   parallelismType                        (8, 0)
+	//   chromaFormatIdc                        (8, reserved 0xFC | val<<2)
+	//   bitDepthLumaMinus8                     (8, reserved 0xF8 | val)
+	//   bitDepthChromaMinus8                   (8, reserved 0xF8 | val)
+	//   avgFrameRate                           (16)
+	//   constantFrameRate|numTemporalLayers|temporalIdNested|lengthSizeMinusOne (8)
+	//   numOfArrays                           (8) = 3
+	//   per array: array_completeness|nalu_type (8), numNalus (16), naluLength(16), nalu
+	// 固定头 23 字节；每个 array 固定开销 5 字节（nalu_type 1 + numNalus 2 + naluLength 2）。
+	recordLen := 23 + 5 + len(vps) + 5 + len(sps) + 5 + len(pps)
+
+	dataSize := 1 + 1 + 3 + recordLen
+	tag := make([]byte, 11+dataSize+4)
+
+	tag[0] = flvTagTypeVideo
+	tag[1] = byte(dataSize >> 16)
+	tag[2] = byte(dataSize >> 8)
+	tag[3] = byte(dataSize)
+	tag[4], tag[5], tag[6], tag[7] = 0, 0, 0, 0
+	tag[8], tag[9], tag[10] = 0, 0, 0
+
+	offset := 11
+	// Frame type: 1 (keyframe) | codecID: 12 (HEVC) = 0x1C
+	tag[offset] = 0x1C
+	offset++
+	// AVCPacketType for HEVC: 0 = HEVCDecoderConfigurationRecord
+	tag[offset] = flvHEVCDecoderConfigRecord
+	offset++
+	// CompositionTime: 0
+	tag[offset], tag[offset+1], tag[offset+2] = 0, 0, 0
+	offset += 3
+
+	// HEVCDecoderConfigurationRecord
+	tag[offset] = 1 // configurationVersion
+	offset++
+	// general_profile_space(0) | tier_flag(0) | general_profile_idc(sps[1] from HEVC SPS)
+	// HEVC SPS has profile_idc at byte 2; pass through with 0/0 prefix
+	if len(sps) >= 3 {
+		tag[offset] = sps[1] & 0x1F
+	} else {
+		tag[offset] = 0
+	}
+	offset++
+	// general_profile_compatibility_flags: bytes 4..7 of SPS, but only
+	// first 4 bytes are reliably populated. Fill with 0 for safety.
+	tag[offset], tag[offset+1], tag[offset+2], tag[offset+3] = 0, 0, 0, 0
+	offset += 4
+	// general_constraint_indicator_flags: 6 bytes
+	tag[offset], tag[offset+1], tag[offset+2] = 0, 0, 0
+	tag[offset+3], tag[offset+4], tag[offset+5] = 0, 0, 0
+	offset += 6
+	// general_level_idc: SPS[12] if available
+	if len(sps) >= 13 {
+		tag[offset] = sps[12]
+	} else {
+		tag[offset] = 0
+	}
+	offset++
+	// min_spatial_segmentation_idc: 0xF000 (reserved upper bits)
+	tag[offset] = 0xF0
+	tag[offset+1] = 0x00
+	offset += 2
+	// parallelismType: 0
+	tag[offset] = 0xFC
+	offset++
+	// chromaFormatIdc: 0xFC | (1<<1) = 0xFE (chroma_format_idc=1, 4:2:0)
+	tag[offset] = 0xFD
+	offset++
+	// bitDepthLumaMinus8: 0xF8 | 0
+	tag[offset] = 0xF8
+	offset++
+	// bitDepthChromaMinus8: 0xF8 | 0
+	tag[offset] = 0xF8
+	offset++
+	// avgFrameRate: 0 (unknown)
+	tag[offset] = 0
+	tag[offset+1] = 0
+	offset += 2
+	// constantFrameRate(0) | numTemporalLayers(0) | temporalIdNested(0) | lengthSizeMinusOne(3)
+	// 0000 0000 1111 = 0x0F
+	tag[offset] = 0x0F
+	offset++
+	// numOfArrays = 3
+	tag[offset] = 3
+	offset++
+
+	// VPS array
+	tag[offset] = 32 // array_completeness(1) | reserved(1) | NAL_unit_type(6)
+	offset++
+	binary.BigEndian.PutUint16(tag[offset:], 1) // numNalus
+	offset += 2
+	binary.BigEndian.PutUint16(tag[offset:], uint16(len(vps)))
+	offset += 2
+	copy(tag[offset:], vps)
+	offset += len(vps)
+
+	// SPS array
+	tag[offset] = 33
+	offset++
+	binary.BigEndian.PutUint16(tag[offset:], 1)
+	offset += 2
+	binary.BigEndian.PutUint16(tag[offset:], uint16(len(sps)))
+	offset += 2
+	copy(tag[offset:], sps)
+	offset += len(sps)
+
+	// PPS array
+	tag[offset] = 34
+	offset++
+	binary.BigEndian.PutUint16(tag[offset:], 1)
+	offset += 2
+	binary.BigEndian.PutUint16(tag[offset:], uint16(len(pps)))
+	offset += 2
+	copy(tag[offset:], pps)
+	offset += len(pps)
+
+	// PreviousTagSize
+	prevSize := uint32(dataSize + 11)
+	binary.BigEndian.PutUint32(tag[offset:], prevSize)
+	return tag
 }
 
 // FlushTag finalises and returns the accumulated FLV tag (preceded by

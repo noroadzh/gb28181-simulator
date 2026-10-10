@@ -291,6 +291,7 @@ func (m *MediaService) Close() error {
 // The caller is responsible for closing the returned cleanup function.
 func (m *MediaService) SubscribePS(ctx context.Context, cfg model.MediaConfig) (psCh <-chan model.PSFrame, cleanup func(), err error) {
 	cfg = cfg.Normalize()
+	m.logger.Info("media: SubscribePS called", "cfg_kind", cfg.Kind, "cfg_path", cfg.Path)
 	if err := cfg.Validate(); err != nil {
 		return nil, nil, fmt.Errorf("app: invalid media config: %w", err)
 	}
@@ -317,26 +318,68 @@ func (m *MediaService) SubscribePS(ctx context.Context, cfg model.MediaConfig) (
 		return nil, nil, fmt.Errorf("app: no PS packetizer factory wired")
 	}
 
-	psChRaw := make(chan model.PSFrame) // unbuffered: back-pressure on reader
+	psChRaw := make(chan model.PSFrame, 256) // generous buffer: lets reader run ahead without blocking on runPipeline
 	reader := readerFor(rc, cfg)
 
-	var once sync.Once
+	// Ownership model: only the reader goroutine closes psChRaw, so no other
+	// closer can race with its send on that channel. cleanup closes the source
+	// and signals done, then synchronously waits for the reader to exit (it
+	// closes psChRaw in its defer before signaling readerFinished).
+	//
+	// Termination paths:
+	//  - EOF / read error: reader exits on its own, closes channel.
+	//  - ctx cancel: reader's select sees ctx.Done and exits.
+	//  - cleanup: closes src (unblocking Read), closes done; reader exits via
+	//    the select guard or the send-select done branch.
+	done := make(chan struct{})
+	readerFinished := make(chan struct{})
+	var (
+		closeCh  sync.Once // channel closure, reader-owned
+		closeSrc sync.Once // source closure, cleanup-owned
+	)
 	cleanup = func() {
-		once.Do(func() {
+		closeSrc.Do(func() {
 			_ = src.Close()
-			close(psChRaw)
+			close(done)
 		})
+		<-readerFinished
 	}
 
 	go func() {
-		defer close(psChRaw)
+		// LIFO defers: close channel first, then signal completion.
+		defer close(readerFinished)
+		defer closeCh.Do(func() { close(psChRaw) })
+		m.logger.Info("media: SubscribePS reader goroutine started",
+			"cfg_kind", cfg.Kind, "cfg_path", cfg.Path)
+		frameCount := 0
+		defer func() {
+			m.logger.Info("media: SubscribePS reader goroutine exiting",
+				"cfg_kind", cfg.Kind, "cfg_path", cfg.Path, "frames_sent", frameCount)
+		}()
 		for {
+			// Guard: exit immediately if either signal is set, before
+			// attempting a potentially blocking Read. This prevents goroutine
+			// leaks when the subscriber (HandleFLV) disappears without draining
+			// psChRaw, leaving the next Read to block forever.
+			select {
+			case <-ctx.Done():
+				m.logger.Info("media: SubscribePS reader exiting (ctx done)",
+					"cfg_kind", cfg.Kind, "cfg_path", cfg.Path)
+				return
+			case <-done:
+				m.logger.Info("media: SubscribePS reader exiting (done signal)",
+					"cfg_kind", cfg.Kind)
+				return
+			default:
+			}
 			frame, err := reader.Read(ctx)
 			if err != nil {
 				if err == io.EOF {
+					m.logger.Info("media: SubscribePS reader EOF", "cfg_kind", cfg.Kind)
 					return
 				}
-				// Context cancelled or read error — both mean stop.
+				m.logger.Debug("media: SubscribePS reader error",
+					"cfg_kind", cfg.Kind, "error", err.Error())
 				return
 			}
 			ps, err := psPktz.Packetize(frame)
@@ -345,9 +388,15 @@ func (m *MediaService) SubscribePS(ctx context.Context, cfg model.MediaConfig) (
 				continue
 			}
 			select {
-			case psChRaw <- ps:
 			case <-ctx.Done():
+				m.logger.Debug("media: SubscribePS send ctx cancelled", "cfg_kind", cfg.Kind)
 				return
+			case <-done:
+				m.logger.Debug("media: SubscribePS send done signal", "cfg_kind", cfg.Kind)
+				return
+			case psChRaw <- ps:
+				frameCount++
+				// Sent successfully. Loop back to read the next frame.
 			}
 		}
 	}()

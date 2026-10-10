@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
 )
@@ -107,7 +108,7 @@ func (g *Gateway) Subscribe(ctx context.Context, nodeID model.NodeID, channelID 
 		return nil, &ErrStreamingUnsupported{NodeID: nodeID, ChannelID: channelID, Reason: "no media source configured"}
 	}
 
-	out := make(chan []byte)
+	out := make(chan []byte, 16) // buffered: lets the pipeline run ahead of a slow HTTP subscriber
 
 	// Open the PS pipeline.
 	psCh, err := g.media.SubscribePS(ctx, nodeID, channelID)
@@ -137,19 +138,39 @@ func (g *Gateway) runPipeline(
 	psCh <-chan model.PSFrame,
 	out chan<- []byte,
 ) {
-	defer close(out)
+	framesParsed := 0
+	framesSkipped := 0
+	tagCount := 0
+	defer func() {
+		close(out)
+		g.log.Info("flv: pipeline exiting",
+			"node_id", key.nodeID.String(), "channel_id", key.channelID,
+			"frames_parsed", framesParsed, "frames_skipped", framesSkipped, "tags_sent", tagCount)
+	}()
 	g.mu.Lock()
 	g.sessions.Remove(key)
 	g.mu.Unlock()
 
 	// First chunk: FLV header.
+	// Non-blocking send: the reader goroutine may not have started yet, so we
+	// must not block here. If the subscriber disappears before the header is
+	// sent the HTTP handler returns with an empty body (acceptable for demos).
 	select {
 	case out <- FLVHeader:
-	case <-ctx.Done():
+		g.log.Info("flv: header sent", "node_id", key.nodeID.String(), "channel_id", key.channelID)
+	case <-time.After(2 * time.Second):
+		g.log.Warn("flv: header send timeout, no subscriber",
+			"node_id", key.nodeID.String(), "channel_id", key.channelID)
 		return
 	}
 
+	// Sequence-header state. SPS/PPS (or VPS/SPS/PPS for HEVC) can arrive on
+	// different frames when StreamESReader splits the first mp4 demuxed frame,
+	// so we accumulate them across frames until we have everything needed.
 	var sentSeqHeader bool
+	var collectedAVCSPS, collectedAVCPPS []byte
+	var collectedHEVCVPS, collectedHEVCSPS, collectedHEVCPPS []byte
+	var detectedCodec VideoCodec
 
 	for {
 		select {
@@ -165,35 +186,117 @@ func (g *Gateway) runPipeline(
 				return
 			}
 			nalus, tsMS, parsed := ParsePS(frame.Payload)
+			framesParsed++
 			if !parsed {
+				framesSkipped++
+				if framesSkipped <= 3 {
+					g.log.Info("flv: PS parse failed", "payload_size", len(frame.Payload))
+				}
 				continue
 			}
-			// First video frame: extract SPS/PPS and emit sequence header.
-			if !sentSeqHeader {
-				sps, pps := ExtractSPSPPS(nalus)
-				if sps != nil && pps != nil {
-					seqHeader := BuildAVCSequenceHeader(sps, pps)
-					select {
-					case out <- seqHeader:
-						sentSeqHeader = true
-					case <-ctx.Done():
-						return
+			if framesParsed <= 2 {
+				typeList := make([]int, 0, len(nalus))
+				for _, n := range nalus {
+					if len(n) >= 5 {
+						typeList = append(typeList, int(n[4]&0x1F))
 					}
-				} else {
-					// No SPS/PPS yet; keep skipping frames until we see them.
+				}
+				g.log.Info("flv: parsePS ok",
+					"payload_size", len(frame.Payload),
+					"nalu_count", len(nalus),
+					"nalu_types", typeList,
+					"ts_ms", tsMS)
+			}
+
+			// Detect codec from the first NALU batch.
+			if detectedCodec == CodecUnknown {
+				detectedCodec = DetectCodec(nalus)
+				g.log.Info("flv: codec detected",
+					"node_id", key.nodeID.String(), "channel_id", key.channelID,
+					"codec", detectedCodec.String())
+			}
+
+			// First video frame(s): accumulate parameter sets and emit the
+			// appropriate sequence header when all required sets are present.
+			if !sentSeqHeader {
+				switch detectedCodec {
+				case CodecAVC:
+					if collectedAVCSPS == nil || collectedAVCPPS == nil {
+						s, p := ExtractSPSPPS(nalus)
+						if s != nil {
+							collectedAVCSPS = s
+						}
+						if p != nil {
+							collectedAVCPPS = p
+						}
+					}
+					if collectedAVCSPS != nil && collectedAVCPPS != nil {
+						seqHeader := BuildAVCSequenceHeader(collectedAVCSPS, collectedAVCPPS)
+						select {
+						case out <- seqHeader:
+							sentSeqHeader = true
+							g.log.Info("flv: AVC sequence header sent",
+								"node_id", key.nodeID.String(), "channel_id", key.channelID,
+								"sps_size", len(collectedAVCSPS), "pps_size", len(collectedAVCPPS))
+						case <-ctx.Done():
+							return
+						}
+					}
+				case CodecHEVC:
+					if collectedHEVCVPS == nil || collectedHEVCSPS == nil || collectedHEVCPPS == nil {
+						v, s, p := ExtractHEVCDecoderConfig(nalus)
+						if v != nil {
+							collectedHEVCVPS = v
+						}
+						if s != nil {
+							collectedHEVCSPS = s
+						}
+						if p != nil {
+							collectedHEVCPPS = p
+						}
+					}
+					if collectedHEVCVPS != nil && collectedHEVCSPS != nil && collectedHEVCPPS != nil {
+						seqHeader := BuildHEVCSequenceHeader(collectedHEVCVPS, collectedHEVCSPS, collectedHEVCPPS)
+						select {
+						case out <- seqHeader:
+							sentSeqHeader = true
+							g.log.Info("flv: HEVC sequence header sent",
+								"node_id", key.nodeID.String(), "channel_id", key.channelID,
+								"vps_size", len(collectedHEVCVPS),
+								"sps_size", len(collectedHEVCSPS), "pps_size", len(collectedHEVCPPS))
+						case <-ctx.Done():
+							return
+						}
+					}
+				}
+				if !sentSeqHeader {
+					if framesParsed <= 10 {
+						g.log.Info("flv: no param sets yet",
+							"codec", detectedCodec.String(), "nalu_count", len(nalus), "frame_num", framesParsed)
+					}
 					continue
 				}
 			}
 
 			// Emit one video tag per NALU.
 			for _, nalu := range nalus {
-				if IsSPSPPSN(nalu) {
-					continue // already sent in sequence header
+				// Skip parameter-set NALUs: they are already encoded in the
+				// sequence header and must not appear as regular video tags.
+				isSPSPPS := IsSPSPPSN(nalu)
+				isHEVCParamSet := detectedCodec == CodecHEVC && IsHEVCSPSPPS(nalu)
+				if isSPSPPS || isHEVCParamSet {
+					continue
 				}
-				isKey := IsKeyframeN(nalu)
-				tag := BuildVideoTag(nalu, isKey, tsMS)
+				isKey := false
+				if detectedCodec == CodecHEVC {
+					isKey = IsHEVCKeyframe(nalu)
+				} else {
+					isKey = IsKeyframeN(nalu)
+				}
+				tag := BuildVideoTag(nalu, isKey, tsMS, detectedCodec)
 				select {
 				case out <- tag:
+					tagCount++
 				case <-ctx.Done():
 					return
 				}
