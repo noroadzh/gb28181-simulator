@@ -27,5 +27,5 @@
 
 ## OpenSpec Archival
 
-- [ ] 17. 归档 change — `openspec archive "fix-catalog-aggregate-and-channel-autogen" --yes`，delta spec 同步到 `openspec/specs/`
-- [ ] 18. 更新 `docs/roadmap-15-steps.md` — 追加新行并修正 #18/#19 的状态脱节
+- [x] 17. 归档 change — `openspec archive "fix-catalog-aggregate-and-channel-autogen" --yes`，delta spec 同步到 `openspec/specs/`
+- [x] 18. 更新 `docs/roadmap-15-steps.md` — 追加新行并修正 #18/#19 的状态脱节
