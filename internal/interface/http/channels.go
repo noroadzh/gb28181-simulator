@@ -2,17 +2,17 @@
 //
 // 本文件为本期（T4）新增，提供如下端点：
 //
-//   GET    /v1/nodes/:id/channels                       通道列表
-//   GET    /v1/nodes/:id/channels/:ch                   通道详情
-//   GET    /v1/nodes/:id/channels/:ch/media             通道级媒体源
-//   PUT    /v1/nodes/:id/channels/:ch/media             设置/替换通道级媒体源
-//   DELETE /v1/nodes/:id/channels/:ch/media             清除通道级媒体源
-//   POST   /v1/nodes/:id/channels/:ch/ptz               PTZ 云台控制
-//   GET    /v1/nodes/:id/channels/:ch/records           录像查询
-//   POST   /v1/nodes/:id/channels/:ch/playback         录像回放控制
-//   POST   /v1/nodes/:id/channels/:ch/talk/start        开始对讲
-//   POST   /v1/nodes/:id/channels/:ch/talk/stop         停止对讲
-//   GET    /v1/nodes/:id/channels/:ch/snapshot          抓取快照
+//	GET    /v1/nodes/:id/channels                       通道列表
+//	GET    /v1/nodes/:id/channels/:ch                   通道详情
+//	GET    /v1/nodes/:id/channels/:ch/media             通道级媒体源
+//	PUT    /v1/nodes/:id/channels/:ch/media             设置/替换通道级媒体源
+//	DELETE /v1/nodes/:id/channels/:ch/media             清除通道级媒体源
+//	POST   /v1/nodes/:id/channels/:ch/ptz               PTZ 云台控制
+//	GET    /v1/nodes/:id/channels/:ch/records           录像查询
+//	POST   /v1/nodes/:id/channels/:ch/playback         录像回放控制
+//	POST   /v1/nodes/:id/channels/:ch/talk/start        开始对讲
+//	POST   /v1/nodes/:id/channels/:ch/talk/stop         停止对讲
+//	GET    /v1/nodes/:id/channels/:ch/snapshot          抓取快照
 //
 // 所有错误统一用 errorBody 包装；HTTP 状态码遵循既有约定（200/204/400/404/409/501）。
 package httpapi
@@ -79,13 +79,13 @@ type ChannelView interface {
 
 // channelResponse is the JSON shape for GET /channels/:ch.
 type channelResponse struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Online       bool   `json:"online"`
-	Status       string `json:"status"`
-	ParentID     string `json:"parent_id,omitempty"`
-	HasMedia     bool   `json:"has_media"`
-	MediaKind    string `json:"media_kind,omitempty"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Online    bool   `json:"online"`
+	Status    string `json:"status"`
+	ParentID  string `json:"parent_id,omitempty"`
+	HasMedia  bool   `json:"has_media"`
+	MediaKind string `json:"media_kind,omitempty"`
 }
 
 func newChannelResponse(ch model.Channel) channelResponse {
@@ -220,8 +220,8 @@ func (s *Server) handleChannelDetail(c echo.Context) error {
 
 // mediaResponse is the JSON shape for GET /channels/:ch/media.
 type mediaResponse struct {
-	ChannelID string           `json:"channel_id"`
-	Has       bool             `json:"has"`
+	ChannelID string            `json:"channel_id"`
+	Has       bool              `json:"has"`
 	Cfg       model.MediaConfig `json:"config,omitempty"`
 }
 
@@ -243,6 +243,9 @@ func (s *Server) handleGetChannelMedia(c echo.Context) error {
 	cfg, has, err := s.channels.GetChannelMedia(c.Request().Context(), id, channelID)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, errorBody{Error: err.Error()})
+	}
+	if has {
+		cfg = cfg.Normalize()
 	}
 	return c.JSON(http.StatusOK, mediaResponse{ChannelID: channelID, Has: has, Cfg: cfg})
 }
@@ -271,6 +274,9 @@ func (s *Server) handlePutChannelMedia(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, errorBody{Error: err.Error()})
 	}
 	cfg, has, _ := s.channels.GetChannelMedia(c.Request().Context(), id, channelID)
+	if has {
+		cfg = cfg.Normalize()
+	}
 	return c.JSON(http.StatusOK, mediaResponse{ChannelID: channelID, Has: has, Cfg: cfg})
 }
 
@@ -357,12 +363,12 @@ func isValidPTZDirection(d string) bool {
 
 // recordResponse is the JSON shape for one entry in GET /channels/:ch/records.
 type recordResponse struct {
-	DeviceID  string `json:"device_id"`
-	ChannelID string `json:"channel_id"`
-	Name      string `json:"name"`
-	StartTime string `json:"start_time"`
-	EndTime   string `json:"end_time"`
-	FilePath  string `json:"file_path"`
+	DeviceID   string `json:"device_id"`
+	ChannelID  string `json:"channel_id"`
+	Name       string `json:"name"`
+	StartTime  string `json:"start_time"`
+	EndTime    string `json:"end_time"`
+	FilePath   string `json:"file_path"`
 	VideoCodec string `json:"video_codec,omitempty"`
 	AudioCodec string `json:"audio_codec,omitempty"`
 }

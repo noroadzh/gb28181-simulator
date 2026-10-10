@@ -606,6 +606,7 @@ func (s *Server) handleGetMedia(c echo.Context) error {
 	if !ok {
 		return c.NoContent(http.StatusNoContent)
 	}
+	cfg = cfg.Normalize()
 	return c.JSON(http.StatusOK, cfg)
 }
 
@@ -625,7 +626,7 @@ func (s *Server) handlePutMedia(c echo.Context) error {
 		}
 		return c.JSON(http.StatusBadRequest, errorBody{Error: err.Error()})
 	}
-	return c.JSON(http.StatusOK, cfg)
+	return c.JSON(http.StatusOK, cfg.Normalize())
 }
 
 // handleDeleteMedia clears the node's media config.

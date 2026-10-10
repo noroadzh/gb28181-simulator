@@ -179,6 +179,7 @@ func (s *Server) registerRoutes(e *echo.Echo) {
 	e.POST("/v1/nodes/:id/channels/:ch/talk/start", s.handleTalkStart)
 	e.POST("/v1/nodes/:id/channels/:ch/talk/stop", s.handleTalkStop)
 	e.GET("/v1/nodes/:id/channels/:ch/snapshot", s.handleChannelSnapshot)
+	e.GET("/v1/nodes/:id/channels/:ch/media-file", s.handleMediaFile)
 
 	// HTTP-FLV streaming endpoint (multi-channel-and-web-player). The
 	// handler is registered only when a streaming server was wired in.

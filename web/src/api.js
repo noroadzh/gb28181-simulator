@@ -86,6 +86,14 @@ export const api = {
     return `${BASE}/v1/flv/${encodeURIComponent(nodeId)}/${encodeURIComponent(ch)}`
   },
 
+  // ─── Media file URL (native <video src>) ────────────────────────────────────
+  //
+  // 浏览器原生 video 播放 MP4 使用的直出端点（支持 HTTP Range）。仅 file
+  // 源且 .mp4 时使用，由 ChannelDetailView 播放分派决定调用与否。
+  mediaFileUrl (nodeId, ch) {
+    return `${BASE}/v1/nodes/${encodeURIComponent(nodeId)}/channels/${encodeURIComponent(ch)}/media-file`
+  },
+
   // ─── Existing API ───────────────────────────────────────────────────────────
 
   listNodes () {

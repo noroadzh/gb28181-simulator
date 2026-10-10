@@ -17,6 +17,19 @@ const playerError = ref('')
 const playerRef = ref(null)
 let player = null
 
+// 播放模式：'native' | 'flv' | null
+const playerMode = ref(null)
+// 原生播放失败后是否已回退到 flv.js（防止循环）
+const fallbackToFlv = ref(false)
+// 播放代次计数器：startPlay/stopPlay/卸载都会递增，用于作废
+// await resolveMediaConfig() 期间发生的停止/重复点击/组件卸载（防竞态）。
+let playGeneration = 0
+
+function currentPlayUrl () {
+  if (playerMode.value === 'native') return api.mediaFileUrl(nodeId.value, channelId.value)
+  return api.flvUrl(nodeId.value, channelId.value)
+}
+
 // PTZ
 const ptzVisible = ref(false)
 const ptzSpeed = ref(50)
@@ -65,15 +78,13 @@ async function loadChannel () {
 }
 
 function startFlv () {
-  if (!channel.value?.has_media) {
-    playerError.value = '该通道未配置媒体源'
-    return
-  }
+  if (!playerRef.value) return
   if (player) { destroyFlv() }
   if (!flvjs.isSupported()) {
     playerError.value = '当前浏览器不支持 FLV 播放'
     return
   }
+  playerMode.value = 'flv'
   const url = api.flvUrl(nodeId.value, channelId.value)
   player = flvjs.createPlayer({
     type: 'flv',
@@ -119,6 +130,101 @@ function startFlv () {
   })
 }
 
+// 解析通道媒体配置：通道级未配置时回退节点级。
+// 返回 { kind, path } 或 null（均未配置）。
+async function resolveMediaConfig () {
+  try {
+    const d = await api.getChannelMedia(nodeId.value, channelId.value)
+    if (d && d.has && d.config) return { kind: d.config.kind, path: d.config.path || '' }
+  } catch (_) { /* 通道级查询失败继续回退节点级 */ }
+  try {
+    const d = await api.getMedia(nodeId.value)
+    if (d && d.kind) return { kind: d.kind, path: d.path || '' }
+  } catch (_) { /* 节点级也无配置 */ }
+  return null
+}
+
+function isNativePlayable (cfg) {
+  return !!cfg &&
+    (cfg.kind === 'file' || cfg.kind === 'local_file') &&
+    /\.mp4$/i.test((cfg.path || '').trim())
+}
+
+// 原生 <video> 播放 MP4 直出端点。失败时由 onVideoError 一次性回退 flv.js。
+function startNative () {
+  if (!playerRef.value) return
+  playerMode.value = 'native'
+  playerError.value = ''
+  const url = api.mediaFileUrl(nodeId.value, channelId.value)
+  const video = playerRef.value
+  video.src = url
+  video.play().then(() => {
+    playing.value = true
+    playerError.value = ''
+  }).catch(e => {
+    // 已回退 flv（onVideoError 先于本 catch 执行）时静默，避免误报错误
+    if (playerMode.value !== 'native') return
+    if (e && e.name === 'AbortError') return
+    // 浏览器拒绝播放（编码不支持/文件损坏）→ 交给 error 处理统一回退
+    playerError.value = `原生播放失败：${e.message || e}`
+  })
+}
+
+// 原生播放失败（如 H.265 编码浏览器不可解）：一次性回退 flv.js。
+function onVideoError () {
+  if (playerMode.value !== 'native' || fallbackToFlv.value) return
+  fallbackToFlv.value = true
+  clearNativeVideo()
+  playerError.value = ''
+  startFlv()
+}
+
+function clearNativeVideo () {
+  const video = playerRef.value
+  if (!video) return
+  video.pause()
+  video.removeAttribute('src')
+  video.load()
+}
+
+// 统一停止：按当前模式清理对应资源。
+function stopPlay () {
+  // 递增代次，作废任何进行中的 startPlay（await 期间被停止/卸载）
+  playGeneration++
+  if (playerMode.value === 'flv') {
+    destroyFlv()
+  } else if (playerMode.value === 'native') {
+    clearNativeVideo()
+    playing.value = false
+  }
+  playerMode.value = null
+}
+
+// 播放入口：解析媒体配置后分派播放模式。
+async function startPlay () {
+  if (!channel.value?.has_media) {
+    playerError.value = '该通道未配置媒体源'
+    return
+  }
+  stopPlay()
+  fallbackToFlv.value = false
+  playerError.value = ''
+  const gen = playGeneration
+  const cfg = await resolveMediaConfig()
+  // await 期间发生了停止/再次播放/组件卸载 → 本次分派作废，防止操作已卸载的 DOM
+  if (gen !== playGeneration || !playerRef.value) return
+  if (isNativePlayable(cfg)) {
+    startNative()
+  } else {
+    startFlv()
+  }
+}
+
+function togglePlay () {
+  if (playing.value) stopPlay()
+  else startPlay()
+}
+
 function destroyFlv () {
   if (!player) return
   player.pause()
@@ -127,11 +233,6 @@ function destroyFlv () {
   player.destroy()
   player = null
   playing.value = false
-}
-
-function toggleFlv () {
-  if (playing.value) destroyFlv()
-  else startFlv()
 }
 
 // PTZ helpers
@@ -203,13 +304,13 @@ async function takeSnapshot () {
   }
 }
 
-function copyFlvUrl () {
-  const url = api.flvUrl(nodeId.value, channelId.value)
+function copyPlayUrl () {
+  const url = currentPlayUrl()
   navigator.clipboard.writeText(url).then(() => ElMessage.success('已复制')).catch(() => {})
 }
 
 onBeforeUnmount(() => {
-  destroyFlv()
+  stopPlay()
   if (ptzInterval.value) clearInterval(ptzInterval.value)
   if (snapshotData.value) URL.revokeObjectURL(snapshotData.value)
   if (talkActive.value) api.stopTalk(nodeId.value, channelId.value).catch(() => {})
@@ -236,7 +337,7 @@ onMounted(loadChannel)
       <!-- 播放器区域 -->
       <el-col :span="16">
         <div style="position:relative;background:#000;border-radius:8px;overflow:hidden;aspect-ratio:16/9">
-          <video ref="playerRef" style="width:100%;height:100%;display:block" muted></video>
+          <video ref="playerRef" style="width:100%;height:100%;display:block" muted @error="onVideoError"></video>
           <div v-if="!channel?.has_media" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;color:#9ca3af">
             <div style="font-size:40px;opacity:0.4">📹</div>
             <div>通道未配置媒体源</div>
@@ -250,10 +351,10 @@ onMounted(loadChannel)
 
         <!-- 播放控制栏 -->
         <div style="margin-top:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-          <el-button :type="playing ? 'danger' : 'success'" @click="toggleFlv">
+          <el-button :type="playing ? 'danger' : 'success'" @click="togglePlay">
             {{ playing ? '停止播放' : '开始播放' }}
           </el-button>
-          <el-button @click="copyFlvUrl" size="small">复制FLV地址</el-button>
+          <el-button @click="copyPlayUrl" size="small">{{ playerMode === 'native' ? '复制播放地址' : '复制FLV地址' }}</el-button>
           <el-button @click="takeSnapshot" size="small" :disabled="!playing">快照</el-button>
           <el-button @click="ptzVisible = !ptzVisible" size="small" :type="ptzVisible ? 'warning' : ''">云台控制</el-button>
           <el-button
@@ -346,12 +447,12 @@ onMounted(loadChannel)
           </div>
         </el-card>
 
-        <!-- 拉流地址卡片 -->
+        <!-- 播放地址卡片（跟随实际播放模式） -->
         <el-card shadow="never" style="background:#111827;border:1px solid #1F2937;margin-top:12px">
-          <template #header><b style="color:#F9FAFB">拉流地址</b></template>
-          <code style="font-size:11px;word-break:break-all;color:#22C55E">{{ api.flvUrl(nodeId, channelId) }}</code>
+          <template #header><b style="color:#F9FAFB">{{ playerMode === 'native' ? '播放地址（原生 MP4）' : '拉流地址（FLV）' }}</b></template>
+          <code style="font-size:11px;word-break:break-all;color:#22C55E">{{ currentPlayUrl() }}</code>
           <div style="margin-top:8px">
-            <el-button size="small" @click="copyFlvUrl">复制</el-button>
+            <el-button size="small" @click="copyPlayUrl">复制</el-button>
           </div>
         </el-card>
       </el-col>
