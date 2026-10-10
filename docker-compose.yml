@@ -41,7 +41,9 @@ services:
       - platform-config:/etc/gb28181-simulator:ro
       - platform-data:/var/lib/gb28181-simulator
     networks:
-      - gbsim-net
+      gbsim-net:
+        # 静态 IP：避免容器重启后地址漂移（设备注册的 Contact / 平台 received 依赖可预期地址）
+        ipv4_address: 172.26.0.2
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
       interval: 30s
@@ -72,7 +74,9 @@ services:
       - device-config:/etc/gb28181-simulator:ro
       - device-data:/var/lib/gb28181-simulator
     networks:
-      - gbsim-net
+      gbsim-net:
+        # 静态 IP：避免容器重启后地址漂移（注册 Contact 地址保持稳定）
+        ipv4_address: 172.26.0.3
     depends_on:
       gbsim-platform:
         condition: service_healthy
@@ -87,6 +91,10 @@ networks:
   gbsim-net:
     driver: bridge
     name: gbsim-net
+    ipam:
+      config:
+        - subnet: 172.26.0.0/16
+          gateway: 172.26.0.1
 
 volumes:
   platform-config:
