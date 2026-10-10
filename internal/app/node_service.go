@@ -315,7 +315,12 @@ func (s *NodeService) Start(ctx context.Context, id model.NodeID) error {
 		if wants {
 			return s.register(ctx, id, node, reg, s.lifecycle.Transport(id))
 		}
-		return nil
+		// No upstream declared: the device is a passive UAS (e.g. an
+		// NVR accepting INVITEs) and there is no register transaction
+		// to wait for. Leaving it at `registering` would promise a
+		// transaction that never comes, so advance it the same way the
+		// platform kinds do.
+		return s.advanceOnline(ctx, id)
 	case model.NodeKindPlatformLarge:
 		// A platform-large does not register with anyone: it accepts
 		// registrations instead.

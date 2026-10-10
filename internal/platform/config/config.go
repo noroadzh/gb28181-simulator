@@ -28,6 +28,14 @@ type Config struct {
 	Nodes    []NodeConfig   `mapstructure:"nodes"`
 	Capture  CaptureConfig  `mapstructure:"capture"`
 	Scenario ScenarioConfig `mapstructure:"scenario"`
+
+	// AutoStart advances every configured node to a running state right
+	// after persisted state has been restored. Default false keeps the
+	// composition root's explicit-start semantics; opting in is for
+	// hands-off deployments where the operator wants the topology live
+	// the moment the process is up. A node that fails to start is logged
+	// and skipped — auto-start never aborts the process over one node.
+	AutoStart bool `mapstructure:"auto_start"`
 }
 
 // NodeConfig is one entry of the optional `nodes:` list. Every field except

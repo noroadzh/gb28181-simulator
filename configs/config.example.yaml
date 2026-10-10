@@ -38,6 +38,10 @@ capture:
 
 tracing:
   enabled: true           # stdout exporter; set false to use a no-op tracer
+
+# auto_start: false       # set true to advance every configured node right
+                          # after startup; default false keeps the explicit-start
+                          # semantics so the Web UI is always the entry point.
   sample_ratio: 1.0       # 0.0..1.0; 1.0 samples everything (dev), 0.01 default
   otlp_endpoint: ""       # host:port for OTLP gRPC; empty = stdout only
   service_name: ""        # defaults to "gb28181-simulator"

@@ -54,9 +54,11 @@ func registrationFixture(
 	return svc, cat, lc
 }
 
-// A node with no registration keeps the pre-change behaviour: start binds
-// the listener and stops at registering.
-func TestNodeService_StartWithoutRegistrationStaysRegistering(t *testing.T) {
+// A device with no registration is a passive UAS: start binds the
+// listener, sends nothing, and the node is already fully started — so it
+// goes online rather than parking at a `registering` that promises a
+// transaction that never comes.
+func TestNodeService_StartWithoutRegistrationGoesOnline(t *testing.T) {
 	t.Parallel()
 	tr := &scriptedTransport{}
 	svc, cat, lc := registrationFixture(t, testDevice, tr)
@@ -72,8 +74,8 @@ func TestNodeService_StartWithoutRegistrationStaysRegistering(t *testing.T) {
 	if len(tr.messages()) != 0 {
 		t.Errorf("an unregistered node sent %d messages, want 0", len(tr.messages()))
 	}
-	if got := statusOf(t, cat, id); got != model.StatusRegistering {
-		t.Errorf("status = %s, want registering", got)
+	if got := statusOf(t, cat, id); got != model.StatusOnline {
+		t.Errorf("status = %s, want online", got)
 	}
 	if !lc.isBound(id) {
 		t.Error("listener not bound")

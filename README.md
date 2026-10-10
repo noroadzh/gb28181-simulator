@@ -77,7 +77,9 @@ nodes:
 
 省略 `nodes:` 时以零节点运行。状态沿 `idle → registering → registered → online` 推进，stop 落到 `offline`，`fault` 只能回到 `idle` 或 `offline`。
 
-`device` 节点启动后立即注册：添加 `registration:` 块后会发送 REGISTER，用 Digest 凭据应答平台的 401 挑战并进入 `online`；失败（超时、拒绝、5xx）会使节点 fault 并释放端口。没有该块时，启动后的节点保持 `registering`，与之前完全一致。
+`device` 节点启动后立即注册：添加 `registration:` 块后会发送 REGISTER，用 Digest 凭据应答平台的 401 挑战并进入 `online`；失败（超时、拒绝、5xx）会使节点 fault 并释放端口。没有该块时，节点是被动 UAS（仅接收下级 INVITE 而不向任何平台注册），启动后直接进入 `online`，不会停在 `registering`。
+
+配置中可设置 `auto_start: true`（顶层字段，默认 `false`）使进程启动后自动推进全部节点；某个节点启动失败会记 Warn 日志并继续，不阻塞其他节点。Web 节点卡片提供「启动/重试」「停止」「注销」按钮及状态轮询；注销按钮仅在 `device` 或 `platform-small` 且 `online` 且配置了 `registration:` 时显示。
 
 `platform-large` 节点是另一半：它**接受**注册。启动它会在其监听口上启动一个服务 goroutine 并使节点 `online`（含义：平台已对外服务）。无凭据的 REGISTER 会被应答 `401` 与 Digest 挑战；`Authorization` 无法解析的会再次被挑战；平台没有对应账号的用户名，或格式正确但校验失败的应答，会按 GB/T 28181 §L.2 的要求直接回 `403`，不再进行二次挑战。通过校验的设备会被授予不超过平台上限的 lifetime，并记录在节点的在线设备表里，可在 `GET /v1/nodes/{id}/devices` 读取；`Expires: 0` 会将其移除。停止平台会先结束服务 goroutine 再释放端口，并清空该表。
 

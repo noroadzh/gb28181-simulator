@@ -93,11 +93,16 @@ type NodeView interface {
 // FaultCounters is non-empty only while a fault profile is armed; it resets
 // to empty when the profile is cleared.
 type nodeResponse struct {
-	ID            string                       `json:"id"`
-	Kind          string                       `json:"kind"`
-	Status        string                       `json:"status"`
-	Addr          string                       `json:"addr"`
-	FaultCounters map[model.FaultAction]uint64 `json:"fault_counters,omitempty"`
+	ID     string `json:"id"`
+	Kind   string `json:"kind"`
+	Status string `json:"status"`
+	Addr   string `json:"addr"`
+	// HasRegistration reports whether the node's profile declares an
+	// upstream `registration:`. Only the backend knows this; the Web UI
+	// uses it to decide whether the unregister button makes sense at
+	// all — a node that never registers has nothing to withdraw.
+	HasRegistration bool                         `json:"has_registration"`
+	FaultCounters   map[model.FaultAction]uint64 `json:"fault_counters,omitempty"`
 }
 
 // errorBody is the uniform JSON error envelope for the node endpoints.
@@ -126,12 +131,14 @@ type nodeError struct {
 }
 
 func newNodeResponse(n model.Node, counters map[model.FaultAction]uint64) nodeResponse {
+	_, hasReg := n.Registration()
 	return nodeResponse{
-		ID:            n.ID().String(),
-		Kind:          n.Profile().Kind().String(),
-		Status:        n.Status().String(),
-		Addr:          n.Profile().Addr(),
-		FaultCounters: counters,
+		ID:              n.ID().String(),
+		Kind:            n.Profile().Kind().String(),
+		Status:          n.Status().String(),
+		Addr:            n.Profile().Addr(),
+		HasRegistration: hasReg,
+		FaultCounters:   counters,
 	}
 }
 

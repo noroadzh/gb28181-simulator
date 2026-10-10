@@ -31,11 +31,11 @@ func TestNodeUnregister_Succeeds(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("POST /unregister = %d, want 200: %s", code, body)
 	}
-	var got map[string]string
+	var got map[string]any
 	if err := json.Unmarshal([]byte(body), &got); err != nil {
 		t.Fatalf("decode %q: %v", body, err)
 	}
-	if got["status"] != "offline" {
+	if s, ok := got["status"].(string); !ok || s != "offline" {
 		t.Errorf("status = %q, want offline", got["status"])
 	}
 }

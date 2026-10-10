@@ -292,8 +292,11 @@ func TestNodeService_CreateStartStopList(t *testing.T) {
 	if err := svc.Start(ctx, node.ID()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	if st, _ := svc.Status(ctx, node.ID()); st != model.StatusRegistering {
-		t.Errorf("status after Start = %v, want registering", st)
+	// A device with no upstream registration is already fully started
+	// once the listener is bound (design D2): there is no register
+	// transaction to wait for, so it advances straight to online.
+	if st, _ := svc.Status(ctx, node.ID()); st != model.StatusOnline {
+		t.Errorf("status after Start = %v, want online", st)
 	}
 	if !lc.isBound(node.ID()) {
 		t.Error("listener was not bound by Start")
@@ -342,15 +345,16 @@ func TestNodeService_StartFailureReleasesPort(t *testing.T) {
 	if err := svc.Start(ctx, node.ID()); err != nil {
 		t.Fatalf("retry Start: %v", err)
 	}
-	if st, _ := svc.Status(ctx, node.ID()); st != model.StatusRegistering {
-		t.Errorf("status after retry = %v, want registering", st)
+	if st, _ := svc.Status(ctx, node.ID()); st != model.StatusOnline {
+		t.Errorf("status after retry = %v, want online", st)
 	}
 }
 
-// TestNodeService_StartDoesNotAutoAdvance asserts Start stops at Registering
-// and that the explicit Mark methods are what moves a node to Registered and
-// Online (design D9, task 6.4).
-func TestNodeService_StartDoesNotAutoAdvance(t *testing.T) {
+// TestNodeService_StartAdvancesUnregisteredDevice asserts the design-D2
+// behaviour: a device with no upstream registration advances straight to
+// online on Start. After a stop the explicit Mark methods remain the way a
+// caller moves a node through registered back to online.
+func TestNodeService_StartAdvancesUnregisteredDevice(t *testing.T) {
 	ctx := context.Background()
 	svc, _, _, _ := newTestService(t)
 
@@ -361,21 +365,23 @@ func TestNodeService_StartDoesNotAutoAdvance(t *testing.T) {
 	if err := svc.Start(ctx, node.ID()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	if st, _ := svc.Status(ctx, node.ID()); st != model.StatusRegistering {
-		t.Errorf("status after Start = %v, want registering (Start must not auto-advance)", st)
+	if st, _ := svc.Status(ctx, node.ID()); st != model.StatusOnline {
+		t.Errorf("status after Start = %v, want online (D2 advance)", st)
 	}
 
-	if err := svc.MarkRegistered(ctx, node.ID()); err != nil {
-		t.Fatalf("MarkRegistered: %v", err)
+	// After a stop the only way back to online for an unregistered
+	// device is Start again — it goes idle→online directly (D2).
+	if err := svc.Stop(ctx, node.ID()); err != nil {
+		t.Fatalf("Stop: %v", err)
 	}
-	if st, _ := svc.Status(ctx, node.ID()); st != model.StatusRegistered {
-		t.Errorf("status after MarkRegistered = %v, want registered", st)
+	if st, _ := svc.Status(ctx, node.ID()); st != model.StatusOffline {
+		t.Fatalf("status after Stop = %v, want offline", st)
 	}
-	if err := svc.MarkOnline(ctx, node.ID()); err != nil {
-		t.Fatalf("MarkOnline: %v", err)
+	if err := svc.Start(ctx, node.ID()); err != nil {
+		t.Fatalf("Start after stop: %v", err)
 	}
 	if st, _ := svc.Status(ctx, node.ID()); st != model.StatusOnline {
-		t.Errorf("status after MarkOnline = %v, want online", st)
+		t.Errorf("status after second Start = %v, want online", st)
 	}
 
 	// An illegal jump is surfaced, not swallowed.

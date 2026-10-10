@@ -526,6 +526,22 @@ func run() error {
 			}
 			nodeSvc = svc
 			faultStore = faults
+
+			// auto_start: bring the whole topology up right after the
+			// persisted state is restored. One failed node is a warning,
+			// never a reason to skip the rest or fail the process — the
+			// operator retries it from the Web UI (design D3).
+			if cfg.AutoStart {
+				bg := context.Background()
+				for _, n := range svc.List(bg) {
+					if err := svc.Start(bg, n.ID()); err != nil {
+						logging.L().Warn("auto-start failed, node left for manual retry",
+							"node_id", n.ID().String(), "error", err.Error())
+						continue
+					}
+				}
+			}
+
 			return svc, nil
 		}).
 		Provide(scenarioKey, func() (any, error) {

@@ -86,6 +86,41 @@ func (f *fakeNodeView) put(n model.Node) {
 	f.nodes[n.ID().String()] = n
 }
 
+// seedRegistered is like seed but the profile carries a registration, so the
+// HTTP response reports has_registration=true.
+func (f *fakeNodeView) seedRegistered(t *testing.T, id, addr string, status model.Status, reg model.Registration) model.Node {
+	t.Helper()
+	profile, err := model.NewNodeProfile(id, addr, "3402000000", "acme")
+	if err != nil {
+		t.Fatalf("NewNodeProfile: %v", err)
+	}
+	profile, err = profile.WithRegistration(reg)
+	if err != nil {
+		t.Fatalf("WithRegistration: %v", err)
+	}
+	node := model.NewNode(profile)
+	for _, step := range []model.Status{
+		model.StatusRegistering, model.StatusRegistered,
+		model.StatusOnline, model.StatusOffline,
+	} {
+		if node.Status() == status {
+			break
+		}
+		next, err := node.WithStatus(step)
+		if err != nil {
+			t.Fatalf("seedRegistered %s to %s: %v", id, status, err)
+		}
+		node = next
+		if node.Status() == status {
+			break
+		}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.nodes[id] = node
+	return node
+}
+
 // InstallFault arms the fake node with the supplied profile. Unknown nodes
 // are rejected with model.ErrUnknownNode to match the real service.
 func (f *fakeNodeView) InstallFault(_ context.Context, id model.NodeID, p model.FaultProfile) error {
@@ -647,7 +682,7 @@ func TestNodes_ListEmpty(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("GET /v1/nodes = %d, want 200", code)
 	}
-	var got []map[string]string
+	var got []map[string]any
 	if err := json.Unmarshal([]byte(body), &got); err != nil {
 		t.Fatalf("body %q is not a JSON array: %v", body, err)
 	}
@@ -669,7 +704,7 @@ func TestNodes_ListFields(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("GET /v1/nodes = %d, want 200", code)
 	}
-	var got []map[string]string
+	var got []map[string]any
 	if err := json.Unmarshal([]byte(body), &got); err != nil {
 		t.Fatalf("unmarshal: %v (%s)", err, body)
 	}
@@ -677,7 +712,7 @@ func TestNodes_ListFields(t *testing.T) {
 		t.Fatalf("len = %d, want 2 (%s)", len(got), body)
 	}
 	for _, entry := range got {
-		for _, field := range []string{"id", "kind", "status", "addr"} {
+		for _, field := range []string{"id", "kind", "status", "addr", "has_registration"} {
 			if _, ok := entry[field]; !ok {
 				t.Errorf("entry %v missing field %q", entry, field)
 			}
@@ -726,11 +761,11 @@ func TestNodes_StartStop(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("POST start = %d, want 200 (%s)", code, body)
 	}
-	var started map[string]string
+	var started map[string]any
 	if err := json.Unmarshal([]byte(body), &started); err != nil {
 		t.Fatalf("start body: %v", err)
 	}
-	if started["status"] != "registering" {
+	if got, ok := started["status"].(string); !ok || got != "registering" {
 		t.Errorf("status after start = %q, want registering", started["status"])
 	}
 
@@ -738,11 +773,11 @@ func TestNodes_StartStop(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("POST stop = %d, want 200 (%s)", code, body)
 	}
-	var stopped map[string]string
+	var stopped map[string]any
 	if err := json.Unmarshal([]byte(body), &stopped); err != nil {
 		t.Fatalf("stop body: %v", err)
 	}
-	if stopped["status"] != "offline" {
+	if s, ok := stopped["status"].(string); !ok || s != "offline" {
 		t.Errorf("status after stop = %q, want offline", stopped["status"])
 	}
 }
@@ -900,11 +935,12 @@ type captureEventResponse struct {
 
 // nodeResponse mirrors the server's node detail response in the test package.
 type nodeResponse struct {
-	ID            string                       `json:"id"`
-	Kind          string                       `json:"kind"`
-	Status        string                       `json:"status"`
-	Addr          string                       `json:"addr"`
-	FaultCounters map[model.FaultAction]uint64 `json:"fault_counters,omitempty"`
+	ID              string                       `json:"id"`
+	Kind            string                       `json:"kind"`
+	Status          string                       `json:"status"`
+	Addr            string                       `json:"addr"`
+	HasRegistration bool                         `json:"has_registration"`
+	FaultCounters   map[model.FaultAction]uint64 `json:"fault_counters,omitempty"`
 }
 
 // TestNodes_CaptureEndpoints asserts the capture query and pcap endpoints
@@ -1009,6 +1045,58 @@ func TestNodes_DetailFaultCounters(t *testing.T) {
 	}
 	if len(after.FaultCounters) != 0 {
 		t.Fatalf("fault_counters = %v, want empty after clear", after.FaultCounters)
+	}
+	if after.HasRegistration {
+		t.Error("has_registration = true for an unregistered node, want false")
+	}
+}
+
+// TestNodes_DetailHasRegistration asserts the node response reports whether
+// the profile declares a registration.
+func TestNodes_DetailHasRegistration(t *testing.T) {
+	t.Parallel()
+	view := newFakeNodeView()
+	noRegID := "34020000011310000001"
+	view.seed(t, noRegID, "127.0.0.1:5060", model.StatusOnline)
+
+	withRegID := "34020000011310000002"
+	reg, err := model.NewRegistration(model.RegistrationParams{
+		Server:   "127.0.0.2:5060",
+		ServerID: "34020000002000000001",
+		Username: "test",
+		Password: "secret",
+		Expires:  3600,
+		Timeout:  2 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("NewRegistration: %v", err)
+	}
+	view.seedRegistered(t, withRegID, "127.0.0.1:5061", model.StatusOnline, reg)
+
+	ts := newNodesServer(t, view)
+	defer ts.Close()
+
+	for _, tc := range []struct {
+		name       string
+		id         string
+		wantHasReg bool
+	}{
+		{"no registration", noRegID, false},
+		{"with registration", withRegID, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, body := getJSON(t, ts.URL+"/v1/nodes/"+tc.id)
+			if code != http.StatusOK {
+				t.Fatalf("node detail = %d, want 200 (%s)", code, body)
+			}
+			var got nodeResponse
+			if err := json.Unmarshal([]byte(body), &got); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if got.HasRegistration != tc.wantHasReg {
+				t.Errorf("has_registration = %v, want %v", got.HasRegistration, tc.wantHasReg)
+			}
+		})
 	}
 }
 
