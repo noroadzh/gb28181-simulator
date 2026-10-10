@@ -11,6 +11,12 @@ import (
 	"github.com/your-org/gb28181-simulator/internal/domain/port"
 )
 
+// 内置小体积测试素材（go test 工作目录为包目录，testdata 在 adapter/media 下）。
+const (
+	mpeg4Asset = "../../adapter/media/testdata/mpeg4-part2.mp4"
+	hevcAsset  = "../../adapter/media/testdata/hevc-sample.mp4"
+)
+
 // PacketizeES wraps an ES frame into a PS frame via the media adapter's
 // packetizer, mimicking the production pipeline
 // (MP4Demuxer → ESFrameReader → PSPacketizer → gateway ParsePS).
@@ -19,20 +25,20 @@ func PacketizeES(frame model.ESFrame) (model.PSFrame, error) {
 	return pktz.Packetize(frame)
 }
 
-// TestMulticodecFLV verifies the full ES→PS pipeline for H.264, HEVC, and
-// MPEG-4 Part 2 video sources from real MP4 files.
-func TestMulticodecFLV(t *testing.T) {
+// TestMulticodecPSRoundTrip verifies the full ES→PS pipeline for HEVC and
+// MPEG-4 Part 2 video sources from built-in MP4 test assets (offline, no /tmp).
+func TestMulticodecPSRoundTrip(t *testing.T) {
 	cases := []struct {
 		name string
 		path string
 	}{
-		{"HEVC_1080p", "/tmp/test_hevc.mp4"},
-		{"MPEG4_1080p", "/tmp/test_mpeg4.mp4"},
+		{"HEVC", hevcAsset},
+		{"MPEG4", mpeg4Asset},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := os.Stat(tc.path); err != nil {
-				t.Skipf("input file missing: %s", tc.path)
+				t.Fatalf("built-in asset missing: %s: %v", tc.path, err)
 			}
 
 			f, err := os.Open(tc.path)
@@ -43,14 +49,11 @@ func TestMulticodecFLV(t *testing.T) {
 
 			demuxer, err := media.NewMP4Demuxer(f)
 			if err != nil {
-				t.Skipf("MP4Demuxer rejected file (non-NALU codec or corrupt): %v", err)
+				t.Fatalf("NewMP4Demuxer rejected %s: %v", tc.name, err)
 			}
 			defer demuxer.Close()
 
 			var framer port.ESFrameReader = demuxer
-			if framer == nil {
-				t.Fatal("MP4Demuxer does not implement ESFrameReader")
-			}
 
 			// Read one ES frame and PS-packetize it
 			frame, err := framer.ReadFrame(context.Background())
@@ -74,15 +77,10 @@ func TestMulticodecFLV(t *testing.T) {
 	}
 }
 
-// TestParsePSHEVCSource verifies a real HEVC MP4 file round-trips through
+// TestParsePSHEVCSource verifies a real HEVC MP4 asset round-trips through
 // ES→PS→ParsePS→DetectCodec and is identified as HEVC.
 func TestParsePSHEVCSource(t *testing.T) {
-	path := "/tmp/test_hevc.mp4"
-	if _, err := os.Stat(path); err != nil {
-		t.Skipf("input file missing: %s", path)
-	}
-
-	f, err := os.Open(path)
+	f, err := os.Open(hevcAsset)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -121,15 +119,11 @@ func TestParsePSHEVCSource(t *testing.T) {
 	}
 }
 
-// TestParsePSMPEG4Source verifies a real MPEG-4 Part 2 MP4 file can at least
-// be packetized. PS parsing may fail because mp4v is not NALU-based.
+// TestParsePSMPEG4Source verifies a real MPEG-4 Part 2 MP4 asset round-trips
+// through ES→PS→ParsePS→DetectCodec and is identified as MPEG-4 (no longer
+// misdetected as H.264, no longer rejected by the demuxer).
 func TestParsePSMPEG4Source(t *testing.T) {
-	path := "/tmp/test_mpeg4.mp4"
-	if _, err := os.Stat(path); err != nil {
-		t.Skipf("input file missing: %s", path)
-	}
-
-	f, err := os.Open(path)
+	f, err := os.Open(mpeg4Asset)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -137,30 +131,40 @@ func TestParsePSMPEG4Source(t *testing.T) {
 
 	demuxer, err := media.NewMP4Demuxer(f)
 	if err != nil {
-		t.Skipf("MP4Demuxer rejected mp4v file (non-NALU codec): %v", err)
+		t.Fatalf("NewMP4Demuxer must accept mp4v, got: %v", err)
 	}
 	defer demuxer.Close()
 
 	var framer port.ESFrameReader = demuxer
 
+	// First video frame carries the VOS/VO/VOL config prefix.
 	frame, err := framer.ReadFrame(context.Background())
 	if err != nil {
 		t.Fatalf("ReadFrame: %v", err)
 	}
-
-	// MPEG-4 Visual (mp4v) is known to be incompatible with NALU-based PS
-	// packetization; PacketizeES should return an explicit error rather than
-	// silently corrupting data.
-	ps, err := PacketizeES(frame)
-	if err != nil {
-		t.Logf("MPEG-4: PacketizeES returned expected error: %v", err)
-		return
+	if len(frame.Payload) < 4 || frame.Payload[0] != 0x00 || frame.Payload[1] != 0x00 ||
+		(frame.Payload[2] != 0x01 && !(frame.Payload[2] == 0x00 && frame.Payload[3] == 0x01)) {
+		t.Fatalf("first frame does not start with an Annex-B start code: % x", frame.Payload[:min(8, len(frame.Payload))])
 	}
 
-	t.Logf("MPEG-4: packetized %d bytes", len(ps.Payload))
-	// If it somehow packetizes, parsing may or may not succeed.
+	ps, err := PacketizeES(frame)
+	if err != nil {
+		t.Fatalf("PacketizeES must succeed for mp4v, got: %v", err)
+	}
+
 	nalus, _, ok := ParsePS(ps.Payload)
-	t.Logf("MPEG-4: ParsePS ok=%v nalus=%d", ok, len(nalus))
+	if !ok {
+		t.Fatalf("ParsePS rejected PS payload (len=%d)", len(ps.Payload))
+	}
+	if len(nalus) == 0 {
+		t.Fatalf("ParsePS returned 0 NALUs from MPEG-4 ES frame")
+	}
+
+	codec := DetectCodec(nalus)
+	t.Logf("MPEG-4: %d NALUs, codec=%s", len(nalus), codec)
+	if codec != CodecMPEG4 {
+		t.Fatalf("DetectCodec returned %s, want CodecMPEG4 (was misdetected as AVC before this change)", codec)
+	}
 }
 
 // TestFLVHeaderCorrect verifies the FLVHeader constant has exactly 13 bytes
@@ -216,15 +220,15 @@ func TestBuildAVCSequenceHeaderNoPanic(t *testing.T) {
 	}
 }
 
-// TestMPEG4FilesExist is a smoke test that checks whether the HEVC and MPEG-4
-// test files are available on disk.
+// TestMPEG4FilesExist is a smoke test that checks the built-in HEVC and
+// MPEG-4 test assets are present on disk.
 func TestMPEG4FilesExist(t *testing.T) {
-	for _, path := range []string{"/tmp/test_hevc.mp4", "/tmp/test_mpeg4.mp4"} {
+	for _, path := range []string{hevcAsset, mpeg4Asset} {
 		info, err := os.Stat(path)
 		if err != nil {
-			t.Logf("file %s not present: %v", path, err)
+			t.Errorf("built-in asset %s missing: %v", path, err)
 			continue
 		}
-		t.Logf("file %s: %d bytes", path, info.Size())
+		t.Logf("asset %s: %d bytes", path, info.Size())
 	}
 }

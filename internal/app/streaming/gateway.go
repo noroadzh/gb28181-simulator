@@ -214,6 +214,16 @@ func (g *Gateway) runPipeline(
 				g.log.Info("flv: codec detected",
 					"node_id", key.nodeID.String(), "channel_id", key.channelID,
 					"codec", detectedCodec.String())
+				// MPEG-4 Part 2 无法封装为 FLV（FLV 无对应 CodecID，也没
+				// 有 sequence header 格式）；此前会被误判为 AVC 并输出坏
+				// tag。显式降级：记录原因并终止本订阅的 pipeline。此时
+				// FLV header 可能已发出，HTTP 响应以空/短 body 结束属预期。
+				// 请改用 GB28181 PS/RTP 通道收流验证。
+				if detectedCodec == CodecMPEG4 {
+					g.log.Error("flv: MPEG-4 Part 2 source cannot be previewed over HTTP-FLV, use GB28181 PS/RTP channel instead",
+						"node_id", key.nodeID.String(), "channel_id", key.channelID)
+					return
+				}
 			}
 
 			// First video frame(s): accumulate parameter sets and emit the

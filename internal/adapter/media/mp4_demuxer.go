@@ -6,6 +6,9 @@
 //     NALUs to Annex-B start-code framing (00 00 00 01),
 //   - audio samples (mp4a carrying AAC) gain a 7-byte ADTS header derived
 //     from the AudioSpecificConfig in esds,
+//   - MPEG-4 Part 2 视频样本（mp4v）原样透传——其本身就是起始码帧化的
+//     VOP byte-stream，不做长度前缀重写；仅每循环前置一次 VOS/VO/VOL
+//     config，并对缺失 VOP 起始码的样本补 00 00 01 B6,
 //   - every frame carries the container PTS converted into the 90 kHz domain
 //     the GB/T 28181 pipeline uses,
 //   - the end of the container is not the end of the stream: reading past
@@ -34,6 +37,9 @@ import (
 // annexBStartCode prefixes every NAL unit of a converted video sample.
 var annexBStartCode = []byte{0x00, 0x00, 0x00, 0x01}
 
+// vopStartCode 是 MPEG-4 Part 2 的 VOP 起始码，补在缺失起始码的样本前。
+var vopStartCode = []byte{0x00, 0x00, 0x01, 0xB6}
+
 // bpath builds a BoxPath from plain strings.
 func bpath(t ...string) mp4.BoxPath {
 	out := make(mp4.BoxPath, len(t))
@@ -56,17 +62,19 @@ const (
 // (file offset, size, 90 kHz PTS) triples plus whatever codec config the
 // framing conversion needs.
 type mp4Track struct {
-	kind  string // "video" or "audio"
-	codec string // "avc1", "hvc1" or "mp4a"
+	kind  string // "video" 或 "audio"
+	codec string // "avc1"、"hvc1"、"mp4v" 或 "mp4a"
 
 	timescale uint64 // media timescale from mdhd
 	samples   []mp4Sample
 
-	// video: NALU length prefix size; parameter sets (Annex-B framed) prepended
-	// once per loop iteration so decoders see parameter sets before the
-	// first slice. For avc1 this is SPS+PPS; for hvc1 it is VPS+SPS+PPS.
-	nalLenSize  int
-	paramSets   []byte // Annex-B framed parameter sets
+	// video 轨道参数：
+	//   nalLenSize：NALU 长度前缀字节数；0 表示非 length-prefixed 轨道（mp4v）。
+	//   paramSets：每循环首个视频样本前前置一次的参数集。avc1 为 SPS+PPS、
+	//     hvc1 为 VPS+SPS+PPS（均为 Annex-B 帧化）；mp4v 为 VOS+VO+VOL
+	//     config（自带 00 00 01 起始码，前置时原样拼接，不再加起始码前缀）。
+	nalLenSize int
+	paramSets  []byte
 
 	// audio: AudioSpecificConfig from esds, from which the ADTS header
 	// is derived per frame.
@@ -100,9 +108,9 @@ type sampleRef struct {
 }
 
 var (
-	_ io.ReadCloser       = (*mp4ReadCloser)(nil)
-	_ port.ESFrameReader  = (*mp4ReadCloser)(nil)
-	_ port.ESFrameReader  = (*MP4Demuxer)(nil)
+	_ io.ReadCloser      = (*mp4ReadCloser)(nil)
+	_ port.ESFrameReader = (*mp4ReadCloser)(nil)
+	_ port.ESFrameReader = (*MP4Demuxer)(nil)
 )
 
 // mp4ReadCloser wraps an MP4Demuxer so it satisfies io.ReadCloser.
@@ -424,7 +432,9 @@ func parseSampleEntries(t *mp4Track, stsd []byte) error {
 				return err
 			}
 		case "mp4v":
-			return fmt.Errorf("media: MPEG-4 Visual (mp4v) is not supported by the GB/T 28181 outbound pipeline — it uses a non-NALU bitstream incompatible with the Annex-B-based PS packetizer; please transcode to H.264 (avc1) or H.265 (hvc1)")
+			if err := t.parseMP4V(entry); err != nil {
+				return err
+			}
 		default:
 			if t.codec == "" {
 				return nil // first entry decides; unsupported → skip track
@@ -495,6 +505,49 @@ func (t *mp4Track) parseMP4A(entry []byte) error {
 	t.codec = "mp4a"
 	t.asc = asc
 	return nil
+}
+
+// parseMP4V 解析 MPEG-4 Part 2 (VisualObjectSequence) sample entry。
+// 布局与 avc1 相同：VisualSampleEntry 固定头后跟可选的 esds box。
+// esds 中 tag 0x05（DecoderSpecificInfo）携带 VOS+VO+VOL 头序列，
+// 自带 00 00 01 起始码，不经过 Annex-B 转换，原样前置。
+func (t *mp4Track) parseMP4V(entry []byte) error {
+	if t.kind != "video" {
+		return fmt.Errorf("media: mp4v sample entry in a %s track", t.kind)
+	}
+	esds, err := childBox(entry, "esds", videoEntryFixed)
+	if err != nil {
+		return fmt.Errorf("media: mp4v without a parsable esds: %w", err)
+	}
+	config, err := mpeg4VisualConfig(esds)
+	if err != nil {
+		return fmt.Errorf("media: mp4v esds without a usable DecoderSpecificInfo: %w", err)
+	}
+	t.codec = "mp4v"
+	t.paramSets = config // VOS+VO+VOL 头序列，自带 00 00 01 起始码
+	t.nalLenSize = 0     // 非 length-prefixed NALU 轨道
+	return nil
+}
+
+// mpeg4VisualConfig 沿 esds 描述符链下行，提取 DecoderSpecificInfo
+// （即 MPEG-4 Visual 轨道的 VOS+VO+VOL config）。
+func mpeg4VisualConfig(esds []byte) ([]byte, error) {
+	if len(esds) < 4 {
+		return nil, fmt.Errorf("esds shorter than its header")
+	}
+	var dsi []byte
+	err := walkDescriptorsFrom(esds, 4, func(tag byte, payload []byte) {
+		if tag == 0x05 { // DecoderSpecificInfo
+			dsi = append([]byte(nil), payload...)
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(dsi) == 0 {
+		return nil, fmt.Errorf("no DecoderSpecificInfo in the descriptor chain")
+	}
+	return dsi, nil
 }
 
 // childBox finds one direct child box of a sample entry by fourCC and
@@ -748,6 +801,12 @@ func (d *MP4Demuxer) ReadFrame(ctx context.Context) (model.ESFrame, error) {
 
 	switch track.kind {
 	case "video":
+		if track.codec == "mp4v" {
+			// MPEG-4 Part 2 样本已是完整 VOP byte-stream，不做 NALU
+			// 重写；仅在每循环首个视频样本前前置一次 config，并对
+			// 缺失 VOP 起始码的样本做修复。
+			return model.ESFrameWithPTSAndKind(track.mpeg4Payload(raw, ref.index == 0), sample.pts, model.ESFrameVideo), nil
+		}
 		// Parameter sets ride on the first video sample of each loop so
 		// late joiners and looping decoders both start from a decodable
 		// point. avc1 gets SPS+PPS; hvc1 gets VPS+SPS+PPS.
@@ -783,6 +842,38 @@ func (t *mp4Track) videoPayload(raw, paramSets []byte) []byte {
 		pos += n
 	}
 	return out
+}
+
+// mpeg4Payload 透传一个 MPEG-4 Part 2 样本：样本本身就是完整 VOP
+// byte-stream，不做 AVCC/HVCC 那样的长度前缀重写。first 为 true（每循环
+// 首个视频样本）时前置一次轨道 config（自带起始码，原样拼接）；样本自身
+// 缺失起始码时补 VOP 起始码。其余样本直接返回原切片——热路径零额外分配。
+func (t *mp4Track) mpeg4Payload(raw []byte, first bool) []byte {
+	needStartCode := !hasMpeg4StartCode(raw)
+	if !first && !needStartCode {
+		return raw
+	}
+	out := make([]byte, 0, len(t.paramSets)+len(vopStartCode)+len(raw))
+	if first {
+		out = append(out, t.paramSets...)
+	}
+	if needStartCode {
+		out = append(out, vopStartCode...)
+	}
+	return append(out, raw...)
+}
+
+// hasMpeg4StartCode 判断 b 是否已以 MPEG-4 起始码开头（00 00 01 或其
+// 补零的 4 字节变体 00 00 00 01）。
+func hasMpeg4StartCode(b []byte) bool {
+	switch {
+	case len(b) >= 4 && b[0] == 0 && b[1] == 0 && b[2] == 0 && b[3] == 1:
+		return true
+	case len(b) >= 3 && b[0] == 0 && b[1] == 0 && b[2] == 1:
+		return true
+	default:
+		return false
+	}
 }
 
 // adtsFrame prefixes one raw AAC sample with a 7-byte ADTS header derived

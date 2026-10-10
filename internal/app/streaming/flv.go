@@ -46,6 +46,7 @@ const (
 	CodecUnknown VideoCodec = iota
 	CodecAVC               // H.264
 	CodecHEVC              // H.265 / HEVC
+	CodecMPEG4             // MPEG-4 Part 2：仅用于识别并拒绝 FLV 预览（FLV 无此 CodecID）
 )
 
 // String returns a stable lowercase name for log/metric keys.
@@ -55,6 +56,8 @@ func (c VideoCodec) String() string {
 		return "avc"
 	case CodecHEVC:
 		return "hevc"
+	case CodecMPEG4:
+		return "mpeg4"
 	default:
 		return "unknown"
 	}
@@ -496,11 +499,45 @@ func IsHEVCKeyframe(nalu []byte) bool {
 	return t == 19 || t == 20
 }
 
+// isMPEG4StartByte reports whether b — the first byte after an Annex B start
+// code — matches an MPEG-4 Part 2 start code: VOS(0xB0) / GOV(0xB3) /
+// VO(0xB5) / VOP(0xB6) or VOL(0x20..0x2F).
+//
+// 其中 0xB0/0xB3/0xB5/0xB6 的低 5 位（&0x1F = 16/19/21/22）恰好落入 H.264 的
+// 1..23 类型区间，因此该判定必须先于 H.264 执行，否则 MPEG-4 流会被误判为
+// AVC 并按 AVC 封装出坏 FLV tag。
+func isMPEG4StartByte(b byte) bool {
+	switch b {
+	case 0xB0, 0xB3, 0xB5, 0xB6:
+		return true
+	}
+	return b >= 0x20 && b <= 0x2F
+}
+
 // DetectCodec infers the VideoCodec from a list of NALUs by their length-prefixed
 // header byte(s). It returns CodecUnknown if the list is empty.
+//
+// 判定顺序：先按 MPEG-4 Part 2 特征字节识别（0xB6&0x1F=22、0xB0&0x1F=16 等
+// 会落入 H.264 的 1..23 区间，必须先行拦截），再走既有的 H.264/HEVC 判定。
+// HEVC 参数集首字节（VPS 0x40 / SPS 0x42 / PPS 0x44）与 MPEG-4 特征集不
+// 相交，真实 HEVC 流首帧又以 VPS/SPS/PPS 开头，故既有 HEVC 判定不受影响。
 func DetectCodec(nalus [][]byte) VideoCodec {
 	for _, nalu := range nalus {
 		if len(nalu) >= 5 {
+			// 0x20~0x2F 消歧：该区间既可能是 MPEG-4 VOL 起始码，也可能是
+			// HEVC IDR/CRA（nuh_layer_id=0 时 nal_unit_type 左移 1 位：
+			// IDR_W_RADL=0x26 / IDR_N_LP=0x28 / CRA=0x2A）。HEVC NAL 单元
+			// 第二字节低 3 位是 nuh_temporal_id_plus1，标准规定恒非 0，以
+			// 此区分真实 HEVC 切片与 MPEG-4 VOL。
+			if nalu[4] >= 0x20 && nalu[4] <= 0x2F && len(nalu) >= 6 && nalu[5]&0x07 != 0 {
+				if t := HEVCNALUType(nalu); t == 19 || t == 20 || t == 21 {
+					return CodecHEVC
+				}
+			}
+			// MPEG-4 Part 2: VOS/VO/GOV/VOP/VOL start code 后首字节。
+			if isMPEG4StartByte(nalu[4]) {
+				return CodecMPEG4
+			}
 			// H.264: byte[4] & 0x1F in 1..23
 			if t := NALUType(nalu); t >= 1 && t <= 23 {
 				return CodecAVC

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -315,5 +316,203 @@ func TestMP4Demux_ADTSHeader(t *testing.T) {
 	want := []byte{0xFF, 0xF1, 0x4C, 0x80, 0x01, 0xFF, 0xFC}
 	if !bytes.Equal(got, want) {
 		t.Fatalf("adts:\n got %x\nwant %x", got, want)
+	}
+}
+
+// ---- MPEG-4 Part 2 (mp4v) fixture 与用例 ------------------------------------
+
+// mp4vDSI 是 fixture 的 DecoderSpecificInfo：VOS+VO+VOL 头序列（自带
+// 00 00 01 起始码）。内容对 demuxer 不透明，只要求非空且可精确断言。
+var mp4vDSI = []byte{
+	0x00, 0x00, 0x01, 0xB0, 0x08,
+	0x00, 0x00, 0x01, 0xB5, 0x09,
+	0x00, 0x00, 0x01, 0x20, 0x11, 0x22, 0x33,
+}
+
+// 三个 mp4v 样本：3 字节起始码 / 无起始码（需补 B6）/ 4 字节补零起始码。
+var (
+	mp4vSample1 = []byte{0x00, 0x00, 0x01, 0xB6, 0xAA, 0xBB}
+	mp4vSample2 = []byte{0xC3, 0x01, 0x02, 0x03, 0x04}
+	mp4vSample3 = []byte{0x00, 0x00, 0x00, 0x01, 0xB6, 0x99, 0x88}
+)
+
+// buildMinimalMP4V 构造一个单视频轨（mp4v）的最小 mp4。三个样本分别覆盖
+// 3 字节起始码、无起始码、4 字节起始码三条路径。withESDS=false 去掉
+// esds box，用于覆盖解析错误路径。
+func buildMinimalMP4V(t *testing.T, withESDS bool) []byte {
+	t.Helper()
+
+	entry := bytes.Join([][]byte{
+		make([]byte, 6), u16(1), // SampleEntry: reserved + data_ref_idx
+		u16(0), u16(0), make([]byte, 12), // pre_defined, reserved, pre_defined[3]
+		u16(176), u16(144), // width, height
+		u32(0x00480000), u32(0x00480000), // h/v resolution
+		u32(0),                 // reserved
+		u16(1),                 // frame_count
+		make([]byte, 32),       // compressorname
+		u16(0x18), u16(0xFFFF), // depth, pre_defined
+	}, nil)
+	if withESDS {
+		dcdPayload := bytes.Join([][]byte{
+			u8(0x20),                     // objectTypeIndication: MPEG-4 Visual
+			u8(0x15), {0x00, 0x00, 0x00}, // streamType 等 + bufferSizeDB
+			u32(400000), u32(100000), // maxBitrate, avgBitrate
+		}, nil)
+		dcdPayload = append(dcdPayload, box2(0x05, mp4vDSI)...)
+		esPayload := append([]byte{0x00, 0x01, 0x00}, box2(0x04, dcdPayload)...)
+		entry = append(entry, box("esds", u32(0), box2(0x03, esPayload))...)
+	}
+	mp4v := box("mp4v", entry)
+
+	videoTrack := func(chunk uint64) []byte {
+		stts := fullbox("stts", 0, 0, u32(1), u32(3), u32(3000))
+		stsc := fullbox("stsc", 0, 0, u32(1), u32(1), u32(3), u32(1))
+		stsz := fullbox("stsz", 0, 0, u32(0), u32(3),
+			u32(uint32(len(mp4vSample1))), u32(uint32(len(mp4vSample2))), u32(uint32(len(mp4vSample3))))
+		stco := fullbox("stco", 0, 0, u32(1), u32(uint32(chunk)))
+		stsd := fullbox("stsd", 0, 0, u32(1), mp4v)
+		stbl := box("stbl", stts, stsc, stsz, stco, stsd)
+		minf := box("minf", stbl)
+		hdlr := fullbox("hdlr", 0, 0, u32(0), []byte("vide"), make([]byte, 12), u8(0))
+		mdhd := fullbox("mdhd", 0, 0, u32(0), u32(0), u32(90000), u32(9000), u16(0x55C4), u16(0))
+		return box("trak", box("mdia", mdhd, hdlr, minf))
+	}
+
+	ftyp := box("ftyp", []byte("isom"), u32(0x200), []byte("isom"))
+	moov := box("moov", videoTrack(0))
+	payloadStart := uint64(len(ftyp) + len(moov) + 8)
+	moov = box("moov", videoTrack(payloadStart))
+	mdat := box("mdat", mp4vSample1, mp4vSample2, mp4vSample3)
+	return bytes.Join([][]byte{ftyp, moov, mdat}, nil)
+}
+
+// writeTempMP4V 把 mp4v fixture 落盘为真实文件（demuxer 通过 ReadAt 读取）。
+func writeTempMP4V(t *testing.T, withESDS bool) *os.File {
+	t.Helper()
+	data := buildMinimalMP4V(t, withESDS)
+	path := filepath.Join(t.TempDir(), "minimal-mp4v.mp4")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write mp4v fixture: %v", err)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open mp4v fixture: %v", err)
+	}
+	t.Cleanup(func() { _ = f.Close() })
+	return f
+}
+
+// TestMP4Demux_MPEG4Visual 覆盖 mp4v 轨道：config 前置（自带起始码）、
+// 缺起始码样本补 VOP 起始码 B6、4 字节起始码样本原样透传、循环回卷语义。
+func TestMP4Demux_MPEG4Visual(t *testing.T) {
+	d, err := NewMP4Demuxer(writeTempMP4V(t, true))
+	if err != nil {
+		t.Fatalf("open mp4v fixture: %v", err)
+	}
+	ctx := context.Background()
+
+	want := []struct {
+		payload []byte
+		pts     uint64
+	}{
+		// 首样本：config（自带起始码，原样前置）+ 3 字节起始码样本。
+		{bytes.Join([][]byte{mp4vDSI, mp4vSample1}, nil), 0},
+		// 缺起始码样本：补 VOP 起始码 00 00 01 B6。
+		{bytes.Join([][]byte{{0x00, 0x00, 0x01, 0xB6}, mp4vSample2}, nil), 3000},
+		// 4 字节补零起始码样本：原样透传。
+		{mp4vSample3, 6000},
+	}
+	for i, w := range want {
+		frame, err := d.ReadFrame(ctx)
+		if err != nil {
+			t.Fatalf("frame %d: %v", i, err)
+		}
+		if !bytes.Equal(frame.Payload, w.payload) {
+			t.Fatalf("frame %d payload:\n got %x\nwant %x", i, frame.Payload, w.payload)
+		}
+		if frame.PTS != w.pts {
+			t.Fatalf("frame %d pts = %d, want %d", i, frame.PTS, w.pts)
+		}
+		if string(frame.Kind) != "video" {
+			t.Fatalf("frame %d kind = %s, want video", i, frame.Kind)
+		}
+	}
+
+	// Loop：回卷后首帧重新携带 config 且 PTS 复位。
+	frame, err := d.ReadFrame(ctx)
+	if err != nil {
+		t.Fatalf("loop frame: %v", err)
+	}
+	if !bytes.Equal(frame.Payload, bytes.Join([][]byte{mp4vDSI, mp4vSample1}, nil)) || frame.PTS != 0 {
+		t.Fatalf("loop frame mismatch: pts=%d payload=%x", frame.PTS, frame.Payload)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+}
+
+// TestMP4Demux_MPEG4VisualWithoutESDS 验证缺少 esds 的 mp4v 轨道被清晰拒绝。
+func TestMP4Demux_MPEG4VisualWithoutESDS(t *testing.T) {
+	f := writeTempMP4V(t, false)
+	_, err := NewMP4Demuxer(f)
+	if err == nil {
+		t.Fatal("mp4v without esds accepted, want error")
+	}
+	if !strings.Contains(err.Error(), "esds") {
+		t.Fatalf("error should name the missing esds box, got: %v", err)
+	}
+}
+
+// TestMP4Demux_MPEG4VisualAsset 用 ffmpeg 生成的真实素材做结构性断言：
+// 首帧以 VOS config 开头、帧数与 PTS 步长符合 12fps/90kHz 的参数。
+func TestMP4Demux_MPEG4VisualAsset(t *testing.T) {
+	f, err := os.Open(filepath.Join("testdata", "mpeg4-part2.mp4"))
+	if err != nil {
+		t.Fatalf("open testdata asset: %v", err)
+	}
+	t.Cleanup(func() { _ = f.Close() })
+	d, err := NewMP4Demuxer(f)
+	if err != nil {
+		t.Fatalf("open demuxer: %v", err)
+	}
+	defer func() { _ = d.Close() }()
+	ctx := context.Background()
+
+	const (
+		wantFrames = 12                 // testsrc duration=1:rate=12
+		wantDelta  = uint64(90000 / 12) // 7500 ticks @90 kHz
+	)
+	var prev uint64
+	for i := 0; i < wantFrames; i++ {
+		frame, err := d.ReadFrame(ctx)
+		if err != nil {
+			t.Fatalf("frame %d: %v", i, err)
+		}
+		if string(frame.Kind) != "video" {
+			t.Fatalf("frame %d kind = %s, want video", i, frame.Kind)
+		}
+		if i == 0 {
+			// 首帧必须以 config 的 VOS 起始码开头。
+			if !bytes.HasPrefix(frame.Payload, []byte{0x00, 0x00, 0x01, 0xB0}) {
+				t.Fatalf("first frame must open with the VOS config, got %x",
+					frame.Payload[:min(8, len(frame.Payload))])
+			}
+		}
+		if frame.PTS != uint64(i)*wantDelta {
+			t.Fatalf("frame %d pts = %d, want %d", i, frame.PTS, uint64(i)*wantDelta)
+		}
+		if i > 0 && frame.PTS <= prev {
+			t.Fatalf("frame %d pts not increasing: %d <= %d", i, frame.PTS, prev)
+		}
+		prev = frame.PTS
+	}
+
+	// 回卷后首帧重新携带 config 且 PTS 复位。
+	frame, err := d.ReadFrame(ctx)
+	if err != nil {
+		t.Fatalf("loop frame: %v", err)
+	}
+	if !bytes.HasPrefix(frame.Payload, []byte{0x00, 0x00, 0x01, 0xB0}) || frame.PTS != 0 {
+		t.Fatalf("loop frame mismatch: pts=%d", frame.PTS)
 	}
 }
