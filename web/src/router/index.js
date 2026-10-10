@@ -10,6 +10,7 @@ import ChannelDetailView from '../views/ChannelDetailView.vue'
 import RecordView from '../views/RecordView.vue'
 import AccountsView from '../views/AccountsView.vue'
 import HelpView from '../views/HelpView.vue'
+import LogView from '../views/LogView.vue'
 
 const routes = [
   { path: '/', redirect: '/dashboard' },
@@ -23,7 +24,8 @@ const routes = [
   { path: '/media/:id?', name: 'media', component: MediaView, meta: { title: '媒体源配置' } },
   { path: '/channels/:id', name: 'channels', component: ChannelListView, meta: { title: '通道列表' } },
   { path: '/channel/:id/:ch', name: 'channel', component: ChannelDetailView, meta: { title: '通道详情' } },
-  { path: '/record/:id/:ch', name: 'record', component: RecordView, meta: { title: '录像回放' } }
+  { path: '/record/:id/:ch', name: 'record', component: RecordView, meta: { title: '录像回放' } },
+  { path: '/logs', name: 'logs', component: LogView, meta: { title: '实时日志' } }
 ]
 
 const router = createRouter({

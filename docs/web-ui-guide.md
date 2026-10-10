@@ -4,7 +4,7 @@
 >
 > **截图说明**：所有截图均存放在 `docs/screenshots/` 目录下，按 `01-platform-xxx.png` / `02-device-xxx.png` 命名区分系统归属。截图由 `scripts/capture-web-screenshots.sh` 脚本在服务器（10.96.1.125）上通过 headless Chromium 批量截取生成，对应部署于 18080（平台）/ 18081（设备）的 Web UI。
 >
-> **通道详情相关截图（12/13/14/16）说明**：通道由设备 Catalog 查询响应动态生成，当前部署环境下设备节点未声明通道，故通道列表为空，通道详情 / 实时播放 / PTZ / 语音对讲 / 录像回放等界面暂无对应截图。待节点配置 `channels:` 段或有设备上报目录后，可用同一脚本重新截取。
+> **通道详情相关截图（12/13/14/16）说明**：通道列表可通过 `POST /v1/nodes/:id/channels` 动态添加。当前部署环境已为设备节点添加 3 个测试通道（摄像头-01/02/03），通道详情 / 实时播放 / PTZ / 语音对讲 / 录像回放等界面截图均已补齐。
 
 ## 目录
 
@@ -247,14 +247,14 @@ device 节点可展开查看所有通道。该页面从 `GET /v1/nodes/:id/chann
 
 ### 5.1 实时播放
 
-> 📷 截图待补充（`12-channel-detail-player.png`）：当前部署环境设备节点无通道，无法进入通道详情页。待节点上报通道目录后，用 `scripts/capture-web-screenshots.sh` 重新截取。
+![通道详情 - 实时播放](screenshots/12-channel-detail-player.png)
 
 - 使用 `flv.js`（BSD 协议）通过 HTTP-FLV 拉取后端流媒体网关 `/v1/flv/:id/:ch`，自动处理浏览器 MSE 兼容。
 - 播放器下方显示当前连接状态。
 
 ### 5.2 PTZ 云台控制
 
-> 📷 截图待补充（`13-channel-detail-ptz.png`）：同上，通道详情页需设备节点有通道才可进入。
+![通道详情 - PTZ 云台控制](screenshots/13-channel-detail-ptz.png)
 
 - **方向按钮**：八方向（上/下/左/右/左上/右上/左下/右下），按住持续发送指令（每 500ms 轮询一次），松开停止。
 - **辅助功能**：变倍（zoom in/out）、变焦（focus near/far）、光圈（iris open/close）。
@@ -265,7 +265,7 @@ device 节点可展开查看所有通道。该页面从 `GET /v1/nodes/:id/chann
 
 ### 5.3 语音对讲
 
-> 📷 截图待补充（`14-channel-detail-talk.png`）：同上，通道详情页需设备节点有通道才可进入。
+![通道详情 - 语音对讲](screenshots/14-channel-detail-talk.png)
 
 - 点击「开始对讲」：浏览器请求麦克风权限，采集 PCM 通过 WebSocket 上行到 `/v1/talk/ws/:session_id`。
 - 后端基于 SIP INVITE 建立音频 RTP 会话（PCMU 编码），下行音频通过 WebSocket 推回浏览器播放。
@@ -289,7 +289,7 @@ device 节点可展开查看所有通道。该页面从 `GET /v1/nodes/:id/chann
 
 **代码位置**：`web/src/views/RecordView.vue`
 
-> 📷 截图待补充（`16-record-playback.png`）：录像回放页面需从通道详情进入，通道列表为空时无法访问。
+![录像回放页面](screenshots/16-record-playback.png)
 
 ### 功能
 

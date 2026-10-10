@@ -114,6 +114,10 @@ async function save () {
     ElMessage.error('Clock 必须 ≥ 1000')
     return
   }
+  if (form.loop && form.kind !== 'file') {
+    ElMessage.error('循环播放仅支持本地文件 (file) 源，其他类型不支持循环')
+    return
+  }
   const payload = {
     kind: form.kind,
     path: form.path,
@@ -219,7 +223,12 @@ async function clear () {
           </div>
         </el-form-item>
         <el-form-item label="循环播放">
-          <el-switch v-model="form.loop" :disabled="form.kind !== 'file'" />
+          <el-tooltip
+            :content="form.kind === 'file' ? '文件播放到末尾后自动从头重播' : '仅本地文件 (file) 源支持循环播放，其他类型无效'"
+            placement="top"
+          >
+            <el-switch v-model="form.loop" :disabled="form.kind !== 'file'" />
+          </el-tooltip>
           <span style="margin-left:8px;color:#888;font-size:12px">仅 file 源生效</span>
         </el-form-item>
         <el-form-item label="MTU">

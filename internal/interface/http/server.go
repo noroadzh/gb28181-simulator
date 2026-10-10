@@ -9,6 +9,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -44,6 +45,11 @@ type Server struct {
 	// streaming is the HTTP-FLV streaming gateway. It may be nil when the
 	// streaming feature is not configured (e.g. in minimal builds).
 	streaming *StreamingServer
+
+	// autoIDMu serialises the auto-generate path of handleChannelAdd so two
+	// concurrent ID-less adds cannot both observe the same next sequence
+	// number. Explicit-ID adds never take this lock.
+	autoIDMu sync.Mutex
 }
 
 var upgrader = websocket.Upgrader{

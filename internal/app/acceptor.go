@@ -2166,8 +2166,10 @@ func (a *Acceptor) refresh(
 // node it arrived at — never with another node's, so two platforms sharing
 // a process cannot see each other's downstreams.
 //
-// When a node registry is attached the node's profile channels are appended
-// to the downstream device list; their ChannelStatus is mapped to the GB/T
+// Each downstream device is listed as itself, and when a node registry is
+// attached the device's own profile channels are also expanded under it so
+// an upstream sees the full sub-tree behind a device node. The platform's
+// own profile channels are appended last. ChannelStatus is mapped to the GB/T
 // 28181 CatalogStatus so online/offline enforcement is visible upstream.
 func (a *Acceptor) answerCatalog(
 	ctx context.Context,
@@ -2187,25 +2189,16 @@ func (a *Acceptor) answerCatalog(
 			continue
 		}
 		items = append(items, item)
+		// A downstream device that is itself a node exposes the channels
+		// its profile carries, so an upstream sees the whole subtree
+		// behind it and not just the device that registered.
+		if a.registry != nil {
+			items = append(items, a.downstreamChannels(ctx, p.id, d)...)
+		}
 	}
 	if a.registry != nil {
 		if node, ok := a.registry.Get(ctx, p.id); ok {
-			for _, ch := range node.Profile().Channels() {
-				status := model.CatalogStatusON
-				if ch.Status() == model.ChannelStatusOffline {
-					status = model.CatalogStatusOFF
-				}
-				catalogItem, err := model.NewCatalogItem(model.CatalogItemParams{
-					DeviceID: ch.ID(),
-					Name:     ch.Name(),
-					Status:   status,
-					ParentID: ch.ParentID(),
-				})
-				if err != nil {
-					continue
-				}
-				items = append(items, catalogItem)
-			}
+			items = append(items, channelCatalogItems(node.Profile().Channels(), "")...)
 		}
 	}
 	catalog, err := model.NewCatalog(p.id.String(), notify.SN(), items)
@@ -2231,6 +2224,65 @@ func (a *Acceptor) answerCatalog(
 		return model.Message{}, false
 	}
 	return resp, true
+}
+
+// channelCatalogItems renders profile channels as catalog entries. The
+// channel status is mapped to the GB/T 28181 CatalogStatus so online/offline
+// enforcement is visible upstream; a channel without a parent falls back to
+// fallbackParent so its lineage stays visible. Unrenderable channels are
+// skipped rather than failing the whole answer.
+func channelCatalogItems(channels []model.Channel, fallbackParent string) []model.CatalogItem {
+	if len(channels) == 0 {
+		return nil
+	}
+	items := make([]model.CatalogItem, 0, len(channels))
+	for _, ch := range channels {
+		parentID := ch.ParentID()
+		if parentID == "" {
+			parentID = fallbackParent
+		}
+		status := model.CatalogStatusON
+		if ch.Status() == model.ChannelStatusOffline {
+			status = model.CatalogStatusOFF
+		}
+		catalogItem, err := model.NewCatalogItem(model.CatalogItemParams{
+			DeviceID: ch.ID(),
+			Name:     ch.Name(),
+			Status:   status,
+			ParentID: parentID,
+		})
+		if err != nil {
+			continue
+		}
+		items = append(items, catalogItem)
+	}
+	return items
+}
+
+// downstreamChannels expands one downstream device into the channels its node
+// profile carries. A device node shares its GB id with its registry entry,
+// so the lookup uses ParseNodeID of the device id; a device the registry
+// does not know, or one whose id is not a node id at all, is answered as
+// itself alone.
+func (a *Acceptor) downstreamChannels(
+	ctx context.Context,
+	node model.NodeID,
+	d model.DownstreamDevice,
+) []model.CatalogItem {
+	if a.registry == nil {
+		return nil
+	}
+	id, err := model.ParseNodeID(d.DeviceID())
+	if err != nil {
+		a.log.Debug("answering a device as itself: its id is not a node id",
+			"node_id", node.String(), "device_id", d.DeviceID())
+		return nil
+	}
+	n, ok := a.registry.Get(ctx, id)
+	if !ok {
+		return nil
+	}
+	return channelCatalogItems(n.Profile().Channels(), d.DeviceID())
 }
 
 // handle decides one REGISTER: challenge it, refuse it, or grant it and

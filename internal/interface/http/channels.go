@@ -20,7 +20,9 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -137,6 +139,34 @@ type channelAddRequest struct {
 	Status   string `json:"status,omitempty"` // ON / OFF，缺省 ON
 }
 
+// generateChannelID builds a unique channel id for a node when the caller
+// leaves it empty: `${nodeID}_${nextSeq}` where nextSeq is one past the
+// highest existing `${nodeID}_NNNN` suffix (or 1 when none exist). The
+// caller can still rename it afterwards through the response the add
+// returns, so auto-generation never takes editing power away from the user.
+//
+// No fixed numeric width is used: GB/T 28181 channel ids are not length-
+// constrained, and a 4-digit cap would silently truncate a 10000th channel.
+// The natural %d grows with the count.
+func generateChannelID(nodeID string, existing []model.Channel) string {
+	maxSeq := 0
+	prefix := nodeID + "_"
+	for _, ch := range existing {
+		id := ch.ID()
+		if !strings.HasPrefix(id, prefix) {
+			continue
+		}
+		n, err := strconv.Atoi(id[len(prefix):])
+		if err != nil || n <= 0 {
+			continue
+		}
+		if n > maxSeq {
+			maxSeq = n
+		}
+	}
+	return fmt.Sprintf("%s_%d", nodeID, maxSeq+1)
+}
+
 // handleChannelAdd creates a new dynamic channel on a device node.
 // Path: POST /v1/nodes/:id/channels
 func (s *Server) handleChannelAdd(c echo.Context) error {
@@ -157,8 +187,17 @@ func (s *Server) handleChannelAdd(c echo.Context) error {
 	req.ID = strings.TrimSpace(req.ID)
 	req.Name = strings.TrimSpace(req.Name)
 	req.ParentID = strings.TrimSpace(req.ParentID)
-	if req.ID == "" || req.Name == "" {
-		return c.JSON(http.StatusBadRequest, errorBody{Error: "id and name are required"})
+	if req.Name == "" {
+		return c.JSON(http.StatusBadRequest, errorBody{Error: "name is required"})
+	}
+	// Auto-generate channel ID when omitted: ${nodeID}_${nextSeq}. The
+	// mutex only covers the empty-ID path so normal explicit-ID adds are
+	// not serialised.
+	if req.ID == "" {
+		existing := s.channels.ListChannels(c.Request().Context(), id)
+		s.autoIDMu.Lock()
+		req.ID = generateChannelID(id.String(), existing)
+		s.autoIDMu.Unlock()
 	}
 	status := model.ChannelStatusOnline
 	if req.Status != "" && !strings.EqualFold(req.Status, "ON") {

@@ -22,8 +22,9 @@
 | 15 | `scenario-engine` | YAML 场景引擎（2026-09-27） | ✅ 已归档 | YAML-driven 场景脚本引擎 + 报告产出 |
 | 16 | `manscdp-logging-coverage` | MANSCDP+ 业务面日志覆盖 | ✅ 已归档 | acceptor 7 处成功路径补 Debug 日志（codec 包按惯例保持无日志）（2026-09-29） |
 | 17 | `media-aggregator-integration` | 媒体热循环聚合接入 | ⬜ 待实施 | `ps_packetizer.go` / `rtpizer.go` 调用 `error_aggregator` |
-| 18 | `logging-user-docs` | 日志配置用户文档 | ⬜ 待实施 | `docs/logging.md`：env 变量、`log.modules` 语法、PATCH 接口契约 |
-| 19 | `media-source-config` | 媒体源端到端配置 | 🔨 进行中 | config `media:` 段 + HTTP API + Web UI 面板；打通 #8 遗留的 app 层 wiring（2026-10-08） |
+| 18 | `logging-user-docs` | 日志配置用户文档 | ✅ 已归档 | `docs/logging.md`：env 变量、`log.modules` 语法、PATCH 接口契约（2026-09-29） |
+| 19 | `media-source-config` | 媒体源端到端配置 | ✅ 已归档 | config `media:` 段 + HTTP API + Web UI 面板；打通 #8 遗留的 app 层 wiring（2026-10-08） |
+| 20 | `fix-catalog-aggregate-and-channel-autogen` | 目录聚合 + 通道自动编号 + 循环校验 + 实时日志页 | ✅ 已归档 | Catalog 展开下游通道、通道 ID 自动生成、loop 仅限 file 校验、Web 实时日志页（2026-10-10） |
 
 ## 依赖关系
 
@@ -55,6 +56,6 @@
 - 原始路线图中 #3 为 `core-manscdp-and-ps`，后被 `enterprise-skeleton` 占位，本文件保留原始编号顺序。
 - 部分 change 内部拆分为多个子 change 归档（如 #5、#6、#7、#8）。
 - #10 原名 `dynamic-catalog-and-query`，实际由 `dynamic-sim-features` change 实现（动态目录/报警、录像与回放、移动位置、运行时触发 API）。
-- 当前已完成 15 个编号（#1–#15），对应 23 个归档 change 目录（`ls openspec/changes/archive/ | wc -l = 23`，2026-09-29 同步）。
-- 待实施 4 个编号（#16–#19：manscdp-logging-coverage、media-aggregator-integration、logging-user-docs、media-source-config），均来自 `2026-09-29-enhance-logging-coverage` 的 Deferred 项。
+- 已完成 19 个编号（#1–#16、#18–#20），对应 39 个归档 change 目录（2026-10-10 同步）。
+- 待实施 1 个编号（#17：media-aggregator-integration），来自 `2026-09-29-enhance-logging-coverage` 的 Deferred 项。
 - 路线图同步契约见 capability `docs-roadmap-sync`；每次归档必须在同提交更新本文件。

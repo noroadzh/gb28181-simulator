@@ -14,6 +14,7 @@ const drawer = ref(false)
 const menu = [
   { path: '/nodes', title: '节点概览' },
   { path: '/accounts', title: '账号管理' },
+  { path: '/logs', title: '实时日志' },
   { path: '/help', title: '帮助' },
   { path: '/capture', title: '抓包面板' },
   { path: '/fault', title: '故障注入' },

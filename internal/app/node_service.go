@@ -863,10 +863,18 @@ func (s *NodeService) GetMedia(ctx context.Context, id model.NodeID) (model.Medi
 
 // SetMedia validates the supplied config and stores it on the node's
 // profile. The change is visible to the acceptor's INVITE path immediately.
+// Loop is only honoured by the file source; for any other kind it is forced
+// off here so a stale UI toggle cannot silently promise looping the backend
+// will never deliver.
 func (s *NodeService) SetMedia(ctx context.Context, id model.NodeID, cfg model.MediaConfig) error {
 	cfg = cfg.Normalize()
 	if err := cfg.Validate(); err != nil {
 		return err
+	}
+	if cfg.Loop && cfg.Kind != model.SourceKindFile {
+		s.log.Warn("media loop ignored for non-file source; forcing loop=false",
+			"node_id", id.String(), "kind", string(cfg.Kind))
+		cfg.Loop = false
 	}
 	if _, err := s.registry.MutateProfile(ctx, id, func(p model.NodeProfile) (model.NodeProfile, error) {
 		p.SetMediaConfig(cfg)
@@ -917,6 +925,11 @@ func (s *NodeService) SetChannelMedia(ctx context.Context, id model.NodeID, chan
 	cfg = cfg.Normalize()
 	if err := cfg.Validate(); err != nil {
 		return err
+	}
+	if cfg.Loop && cfg.Kind != model.SourceKindFile {
+		s.log.Warn("channel media loop ignored for non-file source; forcing loop=false",
+			"node_id", id.String(), "channel_id", channelID, "kind", string(cfg.Kind))
+		cfg.Loop = false
 	}
 	if _, err := s.registry.MutateProfile(ctx, id, func(p model.NodeProfile) (model.NodeProfile, error) {
 		p.SetChannelMediaConfig(channelID, cfg)
