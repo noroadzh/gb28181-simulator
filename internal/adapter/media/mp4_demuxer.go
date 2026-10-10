@@ -62,11 +62,11 @@ type mp4Track struct {
 	timescale uint64 // media timescale from mdhd
 	samples   []mp4Sample
 
-	// video: NALU length prefix size; SPS/PPS (Annex-B framed) prepended
+	// video: NALU length prefix size; parameter sets (Annex-B framed) prepended
 	// once per loop iteration so decoders see parameter sets before the
-	// first slice. hvcC parameter sets are not extracted.
-	nalLenSize int
-	vpsSpsPps  []byte
+	// first slice. For avc1 this is SPS+PPS; for hvc1 it is VPS+SPS+PPS.
+	nalLenSize  int
+	paramSets   []byte // Annex-B framed parameter sets
 
 	// audio: AudioSpecificConfig from esds, from which the ADTS header
 	// is derived per frame.
@@ -100,7 +100,9 @@ type sampleRef struct {
 }
 
 var (
-	_ port.ESFrameReader = (*MP4Demuxer)(nil)
+	_ io.ReadCloser       = (*mp4ReadCloser)(nil)
+	_ port.ESFrameReader  = (*mp4ReadCloser)(nil)
+	_ port.ESFrameReader  = (*MP4Demuxer)(nil)
 )
 
 // mp4ReadCloser wraps an MP4Demuxer so it satisfies io.ReadCloser.
@@ -114,21 +116,31 @@ func (c *mp4ReadCloser) Read(p []byte) (int, error) {
 	if c.d == nil || c.d.f == nil || c.d.closed {
 		return 0, io.EOF
 	}
-	// Skip over degenerate empty frames so a zero-size sample cannot spin
-	// this loop forever.
-	for i := 0; i < 16 && len(c.d.pending) == 0; i++ {
+	// Read whole frames, respecting the caller's buffer size.
+	// An oversized frame is returned in one call; the caller must
+	// handle that case (StreamESReader buffers until a start-code
+	// boundary is found).
+	for {
 		frame, err := c.d.ReadFrame(context.Background())
 		if err != nil {
 			return 0, err
 		}
+		if len(frame.Payload) == 0 {
+			continue // skip degenerate zero-size samples
+		}
 		c.d.pending = frame.Payload
-	}
-	if len(c.d.pending) == 0 {
-		return 0, io.ErrNoProgress
+		break
 	}
 	n := copy(p, c.d.pending)
 	c.d.pending = c.d.pending[n:]
 	return n, nil
+}
+
+// ReadFrame satisfies port.ESFrameReader so that MediaService.readerFor
+// can take the precise frame path (SPS/PPS injection, container PTS, no
+// byte-stream fragmentation).
+func (c *mp4ReadCloser) ReadFrame(ctx context.Context) (model.ESFrame, error) {
+	return c.d.ReadFrame(ctx)
 }
 
 func (c *mp4ReadCloser) Close() error { return c.d.Close() }
@@ -411,6 +423,8 @@ func parseSampleEntries(t *mp4Track, stsd []byte) error {
 			if err := t.parseMP4A(entry); err != nil {
 				return err
 			}
+		case "mp4v":
+			return fmt.Errorf("media: MPEG-4 Visual (mp4v) is not supported by the GB/T 28181 outbound pipeline — it uses a non-NALU bitstream incompatible with the Annex-B-based PS packetizer; please transcode to H.264 (avc1) or H.265 (hvc1)")
 		default:
 			if t.codec == "" {
 				return nil // first entry decides; unsupported → skip track
@@ -438,7 +452,7 @@ func (t *mp4Track) parseAVC(entry []byte) error {
 	if err != nil {
 		return err
 	}
-	t.vpsSpsPps = spsPps
+	t.paramSets = spsPps
 	return nil
 }
 
@@ -455,6 +469,11 @@ func (t *mp4Track) parseHEVC(entry []byte) error {
 	}
 	t.codec = "hvc1"
 	t.nalLenSize = int(hvcC[21]&0x03) + 1
+	paramSets, err := hevcParameterSets(hvcC)
+	if err != nil {
+		return err
+	}
+	t.paramSets = paramSets
 	return nil
 }
 
@@ -536,6 +555,64 @@ func avcParameterSets(avcC []byte) ([]byte, error) {
 	}
 	if len(out) == 0 {
 		return nil, fmt.Errorf("media: avcC without any parameter set")
+	}
+	return out, nil
+}
+
+// hevcParameterSets extracts VPS/SPS/PPS from an hvcC payload as an
+// Annex-B blob ready to be prepended to the stream.
+//
+// hvcC layout (ISO/IEC 14496-15):
+//
+//	[0]                 configurationVersion (=1)
+//	[1]                 general_profile_space(2) | general_tier_flag(1) | general_profile_idc(5)
+//	[2..5]              general_profile_compatibility_flags (32 bits)
+//	[6..11]             general_constraint_indicator_flags (48 bits)
+//	[12]                general_level_idc
+//	[13..14]            min_spatial_segmentation_idc (with 0xF000 reserved upper bits)
+//	[15]                parallelismType (with 0xFC reserved upper bits)
+//	[16]                chromaFormatIdc (with 0xFC reserved upper bits)
+//	[17]                bitDepthLumaMinus8 (with 0xF8 reserved upper bits)
+//	[18]                bitDepthChromaMinus8 (with 0xF8 reserved upper bits)
+//	[19..20]            avgFrameRate
+//	[21]                constantFrameRate(2) | numTemporalLayers(3) | temporalIdNested(1) | lengthSizeMinusOne(2)
+//	[22]                numOfArrays
+//	per array: array_completeness(1) | reserved(1) | NAL_unit_type(6) | numNalus(16) | naluLength(16) | nalu
+func hevcParameterSets(hvcC []byte) ([]byte, error) {
+	if len(hvcC) < 23 {
+		return nil, fmt.Errorf("media: hvcC too short for parameter-set arrays (%d bytes)", len(hvcC))
+	}
+	var out []byte
+	pos := 22 // skip header to numOfArrays
+	if pos >= len(hvcC) {
+		return nil, fmt.Errorf("media: hvcC missing numOfArrays")
+	}
+	numArrays := int(hvcC[pos])
+	pos++
+	for i := 0; i < numArrays; i++ {
+		if pos+3 > len(hvcC) {
+			return nil, fmt.Errorf("media: hvcC truncated in array header")
+		}
+		// naluType := hvcC[pos] & 0x3F (lower 6 bits)
+		pos++ // skip array_completeness | reserved | nalu_type byte
+		numNalus := int(binary.BigEndian.Uint16(hvcC[pos:]))
+		pos += 2
+		for j := 0; j < numNalus; j++ {
+			if pos+2 > len(hvcC) {
+				return nil, fmt.Errorf("media: hvcC truncated in NALU length")
+			}
+			n := int(binary.BigEndian.Uint16(hvcC[pos:]))
+			pos += 2
+			if pos+n > len(hvcC) {
+				return nil, fmt.Errorf("media: hvcC truncated in NALU body")
+			}
+			out = append(out, annexBStartCode...)
+			out = append(out, hvcC[pos:pos+n]...)
+			pos += n
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("media: hvcC without any parameter set")
 	}
 	return out, nil
 }
@@ -673,12 +750,12 @@ func (d *MP4Demuxer) ReadFrame(ctx context.Context) (model.ESFrame, error) {
 	case "video":
 		// Parameter sets ride on the first video sample of each loop so
 		// late joiners and looping decoders both start from a decodable
-		// point. hvc1 carries no extracted sets (nil).
-		var spsPps []byte
+		// point. avc1 gets SPS+PPS; hvc1 gets VPS+SPS+PPS.
+		var paramSets []byte
 		if ref.index == 0 {
-			spsPps = track.vpsSpsPps
+			paramSets = track.paramSets
 		}
-		return model.ESFrameWithPTSAndKind(track.videoPayload(raw, spsPps), sample.pts, model.ESFrameVideo), nil
+		return model.ESFrameWithPTSAndKind(track.videoPayload(raw, paramSets), sample.pts, model.ESFrameVideo), nil
 	case "audio":
 		return model.ESFrameWithPTSAndKind(track.adtsFrame(raw), sample.pts, model.ESFrameAudio), nil
 	default:
@@ -688,9 +765,9 @@ func (d *MP4Demuxer) ReadFrame(ctx context.Context) (model.ESFrame, error) {
 
 // videoPayload rewrites one AVCC/HVCC sample into Annex-B framing,
 // optionally prepending Annex-B parameter sets.
-func (t *mp4Track) videoPayload(raw, spsPps []byte) []byte {
-	out := make([]byte, 0, len(raw)+len(spsPps)+8)
-	out = append(out, spsPps...)
+func (t *mp4Track) videoPayload(raw, paramSets []byte) []byte {
+	out := make([]byte, 0, len(raw)+len(paramSets)+8)
+	out = append(out, paramSets...)
 	pos := 0
 	for pos+t.nalLenSize <= len(raw) {
 		n := 0

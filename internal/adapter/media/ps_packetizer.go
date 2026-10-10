@@ -72,27 +72,37 @@ func (p *PSPacketizer) Packetize(frame model.ESFrame) (model.PSFrame, error) {
 	binary.BigEndian.PutUint32(packHeader[1:5], 0x00010001) // SCR=0 with mandatory marker bits
 	binary.BigEndian.PutUint16(packHeader[5:7], uint16(muxVal))
 
-	// PES header (variable length, minimum 9 bytes after stream_id).
+	// PES header (everything after PES_packet_length).
+	//
+	// MPEG-2 PES header layout (after PES_packet_length, 2 bytes):
+	//   [2]  : '10' marker + flags (1 byte)
+	//   [3]  : PTS_DTS_flags etc. (1 byte)
+	//   [4]  : PES_header_data_length (1 byte)
+	//   [5:] : optional fields (PES_header_data_length bytes)
+	//
+	// With PTS-only (no DTS/ESCR/etc.), optional fields = 5-byte PTS.
+	// So PES header total = 3 fixed bytes + 5 PTS bytes = 8 bytes.
+	// PES_packet_length = 8 + esLen (counts everything after itself).
 	esLen := len(frame.Payload)
-	pesHeaderLen := 9            // fixed PES header size (length field excluded)
-	pesTotal := 2 + pesHeaderLen // length field + PES header only
-	pesHeader := make([]byte, pesTotal)
-	binary.BigEndian.PutUint16(pesHeader[0:2], uint16(pesHeaderLen+esLen))
-	pesHeader[2] = 0x80 // '10' marker
-	pesHeader[3] = 0x80 // PTS only
-	pesHeader[4] = 0x00
-	pesHeader[5] = 0x05 // 5 bytes of PTS follow
+	const pesHeaderDataLen = 5 // PTS is 5 bytes; no DTS, no ESCR, etc.
+	const pesFixedLen = 3      // marker byte + flags byte + header_data_length byte
+	pesHeader := make([]byte, 2+pesFixedLen+pesHeaderDataLen)
+	// PES_packet_length: counts bytes AFTER this field (header + ES payload).
+	binary.BigEndian.PutUint16(pesHeader[0:2], uint16(pesFixedLen+pesHeaderDataLen+esLen))
+	pesHeader[2] = 0x80             // '10' marker
+	pesHeader[3] = 0x80             // PTS only (PTS_DTS_flags = '10')
+	pesHeader[4] = pesHeaderDataLen // number of bytes of optional fields after this
 
 	// Encode PTS in 90 kHz domain into 5-byte MPEG-2 format.
 	pts := frame.PTS
-	pesHeader[6] = 0x21 | byte((pts>>29)&0x0E)
-	pesHeader[7] = byte((pts >> 22) & 0xFF)
-	pesHeader[8] = ((byte((pts >> 15) & 0x7F)) << 1) | 0x01
-	pesHeader[9] = byte((pts >> 7) & 0xFF)
-	pesHeader[10] = (byte(pts&0x7F) << 1) | 0x01
+	pesHeader[5] = 0x21 | byte((pts>>29)&0x0E)
+	pesHeader[6] = byte((pts >> 22) & 0xFF)
+	pesHeader[7] = ((byte((pts >> 15) & 0x7F)) << 1) | 0x01
+	pesHeader[8] = byte((pts >> 7) & 0xFF)
+	pesHeader[9] = (byte(pts&0x7F) << 1) | 0x01
 
 	// Assemble full PS frame.
-	ps := make([]byte, 0, 4+12+4+pesTotal+esLen)
+	ps := make([]byte, 0, 4+12+4+len(pesHeader)+esLen)
 	ps = append(ps, 0x00, 0x00, 0x01, 0xBA) // pack start code
 	ps = append(ps, packHeader...)
 	ps = append(ps, 0x00, 0x00, 0x01, streamIDForKind(frame.Kind)) // video (0xE0) or audio (0xC0)

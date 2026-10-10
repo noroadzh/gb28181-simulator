@@ -82,8 +82,11 @@ func (d *PSDepacketizer) cutFrames() ([]model.ESFrame, error) {
 		// Read PES_packet_length (big-endian, 2 bytes after stream_id).
 		pesLen := int(d.buf[pesIdx+4])<<8 | int(d.buf[pesIdx+5])
 
-		// Reject short packets that cannot contain the minimum 9-byte PES header.
-		if pesLen < 9 {
+		// PES_packet_length counts bytes AFTER itself: the fixed PES header
+		// (3 bytes: marker + flags + header_data_length) + optional header
+		// data (5 bytes for PTS-only) + ES payload. With PTS-only the fixed
+		// portion is 3 + 5 = 8 bytes, so reject anything smaller.
+		if pesLen < 8 {
 			// Skip this malformed frame and continue scanning.
 			d.buf = d.buf[pesIdx+4:]
 			continue
@@ -98,11 +101,14 @@ func (d *PSDepacketizer) cutFrames() ([]model.ESFrame, error) {
 		//   pesIdx + 0..2 : start code 00 00 01
 		//   pesIdx + 3    : stream_id (E0 or C0)
 		//   pesIdx + 4..5 : PES_packet_length (big-endian)
-		//   pesIdx + 6..14: 9-byte PES header (flags + PTS)
-		//   pesIdx + 15   : first ES byte
-		// pesLen = 9 (PES header) + esLen  →  esLen = pesLen - 9
-		esStart := pesIdx + 15
-		esLen := pesLen - 9
+		//   pesIdx + 6    : '10' marker byte
+		//   pesIdx + 7    : flags (PTS_DTS_flags etc.)
+		//   pesIdx + 8    : PES_header_data_length (== 5 for PTS-only)
+		//   pesIdx + 9..13: 5-byte PTS
+		//   pesIdx + 14   : first ES byte
+		// With PTS-only, fixed PES header = 3 + 5 = 8 bytes, so esLen = pesLen - 8.
+		esStart := pesIdx + 14
+		esLen := pesLen - 8
 
 		// Guard against malformed packets.
 		if esStart < 0 || esStart >= len(d.buf) || esLen <= 0 || esStart+esLen > len(d.buf) {
@@ -111,8 +117,8 @@ func (d *PSDepacketizer) cutFrames() ([]model.ESFrame, error) {
 			continue
 		}
 
-		// Extract the PTS (in 90 kHz domain, 5 bytes starting at pesIdx+10).
-		pts := decodePTS(d.buf[pesIdx+10 : pesIdx+15])
+		// Extract the PTS (in 90 kHz domain, 5 bytes starting at pesIdx+9).
+		pts := decodePTS(d.buf[pesIdx+9 : pesIdx+14])
 
 		// Copy the ES payload so the caller gets an independent slice.
 		esPayload := make([]byte, esLen)
