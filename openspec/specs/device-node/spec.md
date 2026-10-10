@@ -140,7 +140,7 @@ device（IPC / NVR / DVR）身份的行为规范。本 capability 覆盖其注�
 - **WHEN** 配置中的密码出现在日志、配置回显或接口响应中
 - **THEN** 该值被脱敏替换，原文不出现在任何输出通道
 
-### 需求：每个节点经自身 transport 注册且互不串扰
+### Requirement: 需求：每个节点经自身 transport 注册且互不串扰
 
 系统 MUST 将注册事务限制在该节点绑定的 transport 上：REGISTER 必须经节点自身的监听器发出，且只有与该事务匹配（`Call-ID` 及请求发往的对端）的响应 MAY 结论该事务。
 

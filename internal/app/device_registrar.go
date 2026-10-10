@@ -183,7 +183,7 @@ func (r *Registrar) transaction(
 			continue
 		}
 		// Likewise, only the platform we registered with may conclude it.
-		if peer != reg.Server() {
+		if !samePeer(peer, reg.Server()) {
 			r.log.Debug("ignoring response from an unexpected peer",
 				"node_id", id.String(), "peer", peer, "want", reg.Server())
 			continue

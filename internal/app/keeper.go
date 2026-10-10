@@ -361,7 +361,7 @@ func (k *Keeper) heartbeat(ctx context.Context, s *session) error {
 		if h, ok := got.Header("Call-ID"); !ok || h.Value() != callID {
 			continue
 		}
-		if peer != s.reg.Server() {
+		if !samePeer(peer, s.reg.Server()) {
 			continue
 		}
 		status := got.StatusCode()
@@ -424,7 +424,7 @@ func (k *Keeper) sendOptions(ctx context.Context, s *session) error {
 		if h, ok := got.Header("Call-ID"); !ok || h.Value() != callID {
 			continue
 		}
-		if peer != s.reg.Server() {
+		if !samePeer(peer, s.reg.Server()) {
 			continue
 		}
 		status := got.StatusCode()
