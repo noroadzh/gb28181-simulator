@@ -163,11 +163,13 @@ func (p *catalogPoller) sendQuery(ctx context.Context, dev model.DownstreamDevic
 	if err != nil {
 		return fmt.Errorf("build MESSAGE: %w", err)
 	}
-	// dst is the device's contact address; fall back to Addr when the
-	// device never advertised one.
-	dst := dev.Contact()
+	// dst is the device's transport address (from Via/contact IP:port).
+	// Use Addr as the primary routing target; Contact (the SIP URI from
+	// the registration Contact header) may advertise 0.0.0.0 which is
+	// not routable.
+	dst := dev.Addr()
 	if dst == "" {
-		dst = dev.Addr()
+		dst = dev.Contact()
 	}
 	if err := p.tr.Send(ctx, msg, dst); err != nil {
 		return fmt.Errorf("send to %s: %w", dst, err)

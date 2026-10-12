@@ -702,8 +702,8 @@ func run() error {
 // non-zero CatalogPollInterval it finds.  A value of 0 means "not set".
 func pickCatalogPollInterval(nodes []platformconfig.NodeConfig) time.Duration {
 	for _, nc := range nodes {
-		if nc.Registration != nil && nc.Registration.CatalogPollInterval > 0 {
-			return nc.Registration.CatalogPollInterval
+		if nc.Platform != nil && nc.Platform.CatalogPollInterval > 0 {
+			return nc.Platform.CatalogPollInterval
 		}
 	}
 	return 0
