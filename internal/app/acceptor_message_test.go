@@ -94,6 +94,22 @@ func (f *fakeMANSCDP) MarshalCatalog(catalog model.Catalog) (string, error) {
 	return b.String(), nil
 }
 
+func (f *fakeMANSCDP) MarshalCatalogWithMedia(catalog model.Catalog, _ map[string]model.MediaConfig) (string, error) {
+	// The fake deliberately ignores the media map: a focused test for the
+	// WithMedia path uses the real codec (see internal/adapter/manscdp
+	// golden tests), here we just need the existing assertions to keep
+	// working.
+	return f.MarshalCatalog(catalog)
+}
+
+func (f *fakeMANSCDP) DecodeCatalogResponse(body string) (model.Catalog, []port.ChannelMedia, error) {
+	return model.Catalog{}, nil, nil
+}
+
+func (f *fakeMANSCDP) MarshalCatalogQuery(targetDeviceID string, sn uint32) (string, error) {
+	return "", nil
+}
+
 func (f *fakeMANSCDP) rendered() []model.Catalog {
 	f.mu.Lock()
 	defer f.mu.Unlock()

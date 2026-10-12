@@ -26,6 +26,34 @@ type MANSCDPCodec interface {
 	// message body.
 	MarshalCatalog(catalog model.Catalog) (string, error)
 
+	// MarshalCatalogWithMedia renders a catalog answer, embedding a
+	// per-device MediaSource extension block in each Item whose DeviceID
+	// appears in mediaByDeviceID with a non-zero MediaConfig. Used by the
+	// device side to broadcast its media-source configuration through
+	// the catalog so a platform can rebuild it on the other side. nil
+	// mediaByDeviceID and the absence of a key both result in the legacy
+	// shape (no Extension). This is the change-driven superset of
+	// MarshalCatalog.
+	MarshalCatalogWithMedia(catalog model.Catalog, mediaByDeviceID map[string]model.MediaConfig) (string, error)
+
+	// DecodeCatalogResponse parses a Catalog response body and returns
+	// the catalog it carries together with the per-channel media
+	// configuration it advertises (only for items that carry an
+	// Extension/MediaSource block). A catalog without an Extension
+	// block is still fully parsed; the returned media slice is empty
+	// in that case. Used by the platform side to harvest a device's
+	// media-source configuration from the catalog it just received.
+	DecodeCatalogResponse(body string) (model.Catalog, []ChannelMedia, error)
+
+	// MarshalCatalogQuery renders a catalog query MESSAGE body sent by a
+	// platform to pull a downstream device's catalog. The caller provides
+	// the target device id and a per-call serial number; the asker's
+	// identity travels in the SIP From header built around this body. The
+	// result is placed verbatim as the body of a SIP MESSAGE whose To
+	// header is the target device's URI. Used by CatalogPoller to actively
+	// harvest a device's catalog on a fixed interval.
+	MarshalCatalogQuery(targetDeviceID string, sn uint32) (string, error)
+
 	// DecodeDeviceInfoQuery parses a DeviceInfo query.
 	DecodeDeviceInfoQuery(body string) (model.DeviceInfoQuery, error)
 

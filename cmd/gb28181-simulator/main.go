@@ -342,6 +342,14 @@ func run() error {
 			if err != nil {
 				return nil, fmt.Errorf("acceptor: %w", err)
 			}
+			// The acceptor is shared across every node in this process, so
+			// it takes one catalog-poll interval for them all. Operators
+			// set the value under the `registration:` section of any node
+			// that runs a platform; the first non-zero value wins.
+			if pollInterval := pickCatalogPollInterval(cfg.Nodes); pollInterval > 0 {
+				acceptor.WithCatalogPollInterval(pollInterval)
+				logging.L().Info("catalog polling enabled", "interval", pollInterval.String())
+			}
 			acceptor.WithCascadeHandler(cascadeHandler)
 			if _, err := svc.WithAcceptor(acceptor); err != nil {
 				return nil, fmt.Errorf("node service: %w", err)
@@ -688,4 +696,15 @@ func run() error {
 		}
 	}
 	return nil
+}
+
+// pickCatalogPollInterval scans all node configs and returns the first
+// non-zero CatalogPollInterval it finds.  A value of 0 means "not set".
+func pickCatalogPollInterval(nodes []platformconfig.NodeConfig) time.Duration {
+	for _, nc := range nodes {
+		if nc.Registration != nil && nc.Registration.CatalogPollInterval > 0 {
+			return nc.Registration.CatalogPollInterval
+		}
+	}
+	return 0
 }

@@ -114,6 +114,11 @@ type Acceptor struct {
 	cascade port.CascadeHandler
 	faults  port.FaultStore
 
+	// catalogPollEvery configures the catalog pull interval for each serving
+	// node. Zero means the poller is disabled (the default). Set through
+	// WithCatalogPollInterval before the first call to Serve.
+	catalogPollEvery time.Duration
+
 	// inviteMu guards both invite maps. Watchers live for the life of one
 	// pending INVITE and are removed either by the timer firing or by an
 	// explicit cancel (ACK arrived, or node is stopping). Keeping them on the
@@ -125,15 +130,26 @@ type Acceptor struct {
 	inviteWatchers map[string]chan struct{}
 }
 
+// WithCatalogPollInterval sets the interval at which a platform actively pulls
+// each downstream device's catalog and imports the per-channel MediaSource
+// Extension into the node's profile. Zero disables the poller. The setter is
+// idempotent; it is safe to call before or between Serve calls.
+func (a *Acceptor) WithCatalogPollInterval(d time.Duration) *Acceptor {
+	a.catalogPollEvery = d
+	return a
+}
+
 // platform is one node's serving goroutine and the settings it serves with.
 type platform struct {
-	id         model.NodeID
-	tr         port.SIPTransport
-	realm      string
-	policy     model.ExpiresPolicy
-	sweepEvery time.Duration
-	cancel     context.CancelFunc
-	done       chan struct{}
+	id               model.NodeID
+	tr               port.SIPTransport
+	realm            string
+	policy           model.ExpiresPolicy
+	sweepEvery       time.Duration
+	cancel           context.CancelFunc
+	done             chan struct{}
+	catalogPoller    *catalogPoller
+	catalogPollEvery time.Duration
 
 	// position stores the last position configured via SetPosition.
 	// hasFix reports whether a position was ever configured; the initial
@@ -402,14 +418,18 @@ func (a *Acceptor) Serve(id model.NodeID, tr port.SIPTransport, realm string, po
 	defer a.mu.Unlock()
 	runCtx, cancel := context.WithCancel(a.ctx)
 	p := &platform{
-		id:          id,
-		tr:          tr,
-		realm:       realm,
-		policy:      policy,
-		sweepEvery:  sweepIntervalFor(policy),
-		cancel:      cancel,
-		done:        make(chan struct{}),
-		subscribers: make(map[string]*catalogSub),
+		id:               id,
+		tr:               tr,
+		realm:            realm,
+		policy:           policy,
+		sweepEvery:       sweepIntervalFor(policy),
+		cancel:           cancel,
+		done:             make(chan struct{}),
+		subscribers:      make(map[string]*catalogSub),
+		catalogPollEvery: a.catalogPollEvery,
+	}
+	if p.catalogPollEvery > 0 && a.registry != nil {
+		p.catalogPoller = newCatalogPoller(id, tr, a.devices, a.registry, a.manscdp, a.newTicker, a.log, p.catalogPollEvery)
 	}
 	a.serving[key] = p
 	go a.run(runCtx, p)
@@ -496,6 +516,14 @@ func (a *Acceptor) run(ctx context.Context, p *platform) {
 		a.sweepLoop(ctx, p)
 	}()
 	defer func() { <-swept }()
+	// The catalog poller shares the node's context so a stopped node leaves
+	// no polling goroutine behind. It only sends; the read loop below answers
+	// the device's query and the device's catalog Response is dispatched by
+	// handleMessage once it arrives.
+	if p.catalogPoller != nil {
+		p.catalogPoller.start(ctx)
+		defer p.catalogPoller.stop()
+	}
 
 	for {
 		msg, peer, err := p.tr.Receive(ctx)
@@ -507,6 +535,12 @@ func (a *Acceptor) run(ctx context.Context, p *platform) {
 			return
 		}
 		if !msg.IsRequest() {
+			// A platform sends no unprompted SIP requests; any Response that
+			// arrives here is the device's answer to a catalog Query we sent.
+			// Only a 2xx means the device answered the catalog successfully.
+			if msg.StatusCode() >= 200 && msg.StatusCode() < 300 {
+				a.handleCatalogResponse(ctx, p, msg)
+			}
 			continue
 		}
 		// Fault gate (Change 13, design D6): consult the node's armed
@@ -2225,7 +2259,11 @@ func (a *Acceptor) answerCatalog(
 			"node_id", p.id.String(), "error", err.Error())
 		return model.Message{}, false
 	}
-	body, err := a.manscdp.MarshalCatalog(catalog)
+	// task 3: embed per-channel media-source Extension in the catalog.
+	// mediaByDeviceID is nil when there is no registry, keeping the legacy
+	// bytes identical (no Extension element in any Item).
+	mediaByDeviceID := buildCatalogMediaByDeviceID(ctx, a, p.id)
+	body, err := a.manscdp.MarshalCatalogWithMedia(catalog, mediaByDeviceID)
 	if err != nil {
 		a.log.Warn("cannot render a catalog answer",
 			"node_id", p.id.String(), "error", err.Error())
@@ -2275,6 +2313,106 @@ func channelCatalogItems(channels []model.Channel, fallbackParent string) []mode
 		items = append(items, catalogItem)
 	}
 	return items
+}
+
+// buildCatalogMediaByDeviceID returns the per-channel MediaConfig map the
+// device embeds in its catalog answer. The map is keyed by channel id, so
+// downstream devices and own channels are merged into one. A nil map means
+// "no media source configured anywhere"; the codec then omits Extension
+// blocks from every Item, which is the legacy shape.
+//
+// Per-channel configuration wins over the node-level one (see
+// model.MediaConfigForChannel). Zero-valued configurations are skipped: an
+// empty Kind cannot open a source, and the codec treats a zero MediaConfig
+// as "no media" anyway. With no registry the map is nil, preserving the
+// golden bytes of the older device-only fixtures.
+func buildCatalogMediaByDeviceID(ctx context.Context, a *Acceptor, id model.NodeID) map[string]model.MediaConfig {
+	if a.registry == nil {
+		return nil
+	}
+	node, ok := a.registry.Get(ctx, id)
+	if !ok {
+		return nil
+	}
+	profile := node.Profile()
+	var out map[string]model.MediaConfig
+	for _, ch := range profile.Channels() {
+		cfg, has := profile.MediaConfigForChannel(ch.ID())
+		if !has || cfg.Kind == "" {
+			continue
+		}
+		if out == nil {
+			out = make(map[string]model.MediaConfig, 4)
+		}
+		out[ch.ID()] = cfg
+	}
+	return out
+}
+
+// handleCatalogResponse parses a 2xx Response body as a Catalog and imports
+// the per-channel MediaSource Extension the device advertised, so a platform
+// learns a cascade child's real media source without a separate query.
+// The error is non-nil when the body is not a catalog Response at all —
+// this is the normal case for every other SIP Response the transport delivers.
+func (a *Acceptor) handleCatalogResponse(ctx context.Context, p *platform, msg model.Message) {
+	decoded, media, err := a.manscdp.DecodeCatalogResponse(msg.Body())
+	if err != nil {
+		to, _ := msg.Header("To")
+		a.log.Debug("ignoring a response body that is not a catalog",
+			"node_id", p.id.String(), "peer", to.Value())
+		return
+	}
+	if len(media) == 0 {
+		return
+	}
+	a.log.Debug("catalog response received; importing media sources",
+		"node_id", p.id.String(), "device_id", decoded.DeviceID(), "channels", len(media))
+	// The device's id is the node id we polled. Every channel in the response
+	// belongs to it; keying the write by the device id from the body lets a
+	// multi-device aggregation in the same response land on the right profile.
+	a.applyMediaSourcesFromCatalog(ctx, p.id, media)
+}
+
+// applyMediaSourcesFromCatalog writes the per-channel media configuration
+// extracted from a decoded catalog response into the receiving node's
+// profile. It is the platform side of the device→platform propagation. An
+// entry whose DeviceID is empty, fails ParseNodeID, or carries an invalid
+// MediaConfig is logged and skipped — a single bad row must not corrupt
+// the profile or take the rest of the response down.
+//
+// The function is a no-op when media is empty or when a NodeRegistry is not
+// attached; both are legitimate production states (real devices do not
+// advertise media sources, and a test harness that omits the registry
+// should still pass).
+func (a *Acceptor) applyMediaSourcesFromCatalog(ctx context.Context, nodeID model.NodeID, media []port.ChannelMedia) {
+	if a.registry == nil || len(media) == 0 {
+		return
+	}
+	for _, m := range media {
+		deviceID := strings.TrimSpace(m.DeviceID)
+		if deviceID == "" {
+			a.log.Warn("catalog media entry with empty device id; skipping",
+				"node_id", nodeID.String())
+			continue
+		}
+		if _, err := model.ParseNodeID(deviceID); err != nil {
+			a.log.Warn("catalog media entry with invalid device id; skipping",
+				"node_id", nodeID.String(), "device_id", deviceID, "error", err.Error())
+			continue
+		}
+		if err := m.Config.Validate(); err != nil {
+			a.log.Warn("catalog media entry invalid; skipping",
+				"node_id", nodeID.String(), "device_id", deviceID, "error", err.Error())
+			continue
+		}
+		if _, err := a.registry.MutateProfile(ctx, nodeID, func(np model.NodeProfile) (model.NodeProfile, error) {
+			np.SetChannelMediaConfig(deviceID, m.Config.Normalize())
+			return np, nil
+		}); err != nil {
+			a.log.Warn("cannot store catalog media on profile",
+				"node_id", nodeID.String(), "device_id", deviceID, "error", err.Error())
+		}
+	}
 }
 
 // downstreamChannels expands one downstream device into the channels its node

@@ -156,6 +156,14 @@ type NodeRegistrationConfig struct {
 	HeartbeatInterval    time.Duration `mapstructure:"heartbeat_interval"`
 	HeartbeatTimeout     time.Duration `mapstructure:"heartbeat_timeout"`
 	HeartbeatMaxFailures uint32        `mapstructure:"heartbeat_max_failures"`
+
+	// CatalogPollInterval controls how often a platform-large node
+	// actively pulls each downstream device's catalog. The poller
+	// imports the per-channel MediaSource Extension from the response
+	// so that cascading streams can locate the original media. Zero
+	// (the default) disables the pull and the platform relies entirely
+	// on device-driven NOTIFY pushes.
+	CatalogPollInterval time.Duration `mapstructure:"catalog_poll_interval"`
 }
 
 // ValidateNodes checks every `nodes:` entry and returns an error naming the
