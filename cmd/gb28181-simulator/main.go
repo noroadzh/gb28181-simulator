@@ -15,9 +15,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/your-org/gb28181-simulator/internal/adapter/accountsql"
 	"github.com/your-org/gb28181-simulator/internal/adapter/audit"
 	sipauth "github.com/your-org/gb28181-simulator/internal/adapter/auth"
-	"github.com/your-org/gb28181-simulator/internal/adapter/accountsql"
 	"github.com/your-org/gb28181-simulator/internal/adapter/capture"
 	"github.com/your-org/gb28181-simulator/internal/adapter/cascade"
 	"github.com/your-org/gb28181-simulator/internal/adapter/channelsql"
@@ -582,7 +582,7 @@ func run() error {
 				Commit:  commit,
 				BuiltAt: builtAt,
 			}, nodeSvc, scenarioRunner, nodeSvc, accountAdmin, flvServer), nil
-			})
+		})
 
 	cancel, err := c.Build()
 	if err != nil {

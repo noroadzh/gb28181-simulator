@@ -1,0 +1,447 @@
+package httpapi_test
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"sort"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/your-org/gb28181-simulator/internal/app"
+	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/your-org/gb28181-simulator/internal/domain/port"
+	httpapi "github.com/your-org/gb28181-simulator/internal/interface/http"
+	platformconfig "github.com/your-org/gb28181-simulator/internal/platform/config"
+	"github.com/your-org/gb28181-simulator/internal/platform/observability/logging"
+)
+
+// platformLargeNodeID is the dedicated node id used by all
+// platform-large HTTP transport tests in this file.  It's a 20-digit GB/T
+// 20-byte id with the platform-large prefix.
+const platformLargeNodeID = "34020000002000000001"
+
+// channelsForLarge builds a server that carries a platform-large node
+// ready to receive dynamic-channel HTTP requests.
+//
+// We use two separate fakes: the standard fakeNodeView (which already
+// implements every NodeView method, including AddChannel / RemoveChannel)
+// and a small channelTable helper to seed the platform-large node before
+// exercising the HTTP API.
+func channelsForLarge(t *testing.T) (*httptest.Server, httpapi.ChannelView) {
+	t.Helper()
+	view := newFakeNodeView()
+	view.seed(t, platformLargeNodeID, "127.0.0.1:15060", model.StatusOnline)
+	store := newDynamicChannelStore()
+	nodeView := autoIDNodeView{view: view, store: store}
+	channelsView := autoIDChannelView{view: view, store: store}
+	srv := httpapi.NewServer(
+		platformconfig.Config{}, logging.NewHub(4), httpapi.Version{Version: "x"},
+		nodeView, nil, channelsView, nil, nil,
+	)
+	ts := httptest.NewServer(srv.Echo())
+	t.Cleanup(ts.Close)
+	return ts, channelsView
+}
+
+// dynamicChannelStore is a side-table used to verify the HTTP layer's
+// dynamic-channel CRUD end-to-end.  The platform-large node, unlike a
+// device, has no pre-declared channel; we need a place for the HTTP
+// handler to keep channels it receives from the API.
+type dynamicChannelStore struct {
+	mu       sync.Mutex
+	channels map[string]map[string]model.Channel // nodeID → channelID → Channel
+	seq      map[string]int                      // nodeID → next sequence
+}
+
+func newDynamicChannelStore() *dynamicChannelStore {
+	return &dynamicChannelStore{
+		channels: map[string]map[string]model.Channel{},
+		seq:      map[string]int{},
+	}
+}
+
+func (s *dynamicChannelStore) add(nodeID, channelID, name, parentID string, status model.ChannelStatus) (model.Channel, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.channels[nodeID]; !ok {
+		s.channels[nodeID] = map[string]model.Channel{}
+	}
+	if _, exists := s.channels[nodeID][channelID]; exists {
+		return model.Channel{}, errChannelExists
+	}
+	ch, err := model.NewChannel(channelID, name, parentID, status)
+	if err != nil {
+		return model.Channel{}, err
+	}
+	s.channels[nodeID][channelID] = ch
+	return ch, nil
+}
+
+func (s *dynamicChannelStore) addAutoID(nodeID, name, parentID string, status model.ChannelStatus) (model.Channel, error) {
+	s.mu.Lock()
+	s.seq[nodeID]++
+	seq := s.seq[nodeID]
+	s.mu.Unlock()
+	id := nodeID + "_" + itoa(seq)
+	return s.add(nodeID, id, name, parentID, status)
+}
+
+func (s *dynamicChannelStore) remove(nodeID, channelID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.channels[nodeID][channelID]; !ok {
+		return errChannelNotFound
+	}
+	delete(s.channels[nodeID], channelID)
+	return nil
+}
+
+func (s *dynamicChannelStore) list(nodeID string) []model.Channel {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]model.Channel, 0, len(s.channels[nodeID]))
+	for _, ch := range s.channels[nodeID] {
+		out = append(out, ch)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID() < out[j].ID() })
+	return out
+}
+
+var (
+	errChannelExists   = errString("channel already exists")
+	errChannelNotFound = errString("channel not found")
+)
+
+type errString string
+
+func (e errString) Error() string { return string(e) }
+
+// itoa avoids pulling strconv into a test helper.  Sequence numbers are
+// small enough for the simple loop.
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var buf [20]byte
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(buf[i:])
+}
+
+// TestHTTPChannelAdd_PlatformLarge_AutoID verifies spec task 4.1 scenario
+// "id 留空 → 自动生成 ${nodeID}_N" through the real HTTP transport.
+//
+// Implementation note: the real NodeService.AddChannel requires a non-empty
+// id; auto-id generation lives in the HTTP handler (handleChannelAdd). To
+// exercise the handler we use a tiny custom NodeView/ChannelView pair that
+// mimics the auto-id behavior.  This is enough to cover 4.1's HTTP contract.
+func TestHTTPChannelAdd_PlatformLarge_AutoID(t *testing.T) {
+	view := newFakeNodeView()
+	view.seed(t, platformLargeNodeID, "127.0.0.1:15060", model.StatusOnline)
+	store := newDynamicChannelStore()
+
+	srv := httpapi.NewServer(platformconfig.Config{}, logging.NewHub(4), httpapi.Version{Version: "x"},
+		autoIDNodeView{view: view, store: store},
+		nil,
+		autoIDChannelView{view: view, store: store},
+		nil, nil)
+	ts := httptest.NewServer(srv.Echo())
+	defer ts.Close()
+
+	url := ts.URL + "/v1/nodes/" + platformLargeNodeID + "/channels"
+	_, body := postJSONWithBody(t, url, []byte(`{"name":"lobby-cam","status":"ON"}`))
+	var r1 struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(body), &r1); err != nil {
+		t.Fatalf("decode first body: %v", err)
+	}
+	if r1.ID == "" {
+		t.Fatalf("first auto-id is empty (body: %s)", body)
+	}
+	if !hasPrefix(r1.ID, platformLargeNodeID+"_") {
+		t.Fatalf("auto-id = %q, want prefix %q_", r1.ID, platformLargeNodeID)
+	}
+
+	_, body2 := postJSONWithBody(t, url, []byte(`{"name":"entrance-cam","status":"ON"}`))
+	var r2 struct {
+		ID string `json:"id"`
+	}
+	json.Unmarshal([]byte(body2), &r2)
+	if r2.ID == r1.ID {
+		t.Fatalf("second auto-id = %q, must differ from first", r2.ID)
+	}
+	if !hasPrefix(r2.ID, platformLargeNodeID+"_") {
+		t.Fatalf("auto-id = %q, want prefix %q_", r2.ID, platformLargeNodeID)
+	}
+}
+
+func hasPrefix(s, prefix string) bool {
+	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
+}
+
+// --- auto-id views ----------------------------------------------------------
+//
+// These two adapters wrap fakeNodeView and a dynamicChannelStore to mimic
+// what the production code does in handleChannelAdd (auto-id) and
+// handleChannelDelete.  This keeps the test self-contained without wiring
+// up the real *app.NodeService.
+
+type autoIDNodeView struct {
+	view  *fakeNodeView
+	store *dynamicChannelStore
+}
+
+func (a autoIDNodeView) List(ctx context.Context) []model.Node { return a.view.List(ctx) }
+func (a autoIDNodeView) Get(ctx context.Context, id model.NodeID) (model.Node, bool) {
+	return a.view.Get(ctx, id)
+}
+func (a autoIDNodeView) Start(ctx context.Context, id model.NodeID) error {
+	return a.view.Start(ctx, id)
+}
+func (a autoIDNodeView) Stop(ctx context.Context, id model.NodeID) error { return a.view.Stop(ctx, id) }
+func (a autoIDNodeView) Unregister(ctx context.Context, id model.NodeID) error {
+	return a.view.Unregister(ctx, id)
+}
+func (a autoIDNodeView) Devices(ctx context.Context, id model.NodeID) ([]model.DownstreamDevice, error) {
+	return a.view.Devices(ctx, id)
+}
+func (a autoIDNodeView) Device(ctx context.Context, id model.NodeID, deviceID string) (model.DownstreamDevice, error) {
+	return a.view.Device(ctx, id, deviceID)
+}
+func (a autoIDNodeView) TriggerAlarm(ctx context.Context, id model.NodeID, in app.AlarmInput) (model.AlarmSnapshot, error) {
+	return a.view.TriggerAlarm(ctx, id, in)
+}
+func (a autoIDNodeView) SetPosition(ctx context.Context, id model.NodeID, pos model.Position) error {
+	return a.view.SetPosition(ctx, id, pos)
+}
+func (a autoIDNodeView) SetChannelStatus(ctx context.Context, id model.NodeID, channelID string, status model.ChannelStatus) error {
+	return a.view.SetChannelStatus(ctx, id, channelID, status)
+}
+func (a autoIDNodeView) AddChannel(ctx context.Context, id model.NodeID, channelID, name, parentID string, status model.ChannelStatus) (model.Channel, error) {
+	return a.store.add(id.String(), channelID, name, parentID, status)
+}
+func (a autoIDNodeView) RemoveChannel(ctx context.Context, id model.NodeID, channelID string) error {
+	return a.store.remove(id.String(), channelID)
+}
+func (a autoIDNodeView) InstallFault(ctx context.Context, id model.NodeID, p model.FaultProfile) error {
+	return a.view.InstallFault(ctx, id, p)
+}
+func (a autoIDNodeView) GetFault(ctx context.Context, id model.NodeID) (model.FaultProfile, map[model.FaultAction]uint64, bool) {
+	return a.view.GetFault(ctx, id)
+}
+func (a autoIDNodeView) ClearFault(ctx context.Context, id model.NodeID) error {
+	return a.view.ClearFault(ctx, id)
+}
+func (a autoIDNodeView) QueryCapture(ctx context.Context, nodeID model.NodeID, limit int) ([]port.CaptureEvent, error) {
+	return a.view.QueryCapture(ctx, nodeID, limit)
+}
+func (a autoIDNodeView) CapturePCAP(ctx context.Context, nodeID model.NodeID) ([]byte, error) {
+	return a.view.CapturePCAP(ctx, nodeID)
+}
+func (a autoIDNodeView) GetMedia(ctx context.Context, id model.NodeID) (model.MediaConfig, bool, error) {
+	return a.view.GetMedia(ctx, id)
+}
+func (a autoIDNodeView) SetMedia(ctx context.Context, id model.NodeID, cfg model.MediaConfig) error {
+	return a.view.SetMedia(ctx, id, cfg)
+}
+func (a autoIDNodeView) ClearMedia(ctx context.Context, id model.NodeID) error {
+	return a.view.ClearMedia(ctx, id)
+}
+
+// autoIDChannelView delegates to the same store and the existing fake.
+type autoIDChannelView struct {
+	view  *fakeNodeView
+	store *dynamicChannelStore
+}
+
+func (a autoIDChannelView) ListChannels(ctx context.Context, id model.NodeID) []model.Channel {
+	return a.store.list(id.String())
+}
+func (a autoIDChannelView) Channel(_ context.Context, id model.NodeID, channelID string) (model.Channel, bool) {
+	a.store.mu.Lock()
+	defer a.store.mu.Unlock()
+	if m, ok := a.store.channels[id.String()]; ok {
+		ch, ok := m[channelID]
+		return ch, ok
+	}
+	return model.Channel{}, false
+}
+func (a autoIDChannelView) GetChannelMedia(_ context.Context, _ model.NodeID, _ string) (model.MediaConfig, bool, error) {
+	return model.MediaConfig{}, false, nil
+}
+func (a autoIDChannelView) SetChannelMedia(_ context.Context, _ model.NodeID, _ string, _ model.MediaConfig) error {
+	return nil
+}
+func (a autoIDChannelView) ClearChannelMedia(_ context.Context, _ model.NodeID, _ string) error {
+	return nil
+}
+func (a autoIDChannelView) PTZ(_ context.Context, _ model.NodeID, _ string, _ string, _, _ int) error {
+	return nil
+}
+
+func (a autoIDChannelView) Snapshot(_ context.Context, _ model.NodeID, _ string) ([]byte, string, error) {
+	return nil, "", nil
+}
+
+func (a autoIDChannelView) Records(_ context.Context, _ model.NodeID, _ string, _, _ time.Time) ([]model.RecordInfoItem, error) {
+	return nil, nil
+}
+
+func (a autoIDChannelView) Playback(_ context.Context, _ model.NodeID, _, _ string, _ int) error {
+	return nil
+}
+
+func (a autoIDChannelView) TalkStart(_ context.Context, _ model.NodeID, _ string) (string, string, error) {
+	return "", "", fmt.Errorf("unsupported")
+}
+
+func (a autoIDChannelView) TalkStop(_ context.Context, _ model.NodeID, _, _ string) error {
+	return nil
+}
+
+// TestHTTPChannelAdd_PlatformLarge_ExplicitID covers 4.1 scenario "id 显式
+// 给出 → 201".  Uses the app-layer test for behavior; here we only assert
+// the HTTP path returns 201.
+func TestHTTPChannelAdd_PlatformLarge_ExplicitID(t *testing.T) {
+	ts, _ := channelsForLarge(t)
+	url := ts.URL + "/v1/nodes/" + platformLargeNodeID + "/channels"
+	status, body := postJSONWithBody(t, url, []byte(`{"id":"34020000002000000001","name":"entrance-main","status":"ON"}`))
+	if status != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 (body: %s)", status, body)
+	}
+}
+
+// TestHTTPChannelAdd_PlatformLarge_DuplicateID covers 4.1 scenario "重复
+// id → 4xx".  The app layer returns an error which the HTTP handler maps
+// to 400 (per existing device behavior).
+func TestHTTPChannelAdd_PlatformLarge_DuplicateID(t *testing.T) {
+	ts, _ := channelsForLarge(t)
+	url := ts.URL + "/v1/nodes/" + platformLargeNodeID + "/channels"
+	body := []byte(`{"id":"34020000002000000002","name":"entrance-dup","status":"ON"}`)
+	status, _ := postJSONWithBody(t, url, body)
+	if status != http.StatusCreated {
+		t.Fatalf("first POST status = %d, want 201", status)
+	}
+	status2, body2 := postJSONWithBody(t, url, body)
+	if status2 < 400 {
+		t.Fatalf("duplicate POST status = %d, want 4xx (body: %s)", status2, body2)
+	}
+}
+
+// TestHTTPChannelAdd_20DigitID_OK covers spec task 4.1 scenario
+// "合法 20 位数字 ID → 201".
+func TestHTTPChannelAdd_20DigitID_OK(t *testing.T) {
+	ts, _ := channelsForLarge(t)
+	url := ts.URL + "/v1/nodes/" + platformLargeNodeID + "/channels"
+	status, body := postJSONWithBody(t, url, []byte(`{"id":"34020000002000000003","name":"gate-cam","status":"ON"}`))
+	if status != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 (body: %s)", status, body)
+	}
+}
+
+// TestHTTPChannelAdd_NonNumericID_BadRequest covers spec task 4.1 scenario
+// "非数字 ID → 400".
+func TestHTTPChannelAdd_NonNumericID_BadRequest(t *testing.T) {
+	ts, _ := channelsForLarge(t)
+	url := ts.URL + "/v1/nodes/" + platformLargeNodeID + "/channels"
+	status, body := postJSONWithBody(t, url, []byte(`{"id":"entrance-cam","name":"gate-cam","status":"ON"}`))
+	if status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (body: %s)", status, body)
+	}
+}
+
+// TestHTTPChannelAdd_19DigitID_BadRequest covers spec task 4.1 scenario
+// "19 位 ID → 400".
+func TestHTTPChannelAdd_19DigitID_BadRequest(t *testing.T) {
+	ts, _ := channelsForLarge(t)
+	url := ts.URL + "/v1/nodes/" + platformLargeNodeID + "/channels"
+	status, body := postJSONWithBody(t, url, []byte(`{"id":"3402000000200000001","name":"short-cam","status":"ON"}`))
+	if status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (body: %s)", status, body)
+	}
+}
+
+// TestHTTPChannelRemove_PlatformLarge covers 4.1 scenario "DELETE 成功 → 204".
+func TestHTTPChannelRemove_PlatformLarge(t *testing.T) {
+	view := newFakeNodeView()
+	view.seed(t, platformLargeNodeID, "127.0.0.1:15060", model.StatusOnline)
+	store := newDynamicChannelStore()
+	// seed channel via the store directly
+	if _, err := store.add(platformLargeNodeID, "to-remove", "to-remove", "", model.ChannelStatusOnline); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	nodeView := autoIDNodeView{view: view, store: store}
+	channelsView := autoIDChannelView{view: view, store: store}
+	srv := httpapi.NewServer(platformconfig.Config{}, logging.NewHub(4), httpapi.Version{Version: "x"},
+		nodeView, nil, channelsView, nil, nil)
+	ts := httptest.NewServer(srv.Echo())
+	defer ts.Close()
+
+	req := httptest.NewRequest(http.MethodDelete, ts.URL+"/v1/nodes/"+platformLargeNodeID+"/channels/to-remove", nil)
+	// httptest.NewRequest populates RequestURI; net/http forbids setting it on
+	// client requests, so clear it before handing the request to Client.Do.
+	req.RequestURI = ""
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatalf("DELETE: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("DELETE status = %d, want 204", resp.StatusCode)
+	}
+}
+
+// TestHTTPChannelList_PlatformLarge covers the list endpoint returning 200
+// + JSON for a platform-large node with dynamic channels seeded.
+func TestHTTPChannelList_PlatformLarge(t *testing.T) {
+	view := newFakeNodeView()
+	view.seed(t, platformLargeNodeID, "127.0.0.1:15060", model.StatusOnline)
+	store := newDynamicChannelStore()
+	// seed channels via the store directly (avoids needing AddChannel on fakeNodeView)
+	for _, id := range []string{"ch-1", "ch-2"} {
+		if _, err := store.add(platformLargeNodeID, id, id, "", model.ChannelStatusOnline); err != nil {
+			t.Fatalf("seed channel %s: %v", id, err)
+		}
+	}
+	nodeView := autoIDNodeView{view: view, store: store}
+	channelsView := autoIDChannelView{view: view, store: store}
+	srv := httpapi.NewServer(platformconfig.Config{}, logging.NewHub(4), httpapi.Version{Version: "x"},
+		nodeView, nil, channelsView, nil, nil)
+	ts := httptest.NewServer(srv.Echo())
+	defer ts.Close()
+
+	url := ts.URL + "/v1/nodes/" + platformLargeNodeID + "/channels"
+	status, body := getJSON(t, url)
+	if status != http.StatusOK {
+		t.Fatalf("GET status = %d, want 200 (body: %s)", status, body)
+	}
+	var channels []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal([]byte(body), &channels); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(channels) != 2 {
+		t.Fatalf("channels = %d, want 2 (body: %s)", len(channels), body)
+	}
+}
+
+// mustParseNodeID wraps model.ParseNodeID for test brevity.
+func mustParseNodeID(t *testing.T, raw string) model.NodeID {
+	t.Helper()
+	id, err := model.ParseNodeID(raw)
+	if err != nil {
+		t.Fatalf("ParseNodeID(%q): %v", raw, err)
+	}
+	return id
+}

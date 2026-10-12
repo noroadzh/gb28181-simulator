@@ -131,7 +131,7 @@ func (p RTPPacket) Validate() error {
 // The returned slice is owned by the caller.
 func (p RTPPacket) Bytes() []byte {
 	b := make([]byte, 12+len(p.Payload))
-	b[0] = 0x80                              // V=2, P=0, X=0, CC=0
+	b[0] = 0x80 // V=2, P=0, X=0, CC=0
 	b[1] = (boolToByte(p.Marker) << 7) | byte(p.PayloadType)
 	binary.BigEndian.PutUint16(b[2:4], uint16(p.Sequence))
 	binary.BigEndian.PutUint32(b[4:8], p.Timestamp)
@@ -156,12 +156,12 @@ const (
 // the caller before Open is called; this struct only carries them.
 type MediaConfig struct {
 	Kind  MediaSourceKind `json:"kind"`
-	Path  string          `json:"path"`   // file path, RTSP URL or HLS m3u8 URL
-	Loop  bool            `json:"loop"`   // for kind=file: restart from beginning when EOF is reached
-	SSRC  uint32          `json:"ssrc"`   // RTP SSRC used by the RTPizer, 0 means auto-generate
-	MTU   int             `json:"mtu"`    // max bytes per RTP payload; defaults to 1400
-	FPS   int             `json:"fps"`    // synthetic source frame rate; defaults to 25
-	Clock uint64          `json:"clock"`  // RTP clock rate (Hz); defaults to 90000
+	Path  string          `json:"path"`  // file path, RTSP URL or HLS m3u8 URL
+	Loop  bool            `json:"loop"`  // for kind=file: restart from beginning when EOF is reached
+	SSRC  uint32          `json:"ssrc"`  // RTP SSRC used by the RTPizer, 0 means auto-generate
+	MTU   int             `json:"mtu"`   // max bytes per RTP payload; defaults to 1400
+	FPS   int             `json:"fps"`   // synthetic source frame rate; defaults to 25
+	Clock uint64          `json:"clock"` // RTP clock rate (Hz); defaults to 90000
 }
 
 // Validate checks that a MediaConfig has the minimum fields for its kind.

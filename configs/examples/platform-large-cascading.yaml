@@ -1,0 +1,72 @@
+# platform-large 双半场景样例（Change: platform-large-upstream-and-channels）
+#
+# 启动：
+#   go run ./cmd/simulator -config configs/examples/platform-large-cascading.yaml
+#
+# 预期：
+#   - platform-large 节点同时具备 platform:（接受下级注册、应答目录）和
+#     registration:（向上级平台发起注册）两半能力；
+#   - 因为 `upstream-platform-large:5060` 不会真的监听，节点会进入 fault 状态，
+#     但 HTTP 管理端口与本地 serve 半都仍可用，便于通过 API 验证通道增删。
+#
+# 通道通过 HTTP API 注入（启动后执行）：
+#   curl -X POST localhost:18080/v1/nodes/34020000012000000002/channels \
+#     -H 'Content-Type: application/json' \
+#     -d '{"id":"34020000001320000099","name":"lobby","status":"ON"}'
+#   curl -X POST localhost:18080/v1/nodes/34020000012000000002/channels \
+#     -H 'Content-Type: application/json' \
+#     -d '{"id":"34020000001320000100","name":"entrance","status":"ON"}'
+#   curl localhost:18080/v1/nodes/34020000012000000002/channels
+#   curl -X DELETE localhost:18080/v1/nodes/34020000012000000002/channels/34020000001320000099
+
+http:
+  host: 127.0.0.1
+  port: 18080
+
+log:
+  level: info
+  redact_keys:
+    - password
+    - authorization
+
+storage:
+  path: ""
+
+capture:
+  enabled: true
+  capacity: 2048
+
+tracing:
+  enabled: true
+  sample_ratio: 1.0
+  otlp_endpoint: ""
+  service_name: ""
+
+# 单节点 inventory：一条 platform-large 同时声明 platform + registration，
+# 体现"双半"语义。
+nodes:
+  - id: "34020000012000000002"
+    kind: platform-large
+    domain: "3402000000"
+    addr: "127.0.0.1:15070"
+    vendor: acme
+    # 下半：作为 UAS 接受下级注册
+    platform:
+      realm: "3402000000"
+      accounts:
+        - username: "34020000011310000010"
+          password: "change-me"
+      min_expires: 60
+      default_expires: 3600
+      max_expires: 86400
+    # 上半：作为 UAC 主动注册到不存在的上级，触发 fault 用于演示
+    registration:
+      server: "127.0.0.1:5060"               # 不存在的上级，节点会进入 fault
+      server_id: "34020000002000000099"
+      password: "change-me"
+      expires: 3600
+      transport: udp
+      timeout: 5s
+      heartbeat_interval: 60s
+      heartbeat_timeout: 5s
+      heartbeat_max_failures: 3

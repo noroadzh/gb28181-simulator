@@ -99,6 +99,7 @@ func platformService(t *testing.T, ctx context.Context, accounts *credstore.Stor
 	if err != nil {
 		t.Fatalf("NewAcceptor: %v", err)
 	}
+	acceptor = acceptor.WithNodeRegistry(registry)
 	if _, err := svc.WithAcceptor(acceptor); err != nil {
 		t.Fatalf("WithAcceptor: %v", err)
 	}

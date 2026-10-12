@@ -23,18 +23,18 @@ const (
 
 // FLV AVC/HEVC packet types.
 const (
-	flvAVCSequenceHeader = 0 // AVC sequence header (SPS/PPS)
-	flvAVCNALU           = 1 // AVC NALU
-	flvAVCEOS            = 2 // AVC end of sequence
-	flvHEVCSequenceHeader = 0
+	flvAVCSequenceHeader       = 0 // AVC sequence header (SPS/PPS)
+	flvAVCNALU                 = 1 // AVC NALU
+	flvAVCEOS                  = 2 // AVC end of sequence
+	flvHEVCSequenceHeader      = 0
 	flvHEVCDecoderConfigRecord = 0
-	flvHEVCNALU           = 1 // HEVC NALU
-	flvHEVCEOS            = 2 // HEVC end of sequence
+	flvHEVCNALU                = 1 // HEVC NALU
+	flvHEVCEOS                 = 2 // HEVC end of sequence
 )
 
 // FLV codec IDs (lower 4 bits of frame-type byte).
 const (
-	flvCodecAVC = 7
+	flvCodecAVC  = 7
 	flvCodecHEVC = 12 // HEVC in FLV
 )
 
@@ -44,9 +44,9 @@ type VideoCodec int
 
 const (
 	CodecUnknown VideoCodec = iota
-	CodecAVC               // H.264
-	CodecHEVC              // H.265 / HEVC
-	CodecMPEG4             // MPEG-4 Part 2：仅用于识别并拒绝 FLV 预览（FLV 无此 CodecID）
+	CodecAVC                // H.264
+	CodecHEVC               // H.265 / HEVC
+	CodecMPEG4              // MPEG-4 Part 2：仅用于识别并拒绝 FLV 预览（FLV 无此 CodecID）
 )
 
 // String returns a stable lowercase name for log/metric keys.
@@ -113,7 +113,7 @@ func NewFLVMuxer(channelKey string) *FLVMuxer {
 // This is prepended to every HTTP-FLV stream.
 var FLVHeader = []byte{
 	// FLV header (9 bytes)
-	0x46, 0x4C, 0x56,       // "FLV"
+	0x46, 0x4C, 0x56, // "FLV"
 	0x01,                   // version 1
 	0x01,                   // flags: 0x01 = video present (no audio in basic streaming)
 	0x00, 0x00, 0x00, 0x09, // DataOffset = 9 (4 bytes, big-endian)
@@ -153,7 +153,7 @@ func ParsePS(psPayload []byte) (nalus [][]byte, timestampMS uint32, ok bool) {
 		if psPayload[pi] == 0x00 && psPayload[pi+1] == 0x00 &&
 			psPayload[pi+2] == 0x01 {
 			b3 := psPayload[pi+3]
-			if (b3 & 0xF0) == 0xE0 || (b3 & 0xE0) == 0xC0 {
+			if (b3&0xF0) == 0xE0 || (b3&0xE0) == 0xC0 {
 				pi += 4
 				break
 			}

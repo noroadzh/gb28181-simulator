@@ -14,10 +14,10 @@ import (
 func TestSamePeer(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name  string
-		peer  string
+		name   string
+		peer   string
 		server string
-		want  bool
+		want   bool
 	}{
 		{"IP-IP equal", "127.0.0.1:5060", "127.0.0.1:5060", true},
 		{"IP-IP different host", "192.168.1.2:5060", "127.0.0.1:5060", false},

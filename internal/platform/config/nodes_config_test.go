@@ -139,7 +139,7 @@ nodes:
 `
 			}
 			return ``
-		}() + `      mtu: 1400
+		}()+`      mtu: 1400
       ssrc: 12345
       fps: 25
       clock: 90000

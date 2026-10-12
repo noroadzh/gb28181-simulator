@@ -2201,6 +2201,24 @@ func (a *Acceptor) answerCatalog(
 			items = append(items, channelCatalogItems(node.Profile().Channels(), "")...)
 		}
 	}
+	// spec platform-large-node-catalog-aggregate: DeviceList 先按 ParentID 升序、再按 DeviceID 升序。
+	slices.SortFunc(items, func(a, b model.CatalogItem) int {
+		ap, bp := a.ParentID(), b.ParentID()
+		if ap != bp {
+			if ap < bp {
+				return -1
+			}
+			return 1
+		}
+		ad, bd := a.DeviceID(), b.DeviceID()
+		if ad < bd {
+			return -1
+		}
+		if ad > bd {
+			return 1
+		}
+		return 0
+	})
 	catalog, err := model.NewCatalog(p.id.String(), notify.SN(), items)
 	if err != nil {
 		a.log.Warn("cannot build a catalog answer",

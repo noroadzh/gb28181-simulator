@@ -167,6 +167,23 @@ func generateChannelID(nodeID string, existing []model.Channel) string {
 	return fmt.Sprintf("%s_%d", nodeID, maxSeq+1)
 }
 
+// isValidChannelID reports whether raw looks like a GB/T 28181 20-digit
+// national-standard code. Per the channel-http-api spec, an explicit
+// channel_id in POST /v1/nodes/:id/channels must match this format; the
+// auto-id path bypasses this check (its synthetic ${nodeID}_${seq} is not
+// a real GB code).
+func isValidChannelID(raw string) bool {
+	if len(raw) != 20 {
+		return false
+	}
+	for _, r := range raw {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // handleChannelAdd creates a new dynamic channel on a device node.
 // Path: POST /v1/nodes/:id/channels
 func (s *Server) handleChannelAdd(c echo.Context) error {
@@ -189,6 +206,12 @@ func (s *Server) handleChannelAdd(c echo.Context) error {
 	req.ParentID = strings.TrimSpace(req.ParentID)
 	if req.Name == "" {
 		return c.JSON(http.StatusBadRequest, errorBody{Error: "name is required"})
+	}
+	// Explicit channel_id MUST be a 20-digit national-standard code; auto-id
+	// path is exempt because the handler-internal format is ${nodeID}_${seq}
+	// and does not pretend to be a real GB channel id.
+	if req.ID != "" && !isValidChannelID(req.ID) {
+		return c.JSON(http.StatusBadRequest, errorBody{Error: "channel_id must be a 20-digit number"})
 	}
 	// Auto-generate channel ID when omitted: ${nodeID}_${nextSeq}. The
 	// mutex only covers the empty-ID path so normal explicit-ID adds are

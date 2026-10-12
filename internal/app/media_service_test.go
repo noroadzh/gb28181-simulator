@@ -67,9 +67,9 @@ type stubPSPacketizer = stubPS
 // reports io.EOF on Read. Close() flips an atomic counter so tests can
 // verify cleanup reached the source.
 type stubSource struct {
-	payload  []byte
-	cfg      model.MediaConfig
-	closed   atomic.Int32
+	payload []byte
+	cfg     model.MediaConfig
+	closed  atomic.Int32
 }
 
 func (s *stubSource) Open(ctx context.Context) (io.ReadCloser, error) {

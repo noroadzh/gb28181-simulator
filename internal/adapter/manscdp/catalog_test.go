@@ -71,6 +71,99 @@ func TestMarshalCatalog_Golden(t *testing.T) {
 	}
 }
 
+// TestMarshalCatalog_Golden covers catalog serialization with channels, verifying
+// the wire format does not change unexpectedly.
+func TestMarshalCatalog_Golden_Channels(t *testing.T) {
+	cases := []struct {
+		name     string
+		golden   string
+		channels []string
+		sn       uint32
+		platform string
+	}{
+		{"channels only, empty device table", "catalog_channels_only.xml",
+			[]string{"000000000011310000011", "000000000011310000012"}, 11, "34020000002000000001"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			var items []model.CatalogItem
+			for _, id := range tc.channels {
+				ch, err := model.NewChannel(id, id, "", model.ChannelStatusOnline)
+				if err != nil {
+					t.Fatalf("NewChannel: %v", err)
+				}
+				it, err := model.NewCatalogItem(model.CatalogItemParams{DeviceID: ch.ID(), Name: ch.Name()})
+				if err != nil {
+					t.Fatalf("NewCatalogItem: %v", err)
+				}
+				items = append(items, it)
+			}
+			catalog, err := model.NewCatalog(tc.platform, tc.sn, items)
+			if err != nil {
+				t.Fatalf("NewCatalog: %v", err)
+			}
+			got, err := NewMANSCDPCodec().MarshalCatalog(catalog)
+			if err != nil {
+				t.Fatalf("MarshalCatalog: %v", err)
+			}
+			want, err := os.ReadFile(filepath.Join("testdata", tc.golden))
+			if err != nil {
+				t.Fatalf("read golden: %v", err)
+			}
+			if got != string(want) {
+				t.Errorf("catalog bytes changed.\n--- got ---\n%s\n--- want (%s) ---\n%s",
+					got, tc.golden, want)
+			}
+		})
+	}
+}
+
+// TestMarshalCatalog_Golden_DevicesAndChannels covers the wire format when a
+// catalog contains both online downstream devices and node-level channels.
+// This is the mixed case described in task 3.3: items are passed in
+// ascending device-id order (downstream devices first, then channels).
+func TestMarshalCatalog_Golden_DevicesAndChannels(t *testing.T) {
+	devices := []model.DownstreamDevice{
+		newDeviceForCatalog(t, "34020000011310000001"),
+	}
+	items := make([]model.CatalogItem, 0, 1+2)
+	for _, d := range devices {
+		it, err := model.NewCatalogItemFromDevice(d)
+		if err != nil {
+			t.Fatalf("NewCatalogItemFromDevice: %v", err)
+		}
+		items = append(items, it)
+	}
+	for _, id := range []string{"000000000011310000011", "000000000011310000012"} {
+		ch, err := model.NewChannel(id, id, "", model.ChannelStatusOnline)
+		if err != nil {
+			t.Fatalf("NewChannel: %v", err)
+		}
+		it, err := model.NewCatalogItem(model.CatalogItemParams{DeviceID: ch.ID(), Name: ch.Name()})
+		if err != nil {
+			t.Fatalf("NewCatalogItem: %v", err)
+		}
+		items = append(items, it)
+	}
+	catalog, err := model.NewCatalog("34020000002000000001", 12, items)
+	if err != nil {
+		t.Fatalf("NewCatalog: %v", err)
+	}
+	got, err := NewMANSCDPCodec().MarshalCatalog(catalog)
+	if err != nil {
+		t.Fatalf("MarshalCatalog: %v", err)
+	}
+	want, err := os.ReadFile(filepath.Join("testdata", "catalog_devices_and_channels.xml"))
+	if err != nil {
+		t.Fatalf("read golden: %v", err)
+	}
+	if got != string(want) {
+		t.Errorf("catalog bytes changed.\n--- got ---\n%s\n--- want ---\n%s",
+			got, want)
+	}
+}
+
 // Whatever the codec writes, an upstream reads back by decoding it; the
 // answer must survive its own round trip.
 func TestMarshalCatalog_RoundTrip(t *testing.T) {

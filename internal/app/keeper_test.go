@@ -13,6 +13,8 @@ import (
 	"github.com/your-org/gb28181-simulator/internal/domain/port"
 )
 
+const testPlatformLarge = "34020000002000000001"
+
 // syncClock is a thread-safe clock: the keeper reads it from its own
 // goroutine while the test advances it.
 type syncClock struct {

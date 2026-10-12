@@ -123,7 +123,13 @@ npm ci && npm run build
 
 **代码位置**：`web/src/views/NodesView.vue`
 
-**功能说明**：平台系统节点概览展示所有平台节点卡片，每个卡片显示节点 ID、状态标签（`online` 绿色 / `fault` 红色 / 其他灰色）、节点类型、监听地址、故障计数。平台节点无通道和媒体源概念，因此不显示相关按钮。
+**功能说明**：平台系统节点概览展示所有平台节点卡片，每个卡片显示节点 ID、状态标签（`online` 绿色 / `fault` 红色 / 其他灰色）、节点类型、监听地址、故障计数。
+
+> **更新（platform-large-upstream-and-channels change）**：platform-large 节点现已支持以下新能力：
+> - **HTTP 通道 API**：通过 `POST /v1/nodes/:id/channels` 增通道、`DELETE` 删通道、`GET` 查询通道；通道即时反映到 Catalog 响应与 Web UI 通道面板。
+> - **反向注册半**（双半）：platform-large 声明 `registration:` 时，按"先 serve / 后注册上级"顺序推进；任一半失败节点进入 fault。
+> platform-small 节点的 HTTP 通道 API 行为与 platform-large 一致（自 `platform-small-cascading-identity` change 起已支持）。
+> 媒体源（合成图/RTSP/HLS）仅 device 节点可用，platform 节点不支持。
 
 <div style="max-width:900px">
 
@@ -163,7 +169,7 @@ npm ci && npm run build
 
 ### 3.2 设备系统 {#32-设备系统-nodesidchannels}
 
-**适用节点类型**：device
+**适用节点类型**：device / platform-large / platform-small
 
 **代码位置**：`web/src/views/NodesView.vue`
 
@@ -206,7 +212,7 @@ npm ci && npm run build
 
 ## 4. 通道列表
 
-**适用节点类型**：device（平台系统无此功能）
+**适用节点类型**：device / platform-large / platform-small
 
 **代码位置**：`web/src/views/ChannelListView.vue`
 

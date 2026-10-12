@@ -30,8 +30,6 @@ func statusOf(t *testing.T, cat *fakeCatalogue, id model.NodeID) model.Status {
 	return node.Status()
 }
 
-const testPlatformLarge = "34020000002000000001"
-
 // registrationFixture wires a NodeService whose node carries a
 // registration and whose lifecycle hands out tr as the node's listener.
 func registrationFixture(
@@ -161,37 +159,6 @@ func TestNodeService_StartRegistrationFailureFaults(t *testing.T) {
 	}
 	if lc.lastFault == nil {
 		t.Error("lifecycle.Fail received no reason")
-	}
-}
-
-// Only device identities register; a platform carrying the same block must
-// not start sending REGISTERs.
-func TestNodeService_StartNonDeviceDoesNotRegister(t *testing.T) {
-	t.Parallel()
-	tr := &scriptedTransport{}
-	reg := testRegistration(t, 3600, time.Second)
-	svc, cat, _ := registrationFixture(t, testPlatformLarge, tr)
-	r := newTestRegistrar(t, &stubAuthorizer{}, &fakeClock{now: time.Now()})
-	if _, err := svc.WithRegistrar(r); err != nil {
-		t.Fatalf("WithRegistrar: %v", err)
-	}
-
-	id := mustParse(t, testPlatformLarge)
-	profile, err := testProfile(t, testPlatformLarge, "127.0.0.1:15061").WithRegistration(reg)
-	if err != nil {
-		t.Fatalf("WithRegistration: %v", err)
-	}
-	if _, err := svc.Create(context.Background(), profile); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	if err := svc.Start(context.Background(), id); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	if len(tr.messages()) != 0 {
-		t.Errorf("a platform node sent %d messages, want 0", len(tr.messages()))
-	}
-	if got := statusOf(t, cat, id); got != model.StatusRegistering {
-		t.Errorf("status = %s, want registering", got)
 	}
 }
 

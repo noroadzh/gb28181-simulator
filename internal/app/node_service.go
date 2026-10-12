@@ -322,8 +322,16 @@ func (s *NodeService) Start(ctx context.Context, id model.NodeID) error {
 		// platform kinds do.
 		return s.advanceOnline(ctx, id)
 	case model.NodeKindPlatformLarge:
-		// A platform-large does not register with anyone: it accepts
-		// registrations instead.
+		// A platform-large accepts registrations, which is its own way of
+		// coming online. Declaring an `registration:` makes it also a UAC
+		// to the upstream it points at — the cascade link in the middle
+		// becomes possible for any platform kind, not just platform-small.
+		// The two halves run on the same listener and the same state
+		// machine: a single shared helper covers both, so a failed
+		// upstream half unwinds the serving half here too.
+		if wants {
+			return s.startPlatformSmall(ctx, id, node, reg, wants, s.lifecycle.Transport(id))
+		}
 		return s.serve(ctx, id, node, s.lifecycle.Transport(id))
 	case model.NodeKindPlatformSmall:
 		return s.startPlatformSmall(ctx, id, node, reg, wants, s.lifecycle.Transport(id))
@@ -361,9 +369,9 @@ func (s *NodeService) startPlatformSmall(
 	}
 	split := s.splits.forNode(id, tr)
 	if err := s.serve(ctx, id, node, split.Serving()); err != nil {
-		s.log.Error("platform-small cannot serve its downstreams",
+		s.log.Error("platform node cannot serve its downstreams",
 			"node_id", id.String(), "error", err.Error())
-		return fmt.Errorf("app: platform-small node %s, serving half: %w", id, err)
+		return fmt.Errorf("app: platform node %s, serving half: %w", id, err)
 	}
 	if !wants {
 		// No upstream declared: the node is a platform to its own
@@ -372,14 +380,14 @@ func (s *NodeService) startPlatformSmall(
 		return nil
 	}
 	if err := s.register(ctx, id, node, reg, split.Upstream()); err != nil {
-		s.log.Error("platform-small cannot register with its upstream, unwinding the serving half",
+		s.log.Error("platform node cannot register with its upstream, unwinding the serving half",
 			"node_id", id.String(), "error", err.Error())
 		// register faults the node, which ends the serving too, but
 		// the serving half owns a goroutine and a device table of its
 		// own: end it here as well, so the reason a faulted node is
 		// not serving does not depend on how fault unwinds.
 		s.stopServing(id)
-		return fmt.Errorf("app: platform-small node %s, upstream half: %w", id, err)
+		return fmt.Errorf("app: platform node %s, upstream half: %w", id, err)
 	}
 	return nil
 }
@@ -573,7 +581,12 @@ func (s *NodeService) Stop(ctx context.Context, id model.NodeID) error {
 // unregisterUpstream sends the upstream platform a REGISTER with
 // `Expires: 0` when the node has an upstream to say goodbye to, and does
 // nothing otherwise: a device is unregistered through Unregister, which
-// reports failure to its caller, and a platform-large has no upstream.
+// reports failure to its caller.
+//
+// The check is `wants`, not the node kind. A platform-large that declares
+// an upstream at start time walks the same path a platform-small does on
+// the way down — otherwise its goodbye to the upstream is silent and the
+// platform above keeps the registration alive until its own lifetime lapses.
 //
 // Nothing here can fail the stop. The node is going down either way; what
 // is left behind is a platform that still thinks the node is registered
@@ -581,9 +594,6 @@ func (s *NodeService) Stop(ctx context.Context, id model.NodeID) error {
 func (s *NodeService) unregisterUpstream(ctx context.Context, id model.NodeID) {
 	node, ok := s.registry.Get(ctx, id)
 	if !ok {
-		return
-	}
-	if node.ID().Kind() != model.NodeKindPlatformSmall {
 		return
 	}
 	reg, wants := node.Registration()
@@ -604,7 +614,7 @@ func (s *NodeService) unregisterUpstream(ctx context.Context, id model.NodeID) {
 		return
 	}
 	if _, err := s.registrar.Unregister(ctx, tr, node, reg); err != nil {
-		s.log.Warn("platform-small stopped without saying goodbye to its upstream",
+		s.log.Warn("platform node stopped without saying goodbye to its upstream",
 			"node_id", id.String(), "error", err.Error())
 	}
 }

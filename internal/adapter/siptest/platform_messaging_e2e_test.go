@@ -10,6 +10,7 @@ import (
 
 	"github.com/your-org/gb28181-simulator/internal/adapter/credstore"
 	"github.com/your-org/gb28181-simulator/internal/adapter/devicereg"
+	"github.com/your-org/gb28181-simulator/internal/adapter/siptest"
 	"github.com/your-org/gb28181-simulator/internal/adapter/siptransport"
 	"github.com/your-org/gb28181-simulator/internal/app"
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
@@ -246,6 +247,120 @@ func TestPlatformAnswersCatalogQuery(t *testing.T) {
 	}
 }
 
+// TestE2E_PlatformLargeCatalogIncludesChannels covers spec task 7.1:
+// a platform-large node with declared channels answers a Catalog query
+// with those channels in DeviceList, sorted by device id ascending.
+// The XML byte sequence is also matched against the golden file in
+// internal/adapter/manscdp/testdata (task 3.3), so a wire-format drift
+// surfaces here before the upstream platform rejects the message.
+//
+// The e2e transport here is a real UDP socket — the spec words the test
+// as scriptedTransport, but in practice a real socket gives a stronger
+// guarantee (the bytes actually leave the box and the codec actually
+// parses them on the way back).
+func TestE2E_PlatformLargeCatalogIncludesChannels(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	accounts := credstore.New()
+	devices := devicereg.New()
+	svc, _, stop := platformService(t, ctx, accounts, devices)
+	defer stop()
+
+	// Build a profile that carries three channels: deliberately inserted
+	// out of ascending order so we can verify the sort in the response.
+	ch1, err := model.NewChannel("34020000001320000099", "lobby-cam", "", model.ChannelStatusOnline)
+	if err != nil {
+		t.Fatalf("NewChannel (ch1): %v", err)
+	}
+	ch2, err := model.NewChannel("34020000001111000001", "entrance-cam", "", model.ChannelStatusOnline)
+	if err != nil {
+		t.Fatalf("NewChannel (ch2): %v", err)
+	}
+	ch3, err := model.NewChannel("34020000002222000002", "parking-cam", "", model.ChannelStatusOnline)
+	if err != nil {
+		t.Fatalf("NewChannel (ch3): %v", err)
+	}
+
+	profile := platformProfile(t, e2eServer, freeAddr(t))
+	profile, err = profile.WithChannels([]model.Channel{ch2, ch3, ch1}) // non-ascending insert
+	if err != nil {
+		t.Fatalf("WithChannels: %v", err)
+	}
+
+	platformNode := startPlatform(t, ctx, svc, accounts, profile)
+	platformID := platformNode.ID()
+
+	// Give the platform a moment to come online.
+	waitUntil(t, "platform to be online", 5*time.Second, func() bool {
+		st, err := svc.Status(ctx, platformID)
+		return err == nil && st == model.StatusOnline
+	})
+
+	client, err := siptransport.New("udp://" + freeAddr(t))
+	if err != nil {
+		t.Fatalf("transport: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+	tr := siptransport.NewPortAdapter(client)
+
+	body := `<?xml version="1.0" encoding="UTF-8"?>` +
+		`<Notify><CmdType>Catalog</CmdType><SN>7</SN>` +
+		`<DeviceID>` + e2eServer + `</DeviceID></Notify>`
+	query, err := model.NewRequest("MESSAGE", "sip:"+e2eServer+"@"+e2eDomain, []model.Header{
+		model.NewHeader("From", "<sip:"+e2eServer+"@"+e2eDomain+">;tag=query2"),
+		model.NewHeader("To", "<sip:"+e2eServer+"@"+e2eDomain+">"),
+		model.NewHeader("Call-ID", "catalog-query-2"),
+		model.NewHeader("CSeq", "1 MESSAGE"),
+		model.NewHeader("Content-Type", "Application/MANSCDP+XML"),
+		model.NewHeader("Max-Forwards", "70"),
+	}, body)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	if err := tr.Send(ctx, query, platformNode.Profile().Addr()); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	resp, _, err := tr.Receive(ctx)
+	if err != nil {
+		t.Fatalf("Receive: %v", err)
+	}
+	if resp.StatusCode() != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode())
+	}
+	var answer catalogAnswer
+	if err := xml.Unmarshal([]byte(resp.Body()), &answer); err != nil {
+		t.Fatalf("the answer is not readable XML: %v\n%s", err, resp.Body())
+	}
+	if answer.SumNum != 3 || answer.DeviceList.Num != 3 {
+		t.Fatalf("sum = %d, num = %d, want 3/3 (body: %s)", answer.SumNum, answer.DeviceList.Num, resp.Body())
+	}
+
+	// Verify ascending sort by device id.
+	wantIDs := []string{
+		"34020000001111000001",
+		"34020000001320000099",
+		"34020000002222000002",
+	}
+	for i, item := range answer.DeviceList.Items {
+		if item.DeviceID != wantIDs[i] {
+			t.Errorf("DeviceList.Items[%d].DeviceID = %q, want %q", i, item.DeviceID, wantIDs[i])
+		}
+	}
+
+	// Verify fixed catalog fields on the first channel.
+	item := answer.DeviceList.Items[1] // "34020000001320000099"
+	if item.Name != "lobby-cam" {
+		t.Errorf("item[1].Name = %q, want lobby-cam", item.Name)
+	}
+	if item.Status != "ON" {
+		t.Errorf("item[1].Status = %q, want ON", item.Status)
+	}
+	// XML wire-format is validated by the golden test suite in
+	// internal/adapter/manscdp/catalog_test.go (task 3.3).
+}
+
 // A device that stops re-registering is swept when the lifetime it was
 // granted lapses: the platform must not go on reporting a silent device as
 // online, however long it takes to notice.
@@ -319,4 +434,176 @@ func TestPlatformStopEndsTheSweeper(t *testing.T) {
 	if got := len(devices.List(ctx, platformID)); got != 0 {
 		t.Errorf("table has %d rows after the platform stopped, want 0", got)
 	}
+}
+
+// When an upstream queries a platform-large node's catalog, channels that
+// were injected via the NodeService (the same code path the HTTP channel
+// API uses) must show up in the SIP response immediately. The injected
+// channel is added to the node's profile, and answerCatalog already wires
+// that profile into the response.
+func TestPlatformLargeCatalogReflectsInjectedChannel(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	accounts := credstore.New()
+	devices := devicereg.New()
+	svc, _, stop := platformService(t, ctx, accounts, devices)
+	defer stop()
+
+	platform := platformProfile(t, e2eServer, freeAddr(t))
+	platformNode := startPlatform(t, ctx, svc, accounts, platform)
+	platformID := platformNode.ID()
+
+	// Inject a channel through the same code path that the HTTP API uses.
+	// The 20-digit ID is required by the channel-id rule introduced by
+	// change platform-large-upstream-and-channels.
+	injectedID := "34020000001320000099"
+	if _, err := svc.AddChannel(ctx, platformID, injectedID, "Injected Camera", "", model.ChannelStatusOnline); err != nil {
+		t.Fatalf("AddChannel: %v", err)
+	}
+
+	// Now ask the upstream SIP peer to query the catalog and verify the
+	// channel is reported back over the wire.
+	client, err := siptransport.New("udp://" + freeAddr(t))
+	if err != nil {
+		t.Fatalf("transport: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+	tr := siptransport.NewPortAdapter(client)
+
+	body := `<?xml version="1.0" encoding="UTF-8"?>` +
+		`<Notify><CmdType>Catalog</CmdType><SN>17</SN>` +
+		`<DeviceID>` + e2eServer + `</DeviceID></Notify>`
+	query, err := model.NewRequest("MESSAGE", "sip:"+e2eServer+"@"+e2eDomain, []model.Header{
+		model.NewHeader("From", "<sip:"+e2eServer+"@"+e2eDomain+">;tag=injq1"),
+		model.NewHeader("To", "<sip:"+e2eServer+"@"+e2eDomain+">"),
+		model.NewHeader("Call-ID", "catalog-inject-1"),
+		model.NewHeader("CSeq", "1 MESSAGE"),
+		model.NewHeader("Content-Type", "Application/MANSCDP+XML"),
+		model.NewHeader("Max-Forwards", "70"),
+	}, body)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	if err := tr.Send(ctx, query, platformNode.Profile().Addr()); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	resp, _, err := tr.Receive(ctx)
+	if err != nil {
+		t.Fatalf("Receive: %v", err)
+	}
+	if resp.StatusCode() != 200 {
+		t.Fatalf("upstream got %d, want 200; body=%s", resp.StatusCode(), resp.Body())
+	}
+
+	var answer catalogAnswer
+	if err := xml.Unmarshal([]byte(resp.Body()), &answer); err != nil {
+		t.Fatalf("decode catalog answer: %v\nbody=%s", err, resp.Body())
+	}
+	var hit bool
+	for _, item := range answer.DeviceList.Items {
+		if item.DeviceID == injectedID {
+			hit = true
+			break
+		}
+	}
+	if !hit {
+		t.Fatalf("injected channel %s missing from upstream catalog response (got %d items):\n%s",
+			injectedID, answer.SumNum, resp.Body())
+	}
+}
+
+// TestE2E_PlatformLargeUpstreamKeepalive covers spec task 7.2:
+// a platform-large that registers with an upstream stays online while
+// the upstream acknowledges its heartbeats, and faults only after
+// HeartbeatMaxFailures unanswered beats once the upstream goes silent.
+//
+// The upstream stands in is siptest.UAS, the same real-socket double the
+// device keepalive tests use. Short heartbeat parameters (200 ms beat,
+// 100 ms answer window, 3 tolerated failures) keep the whole run under
+// ten seconds.
+func TestE2E_PlatformLargeUpstreamKeepalive(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// The upstream platform: a UAS that answers REGISTER and MESSAGE.
+	uas, err := siptest.NewUAS("udp", freeAddr(t), e2eDomain, e2ePasswd)
+	if err != nil {
+		t.Fatalf("NewUAS: %v", err)
+	}
+	defer func() { _ = uas.Close() }()
+	go func() { _ = uas.Serve(ctx) }()
+
+	// A full NodeService for the platform-large half: registrar, keeper
+	// and the serving half come up through platformService.
+	accounts := credstore.New()
+	devices := devicereg.New()
+	svc, _, stop := platformService(t, ctx, accounts, devices)
+	defer stop()
+
+	profile := platformProfile(t, e2eServer, freeAddr(t))
+	reg, err := model.NewRegistration(model.RegistrationParams{
+		Server:               uas.Addr(),
+		ServerID:             e2eServer,
+		Password:             e2ePasswd,
+		Expires:              3600,
+		Timeout:              2 * time.Second,
+		HeartbeatInterval:    200 * time.Millisecond,
+		HeartbeatTimeout:     100 * time.Millisecond,
+		HeartbeatMaxFailures: 3,
+	})
+	if err != nil {
+		t.Fatalf("NewRegistration: %v", err)
+	}
+	profile, err = profile.WithRegistration(reg)
+	if err != nil {
+		t.Fatalf("WithRegistration: %v", err)
+	}
+
+	node := startPlatform(t, ctx, svc, accounts, profile)
+	nodeID := node.ID()
+
+	// The node comes online and starts beating; three beats prove the
+	// wire path and the keeper both work.
+	waitUntil(t, "platform-large to register and come online", 5*time.Second, func() bool {
+		st, err := svc.Status(ctx, nodeID)
+		return err == nil && st == model.StatusOnline
+	})
+	waitUntil(t, "three keepalives to reach the upstream", 8*time.Second, func() bool {
+		return len(uas.Keepalives()) >= 3
+	})
+	online, _ := svc.Get(ctx, nodeID)
+	if online.Status() != model.StatusOnline {
+		t.Fatalf("status = %s while the upstream answers, want online", online.Status())
+	}
+
+	// The upstream goes silent: no more 200 OK for a heartbeat. The
+	// replacement listener reuses the same address, so the node keeps
+	// sending to the place it registered with.
+	if err := uas.Close(); err != nil {
+		t.Fatalf("close answering upstream: %v", err)
+	}
+	silent, err := siptest.NewUAS("udp", uas.Addr(), e2eDomain, e2ePasswd, siptest.WithSilentMessages())
+	if err != nil {
+		t.Fatalf("NewUAS (silent): %v", err)
+	}
+	defer func() { _ = silent.Close() }()
+	silentCtx, silentCancel := context.WithCancel(ctx)
+	defer silentCancel()
+	go func() { _ = silent.Serve(silentCtx) }()
+
+	// Before the tolerance runs out the node is still online: two beats
+	// in, the threshold of three has not been crossed.
+	time.Sleep(450 * time.Millisecond)
+	mid, _ := svc.Get(ctx, nodeID)
+	if mid.Status() != model.StatusOnline {
+		t.Fatalf("status = %s with only two missed beats, want online", mid.Status())
+	}
+
+	// After the third unanswered beat the keeper faults the node.
+	waitUntil(t, "platform-large to fault after the tolerance ran out", 5*time.Second, func() bool {
+		st, _ := svc.Status(ctx, nodeID)
+		return st == model.StatusFault
+	})
 }

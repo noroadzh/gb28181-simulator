@@ -1266,6 +1266,88 @@ func TestAcceptor_CatalogIncludesProfileChannels(t *testing.T) {
 	}
 }
 
+// TestAcceptor_CatalogAggregatesChannels covers spec task 3.1
+// "Catalog 响应 = 在线设备表 + 节点自身通道（按 device id 升序），空表时空通道亦能渲染 SumNum=0".
+//
+// Two downstream devices + one node-level channel → three entries sorted by
+// device id; an empty online device table + one channel renders the
+// channel-only entry with SumNum=1.
+func TestAcceptor_CatalogAggregatesChannels(t *testing.T) {
+	h, reg := newMessageHarnessWithRegistry(t)
+	ch := mustChannel(t, "34020000001320000005", "lobby", "34020000001320000005", model.ChannelStatusOnline)
+	base, err := model.NewNodeProfile(h.nodeID.String(), "127.0.0.1:5060", "3402000000", "")
+	if err != nil {
+		t.Fatalf("NewNodeProfile: %v", err)
+	}
+	next, _ := base.WithChannelAdded(ch)
+	if _, err := reg.MutateProfile(context.Background(), h.nodeID, func(np model.NodeProfile) (model.NodeProfile, error) {
+		return next, nil
+	}); err != nil {
+		t.Fatalf("MutateProfile: %v", err)
+	}
+	// Two downstream devices online.
+	h.register(t, "34020000011310000001", "3600")
+	h.register(t, "34020000011310000002", "3600")
+	h.codec.setNotify(mustNotify(t, model.CmdTypeCatalog, "34020000002000000001", 11))
+	resp := h.tr.deliver(t, messageRequest(t, "34020000011310000001", "<Query/>"))
+	if resp.StatusCode() != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode())
+	}
+	rendered := h.codec.rendered()
+	if len(rendered) != 1 {
+		t.Fatalf("rendered %d catalogs, want 1", len(rendered))
+	}
+	if rendered[0].SumNum() != 3 {
+		t.Fatalf("sum = %d, want 3 (2 devices + 1 channel)", rendered[0].SumNum())
+	}
+	ids := make([]string, 0, len(rendered[0].Items()))
+	for _, it := range rendered[0].Items() {
+		ids = append(ids, it.DeviceID())
+	}
+	sort.Strings(ids)
+	want := []string{
+		"34020000001320000005",
+		"34020000011310000001",
+		"34020000011310000002",
+	}
+	if !reflect.DeepEqual(ids, want) {
+		t.Errorf("catalog ids = %v, want %v", ids, want)
+	}
+}
+
+// TestAcceptor_CatalogEmptyTableOnlyChannels covers the "empty device table,
+// only node channels" branch of task 3.1: SumNum must reflect the channel
+// count alone.
+func TestAcceptor_CatalogEmptyTableOnlyChannels(t *testing.T) {
+	h, reg := newMessageHarnessWithRegistry(t)
+	channels := []model.Channel{
+		mustChannel(t, "34020000001320000010", "cam-a", "34020000001320000010", model.ChannelStatusOnline),
+		mustChannel(t, "34020000001320000011", "cam-b", "34020000001320000011", model.ChannelStatusOnline),
+	}
+	base, err := model.NewNodeProfile(h.nodeID.String(), "127.0.0.1:5060", "3402000000", "")
+	if err != nil {
+		t.Fatalf("NewNodeProfile: %v", err)
+	}
+	next, _ := base.WithChannels(channels)
+	if _, err := reg.MutateProfile(context.Background(), h.nodeID, func(np model.NodeProfile) (model.NodeProfile, error) {
+		return next, nil
+	}); err != nil {
+		t.Fatalf("MutateProfile: %v", err)
+	}
+	h.codec.setNotify(mustNotify(t, model.CmdTypeCatalog, "34020000002000000001", 12))
+	resp := h.tr.deliver(t, messageRequest(t, "34020000011310000001", "<Query/>"))
+	if resp.StatusCode() != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode())
+	}
+	rendered := h.codec.rendered()
+	if len(rendered) != 1 {
+		t.Fatalf("rendered %d catalogs, want 1", len(rendered))
+	}
+	if rendered[0].SumNum() != 2 {
+		t.Fatalf("sum = %d, want 2 (0 devices + 2 channels)", rendered[0].SumNum())
+	}
+}
+
 // mustChannel is a test helper that builds a validated Channel.
 func mustChannel(t *testing.T, id, name, parentID string, status model.ChannelStatus) model.Channel {
 	t.Helper()
