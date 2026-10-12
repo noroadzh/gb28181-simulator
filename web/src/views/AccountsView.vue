@@ -66,17 +66,21 @@ const pwdRules = {
 }
 
 async function loadNodes () {
+  loading.value = true
   try {
-    const j = await api.listNodes()
-    nodes.value = j.nodes || []
+    // `GET /v1/nodes` 返回的是 JSON 数组（见 spec `platform-account-management`），
+    // 不是 `{nodes: [...]}` 包装对象，直接将数组赋给 nodes.value。
+    nodes.value = (await api.listNodes()) || []
     // 默认选中第一个 platform 节点
     if (!nodeId.value) {
       const p = nodes.value.find((n) => n.kind && n.kind.startsWith('platform'))
       if (p) nodeId.value = p.id
     }
-    if (nodeId.value) loadAccounts()
+    if (nodeId.value) await loadAccounts()
   } catch (e) {
     ElMessage.error('加载节点失败: ' + e.message)
+  } finally {
+    loading.value = false
   }
 }
 

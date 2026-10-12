@@ -107,12 +107,13 @@ const addChDialogVisible = ref(false)
 const addChForm = ref({ id: '', name: '', status: 'ON' })
 const addChFormRef = ref(null)
 
-// 通道 ID 可选：留空时后端自动生成 `${nodeID}_NNNN`；若填写则必须是 20 位国标编码。
+// 通道 ID 可选：留空时后端按 GB/T 28181 规范自动生成 20 位国标编码；
+// 若填写则必须是 20 位纯数字国标编码。
 const chIdRule = (rule, value, callback) => {
   if (!value) {
     callback()
   } else if (!/^\d{20}$/.test(value)) {
-    callback(new Error('必须是 20 位数字国标编码，或留空自动生成'))
+    callback(new Error('必须是 20 位纯数字国标编码，或留空自动生成'))
   } else {
     callback()
   }
@@ -123,21 +124,10 @@ const addChRules = {
   name: [{ required: true, message: '请输入通道名称', trigger: 'blur' }]
 }
 
-// suggestChannelID 依据现有通道推测下一个可用的自动编号，供输入框预填，
-// 用户仍可自由编辑或清空交由后端生成。
-function suggestChannelID () {
-  const prefix = `${nodeId.value}_`
-  let maxSeq = 0
-  for (const ch of channels.value) {
-    if (!ch.id || !ch.id.startsWith(prefix)) continue
-    const n = parseInt(ch.id.slice(prefix.length), 10)
-    if (Number.isFinite(n) && n > maxSeq) maxSeq = n
-  }
-  return `${prefix}${String(maxSeq + 1).padStart(4, '0')}`
-}
-
+// openAddChannel 打开「新增通道」对话框，通道 ID 留空，由后端按 GB/T 28181
+// 规范自动生成 20 位纯数字编码（见 spec `channel-id-auto-gen`）。
 function openAddChannel () {
-  addChForm.value = { id: suggestChannelID(), name: '', status: 'ON' }
+  addChForm.value = { id: '', name: '', status: 'ON' }
   addChDialogVisible.value = true
 }
 
@@ -147,9 +137,18 @@ async function submitAddChannel () {
   } catch (_) {
     return
   }
+  // 留空时后端会自动生成 20 位国标 ID；显式输入时需把空字符串转成 undefined，
+  // 使 JSON 序列化时完全省略 `id` 字段（详见 spec `channel-web-ui`）。
+  const payload = { ...addChForm.value }
+  if (payload.id === '') {
+    delete payload.id
+  }
   try {
-    await api.addChannel(nodeId.value, addChForm.value)
-    ElMessage.success('通道已添加')
+    const created = await api.addChannel(nodeId.value, payload)
+    // 后端可能自动生成 ID；展示实际分配的值便于用户记录。
+    const finalID = (created && created.id) || payload.id || ''
+    const suffix = finalID ? `（ID：${finalID}${created && created.auto_generated ? '，自动生成' : ''}）` : ''
+    ElMessage.success(`通道已添加${suffix}`)
     addChDialogVisible.value = false
     refresh()
   } catch (e) {
@@ -281,7 +280,7 @@ onMounted(refresh)
     <el-dialog v-model="addChDialogVisible" title="新增通道" width="460px">
       <el-form ref="addChFormRef" :model="addChForm" :rules="addChRules" label-width="90px">
         <el-form-item label="通道 ID" prop="id">
-          <el-input v-model="addChForm.id" placeholder="留空自动生成（${nodeID}_NNNN），或填写 20 位数字国标编码" maxlength="20" />
+          <el-input v-model="addChForm.id" placeholder="留空自动生成（20位国标编码）" maxlength="20" />
         </el-form-item>
         <el-form-item label="通道名称" prop="name">
           <el-input v-model="addChForm.name" placeholder="如：大门摄像头" maxlength="64" />
