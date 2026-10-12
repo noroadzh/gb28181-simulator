@@ -17,4 +17,4 @@
 
 - [x] 3.1 运行全量 http 包测试确认无回归：`go test ./internal/interface/http/...`；验证：全部通过
 - [x] 3.2 运行 `openspec validate fix-channel-media-fallback --strict`；验证：校验通过无错误
-- [ ] 3.3 （可选，若用户要求部署）本地交叉编译 linux/amd64 并部署到 10.96.1.125，实测 platform-large 通道详情页显示媒体源已配置；验证：远端 GET 通道详情 `has_media=true`
+- [x] 3.3 （可选，若用户要求部署）本地交叉编译 linux/amd64 并部署到 10.96.1.125，实测 platform-large 通道详情页显示媒体源已配置；验证：远端 GET 通道详情 `has_media=true`（a182189 已部署，device 节点 34020000001310000001 的通道 34020000130000000001 实测 has_media=true, media_kind=file）
