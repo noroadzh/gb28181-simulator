@@ -126,8 +126,12 @@ func (s *Server) handleChannelList(c echo.Context) error {
 	}
 	chs := s.channels.ListChannels(c.Request().Context(), id)
 	out := make([]channelResponse, 0, len(chs))
+	ctx := c.Request().Context()
 	for _, ch := range chs {
-		cfg, has, _ := s.channels.GetChannelMedia(c.Request().Context(), id, ch.ID())
+		cfg, has, _ := s.channels.GetChannelMedia(ctx, id, ch.ID())
+		if !has {
+			cfg, has, _ = s.nodes.GetMedia(ctx, id)
+		}
 		out = append(out, newChannelResponseWithMedia(ch, cfg, has, false))
 	}
 	return c.JSON(http.StatusOK, out)
@@ -296,7 +300,11 @@ func (s *Server) handleChannelDetail(c echo.Context) error {
 	if !ok {
 		return c.JSON(http.StatusNotFound, errorBody{Error: "channel " + channelID + " not found"})
 	}
-	cfg, has, _ := s.channels.GetChannelMedia(c.Request().Context(), id, channelID)
+	ctx := c.Request().Context()
+	cfg, has, _ := s.channels.GetChannelMedia(ctx, id, channelID)
+	if !has {
+		cfg, has, _ = s.nodes.GetMedia(ctx, id)
+	}
 	return c.JSON(http.StatusOK, newChannelResponseWithMedia(ch, cfg, has, false))
 }
 

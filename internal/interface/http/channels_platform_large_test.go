@@ -315,8 +315,13 @@ func (a autoIDChannelView) Channel(_ context.Context, id model.NodeID, channelID
 	}
 	return model.Channel{}, false
 }
-func (a autoIDChannelView) GetChannelMedia(_ context.Context, _ model.NodeID, _ string) (model.MediaConfig, bool, error) {
-	return model.MediaConfig{}, false, nil
+func (a autoIDChannelView) GetChannelMedia(_ context.Context, id model.NodeID, channelID string) (model.MediaConfig, bool, error) {
+	n, ok := a.view.Get(context.Background(), id)
+	if !ok {
+		return model.MediaConfig{}, false, nil
+	}
+	cfg, ok := n.Profile().ChannelMediaConfig(channelID)
+	return cfg, ok, nil
 }
 func (a autoIDChannelView) SetChannelMedia(_ context.Context, _ model.NodeID, _ string, _ model.MediaConfig) error {
 	return nil
@@ -440,8 +445,171 @@ func TestHTTPChannelRemove_PlatformLarge(t *testing.T) {
 	}
 }
 
+// TestHTTPChannelDetail_MediaFallback_NodeLevelOnly covers 2.1 scenario
+// "通道级无媒体源 → 读取节点级 → has_media=true, media_kind 与节点级一致".
+//
+// The autoIDChannelView.GetChannelMedia reads from the node profile's
+// ChannelMediaConfig(channelID); returning (zero, false) when the channel has
+// no per-channel entry.  The handler must fall back to s.nodes.GetMedia and surface
+// the node-level config.
+func TestHTTPChannelDetail_MediaFallback_NodeLevelOnly(t *testing.T) {
+	view := newFakeNodeView()
+	node := view.seed(t, platformLargeNodeID, "127.0.0.1:15060", model.StatusOnline)
+	// Set node-level media only; channel-level is deliberately left empty.
+	profile := node.Profile()
+	profile.SetMediaConfig(model.MediaConfig{Kind: model.SourceKindSynthetic, FPS: 25})
+	view.put(node.WithProfile(profile))
+	store := newDynamicChannelStore()
+	store.add(platformLargeNodeID, "34020000130000000001", "prod-cam", "", model.ChannelStatusOnline)
+	nodeView := autoIDNodeView{view: view, store: store}
+	channelsView := autoIDChannelView{view: view, store: store}
+	srv := httpapi.NewServer(platformconfig.Config{}, logging.NewHub(4), httpapi.Version{Version: "x"},
+		nodeView, nil, channelsView, nil, nil)
+	ts := httptest.NewServer(srv.Echo())
+	defer ts.Close()
+
+	url := ts.URL + "/v1/nodes/" + platformLargeNodeID + "/channels/34020000130000000001"
+	status, body := getJSON(t, url)
+	if status != http.StatusOK {
+		t.Fatalf("GET status = %d, want 200 (body: %s)", status, body)
+	}
+	var ch struct {
+		HasMedia  bool   `json:"has_media"`
+		MediaKind string `json:"media_kind"`
+	}
+	if err := json.Unmarshal([]byte(body), &ch); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !ch.HasMedia {
+		t.Fatalf("has_media = false, want true (body: %s)", body)
+	}
+	if ch.MediaKind != string(model.SourceKindSynthetic) {
+		t.Fatalf("media_kind = %q, want %q (body: %s)", ch.MediaKind, model.SourceKindSynthetic, body)
+	}
+}
+
+// TestHTTPChannelList_MediaFallback_NodeLevelOnly covers 2.2 scenario
+// "列表端点同等条件下每个通道项 has_media=true, media_kind 与节点级一致".
+func TestHTTPChannelList_MediaFallback_NodeLevelOnly(t *testing.T) {
+	view := newFakeNodeView()
+	node := view.seed(t, platformLargeNodeID, "127.0.0.1:15060", model.StatusOnline)
+	profile := node.Profile()
+	profile.SetMediaConfig(model.MediaConfig{Kind: model.SourceKindSynthetic, FPS: 25})
+	view.put(node.WithProfile(profile))
+	store := newDynamicChannelStore()
+	for _, id := range []string{"34020000130000000001", "34020000130000000002"} {
+		store.add(platformLargeNodeID, id, id, "", model.ChannelStatusOnline)
+	}
+	nodeView := autoIDNodeView{view: view, store: store}
+	channelsView := autoIDChannelView{view: view, store: store}
+	srv := httpapi.NewServer(platformconfig.Config{}, logging.NewHub(4), httpapi.Version{Version: "x"},
+		nodeView, nil, channelsView, nil, nil)
+	ts := httptest.NewServer(srv.Echo())
+	defer ts.Close()
+
+	url := ts.URL + "/v1/nodes/" + platformLargeNodeID + "/channels"
+	status, body := getJSON(t, url)
+	if status != http.StatusOK {
+		t.Fatalf("GET status = %d, want 200 (body: %s)", status, body)
+	}
+	var channels []struct {
+		HasMedia  bool   `json:"has_media"`
+		MediaKind string `json:"media_kind"`
+	}
+	if err := json.Unmarshal([]byte(body), &channels); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(channels) != 2 {
+		t.Fatalf("channels = %d, want 2 (body: %s)", len(channels), body)
+	}
+	for i, ch := range channels {
+		if !ch.HasMedia {
+			t.Fatalf("channels[%d].has_media = false, want true (body: %s)", i, body)
+		}
+		if ch.MediaKind != string(model.SourceKindSynthetic) {
+			t.Fatalf("channels[%d].media_kind = %q, want %q (body: %s)",
+				i, ch.MediaKind, model.SourceKindSynthetic, body)
+		}
+	}
+}
+
+// TestHTTPChannelDetail_MediaPriority_ChannelLevelWins covers 2.3 scenario
+// "通道级已配置 → 优先返回通道级, 节点级不覆盖".
+func TestHTTPChannelDetail_MediaPriority_ChannelLevelWins(t *testing.T) {
+	view := newFakeNodeView()
+	node := view.seed(t, platformLargeNodeID, "127.0.0.1:15060", model.StatusOnline)
+	// Node-level synthetic.
+	profile := node.Profile()
+	profile.SetMediaConfig(model.MediaConfig{Kind: model.SourceKindSynthetic, FPS: 25})
+	// Channel-level file (takes priority).
+	profile.SetChannelMediaConfig("34020000130000000001",
+		model.MediaConfig{Kind: model.SourceKindFile, Path: "/data/v.mp4"})
+	view.put(node.WithProfile(profile))
+	store := newDynamicChannelStore()
+	store.add(platformLargeNodeID, "34020000130000000001", "prod-cam", "", model.ChannelStatusOnline)
+	nodeView := autoIDNodeView{view: view, store: store}
+	channelsView := autoIDChannelView{view: view, store: store}
+	srv := httpapi.NewServer(platformconfig.Config{}, logging.NewHub(4), httpapi.Version{Version: "x"},
+		nodeView, nil, channelsView, nil, nil)
+	ts := httptest.NewServer(srv.Echo())
+	defer ts.Close()
+
+	url := ts.URL + "/v1/nodes/" + platformLargeNodeID + "/channels/34020000130000000001"
+	status, body := getJSON(t, url)
+	if status != http.StatusOK {
+		t.Fatalf("GET status = %d, want 200 (body: %s)", status, body)
+	}
+	var ch struct {
+		HasMedia  bool   `json:"has_media"`
+		MediaKind string `json:"media_kind"`
+	}
+	if err := json.Unmarshal([]byte(body), &ch); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !ch.HasMedia {
+		t.Fatalf("has_media = false, want true (body: %s)", body)
+	}
+	if ch.MediaKind != string(model.SourceKindFile) {
+		t.Fatalf("media_kind = %q, want %q (body: %s)",
+			ch.MediaKind, model.SourceKindFile, body)
+	}
+}
+
+// TestHTTPChannelDetail_MediaNeitherLevel covers 2.4 scenario
+// "两级均未配置 → has_media=false, media_kind 省略".
+func TestHTTPChannelDetail_MediaNeitherLevel(t *testing.T) {
+	view := newFakeNodeView()
+	view.seed(t, platformLargeNodeID, "127.0.0.1:15060", model.StatusOnline)
+	store := newDynamicChannelStore()
+	store.add(platformLargeNodeID, "34020000130000000001", "prod-cam", "", model.ChannelStatusOnline)
+	nodeView := autoIDNodeView{view: view, store: store}
+	channelsView := autoIDChannelView{view: view, store: store}
+	srv := httpapi.NewServer(platformconfig.Config{}, logging.NewHub(4), httpapi.Version{Version: "x"},
+		nodeView, nil, channelsView, nil, nil)
+	ts := httptest.NewServer(srv.Echo())
+	defer ts.Close()
+
+	url := ts.URL + "/v1/nodes/" + platformLargeNodeID + "/channels/34020000130000000001"
+	status, body := getJSON(t, url)
+	if status != http.StatusOK {
+		t.Fatalf("GET status = %d, want 200 (body: %s)", status, body)
+	}
+	var ch struct {
+		HasMedia  bool   `json:"has_media"`
+		MediaKind string `json:"media_kind"`
+	}
+	if err := json.Unmarshal([]byte(body), &ch); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if ch.HasMedia {
+		t.Fatalf("has_media = true, want false (body: %s)", body)
+	}
+	if ch.MediaKind != "" {
+		t.Fatalf("media_kind = %q, want empty (body: %s)", ch.MediaKind, body)
+	}
+}
+
 // TestHTTPChannelList_PlatformLarge covers the list endpoint returning 200
-// + JSON for a platform-large node with dynamic channels seeded.
 func TestHTTPChannelList_PlatformLarge(t *testing.T) {
 	view := newFakeNodeView()
 	view.seed(t, platformLargeNodeID, "127.0.0.1:15060", model.StatusOnline)
