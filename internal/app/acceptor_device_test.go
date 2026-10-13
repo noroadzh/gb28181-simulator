@@ -511,3 +511,86 @@ func TestAcceptor_DeviceCatalogWithoutRegistry(t *testing.T) {
 		t.Errorf("catalog SumNum = %d, want 0 (empty device table, no registry)", cat.SumNum())
 	}
 }
+
+// ----------------------------------------------------------------------------
+// 测试：device 节点与 platform-large 节点共用 Acceptor（spec scenario "device 节点与
+// platform-large 共用 Acceptor"）：同一 Acceptor 实例同时 Serve(ServeDevice) 两类
+// 节点，两套 transport 互不干扰。
+// ----------------------------------------------------------------------------
+
+func TestAcceptor_DeviceAndPlatformShareAcceptor(t *testing.T) {
+	deviceID := mustDeviceNodeID(t, "34020000001310000007")
+	platformID, err := model.ParseNodeID("34020000002000000007")
+	if err != nil {
+		t.Fatalf("ParseNodeID(platform): %v", err)
+	}
+	if platformID.Kind() != model.NodeKindPlatformLarge {
+		t.Fatalf("platform id kind = %v, want NodeKindPlatformLarge", platformID.Kind())
+	}
+
+	deviceTr := newAcceptorTransport()
+	platformTr := newAcceptorTransport()
+	codec := manscdp.NewMANSCDPCodec()
+	devices := newFakeDevices()
+	creds := newFakeCredentials()
+	clock := newSyncClock(time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC))
+	tickers := newTickerScript()
+
+	acceptor, err := NewAcceptor(context.Background(), clock, &fakeChallenger{},
+		&fakeAuthenticator{}, creds, devices, codec, tickers.factory(), discardLogger())
+	if err != nil {
+		t.Fatalf("NewAcceptor: %v", err)
+	}
+
+	// 准备 device profile（含 1 channel）使 answerCatalog 能查到内容。
+	reg := nodereg.New()
+	profile, err := model.NewNodeProfile(deviceID.String(), "127.0.0.1:15060", "3402000000", "sim")
+	if err != nil {
+		t.Fatalf("NewNodeProfile: %v", err)
+	}
+	ch := mustChannel(t, "34020000001310000071", "cam-7", deviceID.String(), model.ChannelStatusOnline)
+	profile, err = profile.WithChannels([]model.Channel{ch})
+	if err != nil {
+		t.Fatalf("WithChannels: %v", err)
+	}
+	if _, err := reg.Register(context.Background(), profile); err != nil {
+		t.Fatalf("Register device profile: %v", err)
+	}
+	acceptor.WithNodeRegistry(reg)
+	t.Cleanup(func() { _ = acceptor.Close() })
+
+	// 共享同一 Acceptor：device 用 ServeDevice，platform-large 用 Serve。
+	if err := acceptor.ServeDevice(deviceID, deviceTr, "3402000000"); err != nil {
+		t.Fatalf("ServeDevice: %v", err)
+	}
+	policy, err := model.NewExpiresPolicy(3600, 3600, 3600)
+	if err != nil {
+		t.Fatalf("NewExpiresPolicy: %v", err)
+	}
+	if err := acceptor.Serve(platformID, platformTr, "3402000000", policy); err != nil {
+		t.Fatalf("Serve platform-large: %v", err)
+	}
+
+	if got := acceptor.Serving(); got != 2 {
+		t.Fatalf("serving = %d, want 2 (device + platform-large)", got)
+	}
+
+	// device 端应答 catalog query。
+	body := catalogQueryBody(deviceID.String())
+	req := deviceMessageRequest(t, deviceID.String(), body)
+	resp := deviceTr.deliver(t, req)
+	if resp.StatusCode() != 200 {
+		t.Fatalf("device status = %d, want 200", resp.StatusCode())
+	}
+	if got := responseHeader(t, resp, "Content-Type"); got != "Application/MANSCDP+XML" {
+		t.Errorf("device Content-Type = %q, want Application/MANSCDP+XML", got)
+	}
+
+	// platform-large 端独立收到自己的 MESSAGE 不会被 device read loop 截走。
+	bodyPlatform := catalogQueryBody(platformID.String())
+	reqPlatform := deviceMessageRequest(t, platformID.String(), bodyPlatform)
+	respPlatform := platformTr.deliver(t, reqPlatform)
+	if respPlatform.StatusCode() != 200 {
+		t.Fatalf("platform-large status = %d, want 200", respPlatform.StatusCode())
+	}
+}

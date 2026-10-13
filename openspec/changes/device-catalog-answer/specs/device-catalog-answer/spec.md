@@ -16,6 +16,11 @@ device 节点注册成功后 MUST 启动一个 SIP 读循环，接受来自 plat
 - **WHEN** platform-large 节点向 device 节点发送 OPTIONS / INVITE / SUBSCRIBE / BYE / INFO 非 MESSAGE 请求
 - **THEN** device 节点 MUST 响应 405 Method Not Allowed，Allow 头 MUST 包含 `MESSAGE`
 
+#### Scenario: device 节点对 ACK 静默丢弃
+
+- **WHEN** 任何 peer 向 device 节点发送 ACK 请求
+- **THEN** device 节点 MUST NOT 产生任何 SIP 响应——ACK 由其对端 INVITE 的 silence 隐式确认（RFC 3261 §13.2.2.4：UAS 不答 ACK），405/200 都是协议错误
+
 #### Scenario: device 节点与 platform-large 共用 Acceptor
 
 - **GIVEN** 一个进程内同时存在 device 节点和 platform-large 节点

@@ -63,6 +63,7 @@ Registrar.Register()
 func (a *Acceptor) ServeDevice(id model.NodeID, tr port.SIPTransport, realm string) error {
     // 复用 Serve() 的骨架，但 device 节点特殊处理：
     // - 使用固定的 policy（不影响功能，仅满足 Serve 校验）
+    //   model.NewExpiresPolicy(3600, 3600, 3600)  // granted / desired / max
     // - 不启动 catalogPoller（device 不发 Query）
     // - 不调用 devices.Clear()（device 无下游设备表）
 }
@@ -96,7 +97,7 @@ p := &platform{
     id:        id,
     tr:        tr,
     realm:     realm,
-    policy:    model.NewExpiresPolicy(3600, 3600), // 固定值，满足校验
+    policy:    model.NewExpiresPolicy(3600, 3600, 3600), // 固定值，满足校验
     isDevice:  true,
     // catalogPoller: nil（device 不需要）
 }
@@ -109,29 +110,27 @@ p := &platform{
 
 **选定**：简单 bool 标记 + `if p.isDevice { gate }` 分支。
 
-### 决策 3：device 节点 only 应答 MESSAGE，其他方法 405
+### 决策 3：device 节点 only 应答 MESSAGE，其他方法 405（ACK 除外）
 
 **理由**：
 
 - device 作为 UAS（UAC 是 platform），platform 可能发 OPTIONS/INFO 等探测，**静默丢弃**会让平台侧认为 device 无响应
 - 405 告知平台该方法不支持，平台侧可正常处理（不会触发重试风暴）
 - catalog query 是 MESSAGE 的唯一**业务关键**路径，其他 MESSAGE 子类型（心跳、DeviceInfo 等）走现有 `handleMessage` 逻辑
+- **ACK 例外**：RFC 3261 §13.2.2.4 规定 UAS 不对 ACK 产生响应（ACK 由 2xx 隐式确认）。对 ACK 回 405 或 200 都是协议错误——peer 无法将其解读为事务结果
 
 **实现位置**：`acceptor.run` 的 method switch，在 switch 入口处加 device 节点 gate：
 
 ```go
-case "MESSAGE":
-    // platform-large 和 device 共用 handleMessage
-    resp, answered = a.handleMessage(ctx, p, msg, peer)
-    if !answered { continue }
-default:
-    // device 节点对非 MESSAGE 方法返回 405
-    if p.isDevice {
-        resp, _ = buildResponse(405, "Method Not Allowed", msg, []model.Header{allowHeader()}, "")
-    } else {
-        resp, _ = buildResponse(405, ...)
+case p.isDevice && msg.Method() != "MESSAGE":
+    // ACK 是唯一豁免：UAS 不答 ACK，静默丢弃
+    if msg.Method() == "ACK" {
+        continue
     }
-}
+    resp, _ = buildResponse(405, "Method Not Allowed", msg,
+        []model.Header{deviceAllowHeader()}, "")
+default:
+    switch msg.Method() { /* platform-large 原有分发 */ }
 ```
 
 ### 决策 4：catalogPoller 不在 device 侧启动
