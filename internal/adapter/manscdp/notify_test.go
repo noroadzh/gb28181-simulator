@@ -48,8 +48,12 @@ func TestDecodeNotify(t *testing.T) {
 		{"truncated xml", `<Notify><CmdType>Keepalive</CmdType>`, "", "", 0, true},
 		{"no command type", `<Notify><DeviceID>34020000011310000001</DeviceID></Notify>`, "", "", 0, true},
 		{"no device id", `<Notify><CmdType>Keepalive</CmdType></Notify>`, "", "", 0, true},
-		{"wrong root element", `<Query><CmdType>Catalog</CmdType>` +
-			`<DeviceID>34020000002000000001</DeviceID></Query>`, "", "", 0, true},
+		// GB/T 28181 uses <Query> for a platform→device catalog question and
+		// <Notify> for a device→platform response. The two share the same inner
+		// CmdType/SN/DeviceID fields; DecodeNotify accepts either envelope.
+		{"query root (GB28181 standard)", `<Query><CmdType>Catalog</CmdType>` +
+			`<DeviceID>34020000002000000001</DeviceID></Query>`,
+			model.CmdTypeCatalog, "34020000002000000001", 0, false},
 		{"sn is not a number", `<Notify><CmdType>Catalog</CmdType><SN>abc</SN>` +
 			`<DeviceID>34020000002000000001</DeviceID></Notify>`, "", "", 0, true},
 	}

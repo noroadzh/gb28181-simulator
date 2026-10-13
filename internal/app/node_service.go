@@ -459,6 +459,18 @@ func (s *NodeService) register(
 	if err := s.advanceOnline(ctx, id); err != nil {
 		return s.fault(ctx, id, err)
 	}
+	// A device node starts a SIP read loop so it can answer the catalog
+	// query (MESSAGE) an upstream platform sends. The profile must be
+	// recorded online before ServeDevice reads it (answerCatalog uses
+	// a.registry.Get(p.id).Profile().Channels()). platform-large and
+	// platform-small use a.serve() for the same reason; device uses this
+	// equivalent path.
+	if node.ID().Kind() == model.NodeKindDevice && s.acceptor != nil {
+		if err := s.acceptor.ServeDevice(id, tr, node.Profile().Domain()); err != nil {
+			s.stopServing(id)
+			return s.fault(ctx, id, fmt.Errorf("app: serve device %s: %w", id, err))
+		}
+	}
 	// From here on the node is held open: heartbeats go out and the
 	// registration is renewed before it lapses. The keeper runs on its own
 	// context, so it outlives this call.

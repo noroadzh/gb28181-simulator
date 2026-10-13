@@ -59,6 +59,12 @@ func allowHeader() model.Header {
 	return model.NewHeader("Allow", strings.Join(allowedMethods, ", "))
 }
 
+// deviceAllowHeader returns the Allow header for a device node, which only
+// accepts MESSAGE.
+func deviceAllowHeader() model.Header {
+	return model.NewHeader("Allow", "MESSAGE")
+}
+
 // supportedSubscribeEvent normalizes the Event header of a SUBSCRIBE and
 // reports whether the platform serves it. An absent Event defaults to
 // catalog: GB/T 28181 devices in the wild omit it.
@@ -150,6 +156,10 @@ type platform struct {
 	done             chan struct{}
 	catalogPoller    *catalogPoller
 	catalogPollEvery time.Duration
+
+	// isDevice marks this platform as a device node. A device answers only
+	// MESSAGE (catalog query) and returns 405 Method Not Allowed for others.
+	isDevice bool
 
 	// position stores the last position configured via SetPosition.
 	// hasFix reports whether a position was ever configured; the initial
@@ -436,6 +446,55 @@ func (a *Acceptor) Serve(id model.NodeID, tr port.SIPTransport, realm string, po
 	return nil
 }
 
+// ServeDevice starts a SIP read loop for a device node. Unlike Serve, the
+// device is a UAS: it answers MESSAGE requests (notably the catalog query
+// that lets an upstream learn its MediaSource extension) and returns 405
+// Method Not Allowed for every other method, so a probing peer learns the
+// node is alive without being able to drive it into unwanted behaviour.
+//
+// catalogPoller is intentionally not started: a device has no downstream
+// devices to poll. The devices.Clear() call inside Stop is a no-op for a
+// device that never registered any downstream, so the existing Stop path
+// works without change. Sweep too is harmless: the device's own device
+// table is always empty.
+func (a *Acceptor) ServeDevice(id model.NodeID, tr port.SIPTransport, realm string) error {
+	if tr == nil {
+		return fmt.Errorf("app: acceptor for device node %s requires a transport", id)
+	}
+	if strings.TrimSpace(realm) == "" {
+		return fmt.Errorf("app: acceptor for device node %s requires a realm", id)
+	}
+	// The policy is a placeholder so the sweep beat can be derived; the
+	// device never serves REGISTERs, so the granted lifetime is unused.
+	policy, err := model.NewExpiresPolicy(3600, 3600, 3600)
+	if err != nil {
+		return fmt.Errorf("app: build device policy for node %s: %w", id, err)
+	}
+	key := id.String()
+
+	a.Stop(id)
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	runCtx, cancel := context.WithCancel(a.ctx)
+	p := &platform{
+		id:          id,
+		tr:          tr,
+		realm:       realm,
+		policy:      policy,
+		sweepEvery:  sweepIntervalFor(policy),
+		cancel:      cancel,
+		done:        make(chan struct{}),
+		subscribers: make(map[string]*catalogSub),
+		isDevice:    true,
+		// catalogPollEvery left at its zero value: ServeDevice has no
+		// poller, and the "poller active" guard in run stays false.
+	}
+	a.serving[key] = p
+	go a.run(runCtx, p)
+	return nil
+}
+
 // Stop ends the serving goroutine of id and waits for it to leave, so a
 // caller that goes on to release the listener cannot race a response being
 // written to it. Stopping a node that does not serve is a no-op.
@@ -560,7 +619,46 @@ func (a *Acceptor) run(ctx context.Context, p *platform) {
 				handled = true
 			}
 		}
-		if !handled {
+		// The dispatch below has three shapes, in this order:
+		//
+		//   1. the fault gate already produced an answer — send it as-is;
+		//   2. a device node asked for something other than MESSAGE —
+		//      refuse with 405 and an Allow that names what it does take;
+		//   3. everything else goes to the method switch below, byte for
+		//      byte as it was before device serving existed.
+		//
+		// The device gate sits after the fault gate on purpose: an armed
+		// fault profile must be able to swallow or answer any request,
+		// device nodes included, so a device can still be driven into a
+		// fault for testing. It also sits after the Response branch above,
+		// which needs no gate — a device issues no unprompted requests, so
+		// the only Response it can meet is to something it asked for.
+		switch {
+		case handled:
+			// The fault gate returned a canned response; nothing else runs.
+		case p.isDevice && msg.Method() != "MESSAGE":
+			// A device is a UAS that answers one thing: the catalog query
+			// MESSAGE an upstream sends to learn its channels and their
+			// MediaSource extension. Everything else is refused loudly
+			// rather than dropped, so a probing peer sees the node is
+			// alive and learns which method it must actually use — a silent
+			// drop would read as an unreachable device.
+			//
+			// ACK is the one exception, and it is not a simplification: SIP
+			// forbids a UAS from answering an ACK (RFC 3261 §13.2.2.4), and
+			// a 405 to it would be a protocol error the peer cannot parse
+			// as a transaction outcome. ACK is acknowledged by its silence.
+			if msg.Method() == "ACK" {
+				a.log.Debug("dropping an ACK addressed to a device node",
+					"node_id", p.id.String(), "peer", peer)
+				continue
+			}
+			resp, _ = buildResponse(405, "Method Not Allowed", msg,
+				[]model.Header{deviceAllowHeader()}, "")
+			a.log.Debug("device node refuses a method",
+				"node_id", p.id.String(), "peer", peer,
+				"method", msg.Method())
+		default:
 			switch msg.Method() {
 			case "REGISTER":
 				resp, err = a.handle(ctx, p, msg, peer)

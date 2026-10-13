@@ -13,20 +13,27 @@ import (
 // four elements this simulator acts on are modelled; everything else a peer
 // may add is ignored rather than treated as an error, because GB/T 28181
 // devices in the wild do add elements.
+//
+// The top-level element is intentionally not pinned to <Notify>: GB/T 28181
+// uses <Notify> for unsolicited device→platform events, and <Query> for
+// platform→device questions. The two envelopes share the same inner
+// CmdType/SN/DeviceID triple, and the routing switch downstream only cares
+// about the command name, not which direction the message flew. Pinning the
+// root would make catalog queries unparseable.
 type notifyEnvelope struct {
-	XMLName  xml.Name `xml:"Notify"`
-	CmdType  string   `xml:"CmdType"`
-	SN       string   `xml:"SN"`
-	DeviceID string   `xml:"DeviceID"`
-	Status   string   `xml:"Status"`
+	XMLName  xml.Name
+	CmdType  string `xml:"CmdType"`
+	SN       string `xml:"SN"`
+	DeviceID string `xml:"DeviceID"`
+	Status   string `xml:"Status"`
 }
 
-// DecodeNotify parses a MANSCDP notify body into the command it carries.
+// DecodeNotify parses a MANSCDP body — <Notify> or <Query>, the standard
+// envelopes both directions use — into the command it carries.
 //
 // Malformed input is an error, never a panic: a platform reads what other
 // people's devices wrote. An XML declaration is optional on the way in
-// (it is mandatory on the way out), and a body that is not a <Notify> is
-// reported as such so the caller can log something useful.
+// (it is mandatory on the way out).
 func (c *MANSCDPCodecAdapter) DecodeNotify(body string) (model.Notify, error) {
 	trimmed := strings.TrimSpace(body)
 	if trimmed == "" {
@@ -40,12 +47,6 @@ func (c *MANSCDPCodecAdapter) DecodeNotify(body string) (model.Notify, error) {
 	var env notifyEnvelope
 	if err := xml.Unmarshal([]byte(trimmed), &env); err != nil {
 		return model.Notify{}, fmt.Errorf("manscdp: unmarshal notify: %w", err)
-	}
-	// Accept any top-level element name as long as it carries CmdType and
-	// DeviceID. GB/T 28181 devices in the wild emit different envelopes;
-	// refusing them breaks real-world interoperability.
-	if env.XMLName.Local == "" {
-		env.XMLName.Local = "Notify"
 	}
 	sn, err := parseSN(env.SN)
 	if err != nil {
