@@ -26,6 +26,7 @@ import (
 	"github.com/your-org/gb28181-simulator/internal/adapter/media"
 	mediastatus "github.com/your-org/gb28181-simulator/internal/adapter/media_status"
 	"github.com/your-org/gb28181-simulator/internal/adapter/nodereg"
+	"github.com/your-org/gb28181-simulator/internal/adapter/nodesql"
 	"github.com/your-org/gb28181-simulator/internal/adapter/playback"
 	"github.com/your-org/gb28181-simulator/internal/adapter/scenario"
 	"github.com/your-org/gb28181-simulator/internal/adapter/siptransport"
@@ -37,6 +38,7 @@ import (
 	httpapi "github.com/your-org/gb28181-simulator/internal/interface/http"
 	"github.com/your-org/gb28181-simulator/internal/platform/clock"
 	platformconfig "github.com/your-org/gb28181-simulator/internal/platform/config"
+	"github.com/your-org/gb28181-simulator/internal/platform/events"
 	"github.com/your-org/gb28181-simulator/internal/platform/observability/logging"
 	"github.com/your-org/gb28181-simulator/internal/platform/observability/tracing"
 	"github.com/your-org/gb28181-simulator/internal/platform/servicectx"
@@ -118,11 +120,17 @@ func applyPlatformSection(
 	if err != nil {
 		return model.NodeProfile{}, err
 	}
+	// The configured realm wins over the node's home domain: a platform
+	// may serve a different administrative domain than the one it lives
+	// in, and the digest credentials below must challenge in that realm.
 	realm := profile.Domain()
 	if pc.Realm != nil {
 		realm = *pc.Realm
+		if realm == "" {
+			return model.NodeProfile{}, fmt.Errorf("platform.realm: empty realm")
+		}
 	}
-	serving, err := model.NewPlatformServing(realm, policy)
+	serving, err := model.NewPlatformServingWithNoAuth(realm, policy, pc.AllowNoAuth)
 	if err != nil {
 		return model.NodeProfile{}, err
 	}
@@ -130,26 +138,189 @@ func applyPlatformSection(
 	if err != nil {
 		return model.NodeProfile{}, err
 	}
+	if err := seedPlatformAccounts(profile, pc, accounts); err != nil {
+		return model.NodeProfile{}, err
+	}
+	return profile, nil
+}
+
+// seedPlatformAccounts validates and inserts one platform's account list.
+// Seed ignores duplicates, so the startup loop calls it on every boot for
+// every YAML-declared platform — including nodes restored from the store
+// rather than built from YAML.
+func seedPlatformAccounts(
+	profile model.NodeProfile,
+	pc *platformconfig.NodePlatformConfig,
+	accounts startupAccountStore,
+) error {
+	// Digest credentials bind to the realm the platform challenges in,
+	// which may differ from the node's home domain; fall back to the
+	// domain only when the profile carries no serving config at all.
+	realm := profile.Domain()
+	if serving, ok := profile.PlatformServing(); ok {
+		realm = serving.Realm()
+	}
 	for j, acc := range pc.Accounts {
 		// The store keeps the secret out of sight, so an empty one has
 		// to be caught here: a platform that accepted it would be
 		// accepting everybody — unless the operator opted the platform
 		// into no-auth test/intranet mode via pc.AllowNoAuth.
 		if acc.Password == "" && !pc.AllowNoAuth {
-			return model.NodeProfile{}, fmt.Errorf("accounts[%d]: empty password", j)
+			return fmt.Errorf("accounts[%d]: empty password", j)
 		}
 		cred, err := model.NewCredentials(acc.Username, realm, acc.Password)
 		if err != nil {
-			return model.NodeProfile{}, fmt.Errorf("accounts[%d]: %w", j, err)
+			return fmt.Errorf("accounts[%d]: %w", j, err)
 		}
 		if pc.AllowNoAuth {
 			cred = cred.WithNoAuth()
 		}
 		if err := accounts.Seed(profile.ID(), cred); err != nil {
-			return model.NodeProfile{}, fmt.Errorf("accounts[%d]: %w", j, err)
+			return fmt.Errorf("accounts[%d]: %w", j, err)
 		}
 	}
-	return profile, nil
+	return nil
+}
+
+// seedYAMLAccounts re-seeds one YAML-declared node's platform accounts.
+// On the store path the node's profile came from the DB, so this is where
+// the YAML platform section still has an effect: its accounts are inserted
+// idempotently beside the restored node. An account that has been dropped
+// from YAML is deliberately not deleted — only the HTTP API removes
+// accounts, so a config edit cannot silently revoke credentials.
+func seedYAMLAccounts(
+	profile model.NodeProfile,
+	nc platformconfig.NodeConfig,
+	accounts startupAccountStore,
+) error {
+	if nc.Platform == nil {
+		return nil
+	}
+	return seedPlatformAccounts(profile, nc.Platform, accounts)
+}
+
+// importYAMLNodes copies YAML node definitions into the node store — the
+// one-way handoff that makes the DB the single source of truth. It runs
+// only when the store is empty, and after it the YAML section is dead
+// weight that later boots ignore. Accounts are deliberately not part of
+// the import: they live in their own table and are seeded by the per-node
+// loop (seedPlatformAccounts), so a bad credential fails the boot with a
+// clear per-account error instead of stranding half a node in the DB.
+//
+// The cascade graph is not imported either: YAML expresses topology only
+// through registration targets, and the stored CascadeParent/Children
+// columns are owned by the HTTP API from here on.
+func importYAMLNodes(
+	nodeStore *nodesql.Store,
+	nodes []platformconfig.NodeConfig,
+) error {
+	ctx := context.Background()
+	for i := range nodes {
+		nc := nodes[i]
+		id, err := model.ParseNodeID(nc.ID)
+		if err != nil {
+			return fmt.Errorf("node[%d].id: %w", i, err)
+		}
+		kind, err := model.ParseNodeKind(nc.Kind)
+		if err != nil {
+			return fmt.Errorf("node[%d].kind: %w", i, err)
+		}
+		// Kind from YAML must match what the ID's type code implies, or
+		// it would be stored and then silently ignored (design D1).
+		if err := model.CheckNodeKindConsistency(id, kind); err != nil {
+			return fmt.Errorf("node[%d]: %w", i, err)
+		}
+		sn := model.StoredNode{
+			ID:     id,
+			Kind:   kind,
+			Domain: nc.Domain,
+			Addr:   nc.Addr,
+			Vendor: nc.Vendor,
+		}
+		if nc.Registration != nil {
+			r := nc.Registration
+			reg, regErr := model.NewRegistration(model.RegistrationParams{
+				Server:               r.Server,
+				ServerID:             r.ServerID,
+				Username:             r.Username,
+				Password:             r.Password,
+				AllowNoAuth:          r.AllowNoAuth,
+				GBVersion:            r.GBVersion,
+				Expires:              r.Expires,
+				Timeout:              r.Timeout,
+				Transport:            r.Transport,
+				HeartbeatInterval:    r.HeartbeatInterval,
+				HeartbeatTimeout:     r.HeartbeatTimeout,
+				HeartbeatMaxFailures: r.HeartbeatMaxFailures,
+			})
+			if regErr != nil {
+				return fmt.Errorf("node[%d].registration: %w", i, regErr)
+			}
+			sn.Registration = reg
+			sn.HasRegistration = true
+		}
+		if nc.Platform != nil {
+			pc := nc.Platform
+			policy, polErr := model.NewExpiresPolicy(pc.Min, pc.Default, pc.Max)
+			if polErr != nil {
+				return fmt.Errorf("node[%d].platform: %w", i, polErr)
+			}
+			realm := nc.Domain
+			if pc.Realm != nil {
+				realm = *pc.Realm
+			}
+			serving, svErr := model.NewPlatformServingWithNoAuth(realm, policy, pc.AllowNoAuth)
+			if svErr != nil {
+				return fmt.Errorf("node[%d].platform: %w", i, svErr)
+			}
+			sn.Platform = serving
+			sn.HasPlatform = true
+			sn.CatalogPollIntervalMs = int(pc.CatalogPollInterval / time.Millisecond)
+		}
+		if err := nodeStore.CreateNode(ctx, sn); err != nil {
+			return fmt.Errorf("node[%d] (%s): %w", i, nc.ID, err)
+		}
+	}
+	return nil
+}
+
+// syncNodeStoreFromYAML performs the one-way handoff from the YAML section
+// to the DB-backed store: node definitions come from the store when it has
+// anything in it, and from YAML only on a cold database. That one-way
+// handoff is what makes the DB the single source of truth after the first
+// boot without stranding an operator who still keeps nodes in YAML:
+// importing once, then ignoring it.
+//
+// The import below only fires when the table is empty, so deleting a node
+// at runtime does not drag its YAML definition back on the next restart.
+// A nil store means "YAML only" legacy mode and does nothing here.
+func syncNodeStoreFromYAML(
+	ctx context.Context,
+	nodeStore *nodesql.Store,
+	nodes []platformconfig.NodeConfig,
+) error {
+	if nodeStore == nil || len(nodes) == 0 {
+		return nil
+	}
+	persisted, err := nodeStore.ListNodes(ctx)
+	if err != nil {
+		return fmt.Errorf("count persisted nodes: %w", err)
+	}
+	if len(persisted) == 0 {
+		if err := importYAMLNodes(nodeStore, nodes); err != nil {
+			return fmt.Errorf("import yaml nodes: %w", err)
+		}
+		logging.L().Info("imported node definitions from yaml into storage",
+			"count", len(nodes))
+		return nil
+	}
+	// Warn, not info: an operator who edits a node in the YAML and
+	// restarts expects the edit to land. It will not — the store now owns
+	// the definitions — so this line is the only hint they get before the
+	// API or the dashboard becomes the only way to change a node.
+	logging.L().Warn("ignoring deprecated nodes section in config: storage already holds node definitions",
+		"storage_nodes", len(persisted), "yaml_nodes", len(nodes))
+	return nil
 }
 
 func run() error {
@@ -176,6 +347,11 @@ func run() error {
 	// enables it; it is wired into the node service after the container is
 	// built so the HTTP capture endpoints can read it.
 	var capStore port.CaptureStore
+	// eventHub carries node status transitions from the node service to the
+	// WebSocket dashboard stream (/v1/nodes/stream). Created in the node
+	// service provider, attached to the HTTP server in its own provider, and
+	// closed with the container.
+	var eventHub *events.Hub
 	// Background work (keepalive, renewal) must not be tied to a request,
 	// so it runs on the process context and is stopped explicitly on the
 	// way out.
@@ -275,6 +451,14 @@ func run() error {
 			if err != nil {
 				return nil, err
 			}
+			// Domain events: status transitions flow from NodeService through
+			// this Hub to the WebSocket dashboard stream. NewHub is drop-on-slow
+			// by design (Publish never blocks the SIP path), so a stalled
+			// subscriber cannot wedge the state machine that publishes here.
+			eventHub = events.NewHub(0)
+			if _, err := svc.WithEvents(eventHub); err != nil {
+				return nil, fmt.Errorf("node service: %w", err)
+			}
 			// Node lifecycle reporting — which half of a two-halved node
 			// failed, what could not be undone on the way out — goes
 			// through the process logger, so it is filtered and redacted
@@ -363,6 +547,19 @@ func run() error {
 				return nil, fmt.Errorf("channel store: %w", err)
 			}
 
+			// Runtime node definitions: the DB-backed store is the single
+			// source of truth for node definitions, used by the CRUD API.
+			// It is optional here — nil means "YAML only" (legacy mode),
+			// which is what an operator gets when SQLite failed to open.
+			var nodeStore *nodesql.Store
+			if rawSt.DB() != nil {
+				nodeStore = nodesql.New(rawSt.DB())
+				if _, err := svc.WithNodeStore(nodeStore); err != nil {
+					return nil, fmt.Errorf("node store: %w", err)
+				}
+				logging.L().Debug("runtime node storage enabled")
+			}
+
 			// Fault injection: one store shared by the acceptor (request
 			// gate) and the node service (HTTP fault API).
 			faults := app.NewFaultStore(registry, logging.L())
@@ -443,9 +640,33 @@ func run() error {
 			acceptor.WithMediaService(mediaService)
 			defer func() { _ = mediaService.Close() }()
 
+			// Node definitions come from the store when the store has
+			// anything in it, and from YAML only on a cold database. That
+			// one-way handoff is what makes the DB the single source of
+			// truth after the first boot without stranding an operator who
+			// still keeps nodes in YAML: importing once, then ignoring it.
+			//
+			// The migration below only fires when the table is empty, so
+			// deleting a node at runtime does not drag its YAML definition
+			// back on the next restart.
+			if err := syncNodeStoreFromYAML(processCtx, nodeStore, cfg.Nodes); err != nil {
+				return nil, err
+			}
+
 			// Register every configured node; starting them is an explicit
 			// operation (design D9), so an empty list costs nothing.
+			//
+			// With a store wired, definitions are loaded from it; without
+			// one this loop stays the YAML-only path it has always been.
 			var createdIDs []model.NodeID
+			if nodeStore != nil {
+				// LoadFromStore registers every persisted definition and
+				// restores each node's channels, so the loop below must not
+				// run again for the same rows.
+				if err := svc.LoadFromStore(processCtx); err != nil {
+					return nil, fmt.Errorf("load nodes from storage: %w", err)
+				}
+			}
 			for i, nc := range cfg.Nodes {
 				// Seed the profile's media slot from YAML when present.
 				// platforms don't originate video, so we silently drop
@@ -516,12 +737,23 @@ func run() error {
 					logging.L().Info("platform accounts loaded", "node", profile.ID().String(),
 						"accounts", len(nc.Platform.Accounts))
 				}
+				if nodeStore != nil {
+					// Already registered by LoadFromStore above (and, on a
+					// cold database, already persisted by the import).
+					// Seeding accounts still has to happen: accounts live
+					// beside the node row rather than inside it, and the
+					// import path does not touch them.
+					if err := seedYAMLAccounts(profile, nc, accountAdmin); err != nil {
+						return nil, fmt.Errorf("node[%d].accounts: %w", i, err)
+					}
+					continue
+				}
 				if _, err := svc.Create(context.Background(), profile); err != nil {
 					return nil, fmt.Errorf("register node[%d]: %w", i, err)
 				}
 				createdIDs = append(createdIDs, profile.ID())
 			}
-			if len(cfg.Nodes) > 0 {
+			if nodeStore == nil && len(cfg.Nodes) > 0 {
 				logging.L().Info("nodes registered", "count", len(cfg.Nodes))
 			}
 			// Restore runtime-created channels and media definitions that
@@ -589,7 +821,7 @@ func run() error {
 				Version: version,
 				Commit:  commit,
 				BuiltAt: builtAt,
-			}, nodeSvc, scenarioRunner, nodeSvc, accountAdmin, flvServer), nil
+			}, nodeSvc, scenarioRunner, nodeSvc, accountAdmin, flvServer).WithEventsHub(eventHub), nil
 		})
 
 	cancel, err := c.Build()
@@ -615,6 +847,12 @@ func run() error {
 	defer func() {
 		if err := cancel.Close(); err != nil {
 			logging.L().Warn("container close", "error", err.Error())
+		}
+	}()
+	defer func() {
+		// Close event hub after container (HTTP has already shut down).
+		if eventHub != nil {
+			eventHub.Close()
 		}
 	}()
 	// Registered after the container's own shutdown, so it runs first:

@@ -272,6 +272,21 @@ func (a autoIDNodeView) AddChannel(ctx context.Context, id model.NodeID, channel
 func (a autoIDNodeView) RemoveChannel(ctx context.Context, id model.NodeID, channelID string) error {
 	return a.store.remove(id.String(), channelID)
 }
+func (a autoIDNodeView) CreateNode(ctx context.Context, sn model.StoredNode) (model.Node, error) {
+	return a.view.CreateNode(ctx, sn)
+}
+func (a autoIDNodeView) UpdateNode(ctx context.Context, sn model.StoredNode) error {
+	return a.view.UpdateNode(ctx, sn)
+}
+func (a autoIDNodeView) DeleteNode(ctx context.Context, id model.NodeID) error {
+	return a.view.DeleteNode(ctx, id)
+}
+func (a autoIDNodeView) UpdateCascade(ctx context.Context, id model.NodeID, parent string, children []string) error {
+	return a.view.UpdateCascade(ctx, id, parent, children)
+}
+func (a autoIDNodeView) GetStoredNode(ctx context.Context, id model.NodeID) (model.StoredNode, bool) {
+	return a.view.GetStoredNode(ctx, id)
+}
 func (a autoIDNodeView) InstallFault(ctx context.Context, id model.NodeID, p model.FaultProfile) error {
 	return a.view.InstallFault(ctx, id, p)
 }

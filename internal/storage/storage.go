@@ -7,10 +7,11 @@ package storage
 import (
 	"context"
 	"database/sql"
-	_ "embed"
+	"embed"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/your-org/gb28181-simulator/internal/domain/port"
 	platformconfig "github.com/your-org/gb28181-simulator/internal/platform/config"
@@ -22,6 +23,48 @@ var _ port.Storage = (*Store)(nil)
 
 //go:embed schema.sql
 var schemaSQL string
+
+// migrationsFS holds the numbered migration files applied after schema.sql.
+// Each file is named NNN_description.sql; they run in lexicographic order,
+// which is numeric order for the zero-padded prefix the convention requires.
+// A file that has already been recorded in schema_meta is skipped, so adding
+// one is the whole of "change the schema".
+//
+//go:embed migrations/*.sql
+var migrationsFS embed.FS
+
+// migration is one embedded file paired with its schema_meta version key.
+type migration struct {
+	version string
+	sql     string
+}
+
+// loadMigrations reads the embedded migration files in apply order. A
+// directory with no files is not an error: the schema may legitimately stop
+// at schema.sql, and the caller already applied that.
+func loadMigrations() ([]migration, error) {
+	entries, err := migrationsFS.ReadDir("migrations")
+	if err != nil {
+		return nil, fmt.Errorf("storage: read migrations: %w", err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		names = append(names, e.Name())
+	}
+	sort.Strings(names)
+	out := make([]migration, 0, len(names))
+	for _, name := range names {
+		body, err := migrationsFS.ReadFile("migrations/" + name)
+		if err != nil {
+			return nil, fmt.Errorf("storage: read migration %s: %w", name, err)
+		}
+		out = append(out, migration{version: name, sql: string(body)})
+	}
+	return out, nil
+}
 
 // Bootstrap opens the SQLite database at the supplied path, creating the file
 // and parent directories as needed. Returns an *sql.DB ready for use.
@@ -60,7 +103,72 @@ func Bootstrap(path string) (*sql.DB, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("storage: exec schema: %w", err)
 	}
+	if err := applyMigrations(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	return db, nil
+}
+
+// applyMigrations runs every embedded migration whose version key is not yet
+// recorded in schema_meta. Each migration runs in one transaction so a
+// failing file leaves the database unmodified. After each migration commits,
+// the version is recorded in schema_meta so a restart doesn't re-apply it.
+func applyMigrations(db *sql.DB) error {
+	migs, err := loadMigrations()
+	if err != nil {
+		return err
+	}
+	applied, err := appliedMigrations(db)
+	if err != nil {
+		return err
+	}
+	for _, m := range migs {
+		if applied[m.version] {
+			continue
+		}
+		tx, err := db.Begin()
+		if err != nil {
+			return fmt.Errorf("storage: begin migration %s: %w", m.version, err)
+		}
+		if _, err := tx.Exec(m.sql); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("storage: apply migration %s: %w", m.version, err)
+		}
+		// Record this migration as applied.
+		if _, err := tx.Exec(
+			"INSERT OR IGNORE INTO schema_meta (id, version, applied_at) VALUES (?, ?, datetime('now'))",
+			0, m.version); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("storage: record migration %s: %w", m.version, err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("storage: commit migration %s: %w", m.version, err)
+		}
+	}
+	return nil
+}
+
+// appliedMigrations returns the set of versions already recorded in
+// schema_meta.
+func appliedMigrations(db *sql.DB) (map[string]bool, error) {
+	rows, err := db.Query("SELECT version FROM schema_meta")
+	if err != nil {
+		return nil, fmt.Errorf("storage: read schema_meta: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[string]bool)
+	for rows.Next() {
+		var v string
+		if err := rows.Scan(&v); err != nil {
+			return nil, fmt.Errorf("storage: scan schema_meta: %w", err)
+		}
+		out[v] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("storage: iterate schema_meta: %w", err)
+	}
+	return out, nil
 }
 
 // DefaultDBPath resolves a Config's storage.path, falling back to the

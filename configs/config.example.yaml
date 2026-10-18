@@ -46,6 +46,23 @@ tracing:
   otlp_endpoint: ""       # host:port for OTLP gRPC; empty = stdout only
   service_name: ""        # defaults to "gb28181-simulator"
 
+# ── 已废弃：节点库存由数据库持有 ────────────────────────────────
+# 本段（连同每个节点下的 `registration:` / `platform:` 子块）在升级后
+# 不再是节点定义的真源。行为如下：
+#
+#   * DB 里已有节点 → 整个 `nodes:` 段被忽略，启动日志打出
+#     "ignoring deprecated nodes section in config" 的 Warn。改这里不再
+#     生效，重启也不会带回旧值。
+#   * DB 为空（首次升级）→ 本段被一次性导入 DB，之后改 YAML 同样无效。
+#
+# 本段仍会被 schema 校验：非法条目（ID 位数不对、kind 未知）仍会导致
+# 配置加载失败，而不是被静默跳过——这样「配置写错了」不会退化成
+# 「启动后少几个节点」。校验通过但被忽略的条目不影响运行结果。
+#
+# 迁移：见 `go run scripts/migrations/yaml_to_db.go release/*.yaml`，
+# 该脚本把本段输出为 SQL INSERT，不会直接写库，便于先检查再执行。
+# 运行期的增删改请通过 WebUI 或 `POST /v1/nodes` 进行。
+#
 # Optional node inventory (Change 4). Omit the whole section to run with zero
 # nodes — then behaviour is identical to Change 3.
 #
@@ -67,6 +84,7 @@ nodes:
     domain: "3402000000"
     addr: "127.0.0.1:15060"
     vendor: acme
+    # 已废弃：随 nodes: 一次性导入 DB，此后以 DB 为准。运行期请用 API/WebUI 改。
     # Optional. Present means "register on start": the node sends REGISTER
     # to the platform, answers its 401 challenge and only then goes online.
     # Omit the whole block to keep the node unregistered.
@@ -120,6 +138,7 @@ nodes:
     domain: "3402000000"
     addr: "127.0.0.1:15061"
     vendor: acme
+    # 已废弃：随 nodes: 一次性导入 DB，此后以 DB 为准。运行期请用 API/WebUI 改。
     # Optional. Present means "serve the downstreams below": the node
     # answers REGISTER with a 401 Digest challenge, checks the answer
     # against these accounts and grants a lifetime inside the window.

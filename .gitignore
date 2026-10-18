@@ -46,3 +46,6 @@ node_modules/
 
 # Built binary
 /gb28181-simulator
+
+# Stray build output from `go build` on scripts/ (e.g. go build scripts/migrations/yaml_to_db.go)
+/migrations

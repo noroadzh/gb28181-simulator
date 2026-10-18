@@ -18,6 +18,7 @@ import (
 
 	"github.com/your-org/gb28181-simulator/internal/domain/port"
 	"github.com/your-org/gb28181-simulator/internal/interface/webui"
+	"github.com/your-org/gb28181-simulator/internal/platform/events"
 	platformconfig "github.com/your-org/gb28181-simulator/internal/platform/config"
 	"github.com/your-org/gb28181-simulator/internal/platform/observability/logging"
 )
@@ -41,6 +42,11 @@ type Server struct {
 	echo      *echo.Echo
 	http      *http.Server
 	log       *slog.Logger
+
+	// events is the domain-event hub behind /v1/nodes/stream. It is wired
+	// after construction via WithEventsHub, so a nil hub is a legal final
+	// state: the stream endpoint then reports 503 instead of 101.
+	events *events.Hub
 
 	// streaming is the HTTP-FLV streaming gateway. It may be nil when the
 	// streaming feature is not configured (e.g. in minimal builds).
@@ -96,6 +102,15 @@ func NewServer(cfg platformconfig.Config, hub *logging.Hub, ver Version, nodes N
 	return s
 }
 
+// WithEventsHub attaches the domain-event hub served at /v1/nodes/stream.
+// Call it after NewServer: the route is registered unconditionally and
+// resolves the hub per request, so attaching later needs no re-registration.
+// Nil is allowed and yields a 503 stream endpoint (see nodes_ws.go).
+func (s *Server) WithEventsHub(h *events.Hub) *Server {
+	s.events = h
+	return s
+}
+
 func (s *Server) registerRoutes(e *echo.Echo) {
 	// v1 API routes
 	e.GET("/v1/health", s.handleHealth)
@@ -110,7 +125,12 @@ func (s *Server) registerRoutes(e *echo.Echo) {
 	// Node inventory and per-node control (Change 4). These are registered
 	// unconditionally: with no nodes they simply report an empty list.
 	e.GET("/v1/nodes", s.handleNodeList)
+	e.GET("/v1/nodes/stream", s.handleNodeStatusStream)
+	e.POST("/v1/nodes", s.handleNodeCreate)
 	e.GET("/v1/nodes/:id", s.handleNodeDetail)
+	e.PUT("/v1/nodes/:id", s.handleNodeUpdate)
+	e.DELETE("/v1/nodes/:id", s.handleNodeDelete)
+	e.PUT("/v1/nodes/:id/cascade", s.handleNodeCascade)
 	e.POST("/v1/nodes/:id/start", s.handleNodeStart)
 	e.POST("/v1/nodes/:id/stop", s.handleNodeStop)
 	e.POST("/v1/nodes/:id/unregister", s.handleNodeUnregister)

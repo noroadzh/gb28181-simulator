@@ -74,6 +74,22 @@ func ParseNodeKind(s string) (NodeKind, error) {
 	}
 }
 
+// CheckNodeKindConsistency reports whether kind agrees with the type-code
+// segment the id carries. The runtime derives a node's kind from its id
+// alone (NodeProfile.Kind rebuilds from the id, and every dispatch site
+// switches on id.Kind), so a configured kind that disagrees would be
+// stored and then silently ignored. Callers at every write path — YAML
+// import, HTTP create/update, the migration script — use this to turn
+// that silent divergence into a loud error (design D1).
+func CheckNodeKindConsistency(id NodeID, kind NodeKind) error {
+	idKind := id.Kind()
+	if idKind == kind {
+		return nil
+	}
+	return fmt.Errorf("model: node id %s has type code %q (%s), which conflicts with kind %q; drop the kind field or fix the id",
+		id, id.TypeCode(), idKind, kind)
+}
+
 // NodeID is an immutable validated 20-digit GB/T 28181 identifier. The raw
 // encoding is kept verbatim so String() round-trips exactly what the caller
 // supplied.
@@ -301,6 +317,17 @@ func (p NodeProfile) WithRegistration(reg Registration) (NodeProfile, error) {
 	return cp, nil
 }
 
+// WithRegistrationCleared returns a copy that no longer registers. It is
+// the update path's counterpart to WithRegistration: replacing a node's
+// definition with one that has no `registration:` section must clear the
+// live profile too, not leave the old upstream in place.
+func (p NodeProfile) WithRegistrationCleared() NodeProfile {
+	cp := p
+	cp.registration = nil
+	cp.result = nil
+	return cp
+}
+
 // Registration returns how the node registers, and whether it registers at
 // all. The second result is false for a node never configured to.
 func (p NodeProfile) Registration() (Registration, bool) {
@@ -339,6 +366,14 @@ func (p NodeProfile) WithPlatformServing(serving PlatformServing) (NodeProfile, 
 	cp := p
 	cp.serving = &serving
 	return cp, nil
+}
+
+// WithPlatformServingCleared returns a copy that no longer serves
+// downstreams. It is the update path's counterpart to WithPlatformServing.
+func (p NodeProfile) WithPlatformServingCleared() NodeProfile {
+	cp := p
+	cp.serving = nil
+	return cp
 }
 
 // PlatformServing returns how the node serves its downstreams, and whether
@@ -398,6 +433,25 @@ func (p NodeProfile) WithCascadeChildren(children []string) (NodeProfile, error)
 	cp := p
 	cp.cascadeChildren = cleaned
 	return cp, nil
+}
+
+// WithCascadeParentCleared returns a copy with no upstream — the form a
+// cascade root has. It exists because WithCascadeParent refuses the empty
+// string, which would leave "detach from upstream" inexpressible through
+// the With* setters alone; it mirrors WithRegistrationCleared.
+func (p NodeProfile) WithCascadeParentCleared() NodeProfile {
+	cp := p
+	cp.cascadeParent = ""
+	return cp
+}
+
+// WithCascadeChildrenCleared returns a copy with no downstream children.
+// WithCascadeChildren treats an empty argument as a no-op rather than a
+// clear, so a caller that genuinely wants the list gone needs this.
+func (p NodeProfile) WithCascadeChildrenCleared() NodeProfile {
+	cp := p
+	cp.cascadeChildren = nil
+	return cp
 }
 
 // CascadeChildren returns the downstream routing order; nil when none.

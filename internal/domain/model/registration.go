@@ -47,6 +47,14 @@ type Registration struct {
 	heartbeatTimeout     time.Duration
 	heartbeatMaxFailures uint32
 	optionsEnabled       bool
+
+	// allowNoAuth records that NewRegistration was told this
+	// registration may carry no password. It is kept on the value — not
+	// discarded after the check — so a store can round-trip the node
+	// configuration: rebuilding a Registration from a persisted row must
+	// reproduce the same password requirement, and a row that stored an
+	// empty password would otherwise fail to rebuild.
+	allowNoAuth bool
 }
 
 // RegistrationParams is the flat input for NewRegistration. Zero values take
@@ -147,6 +155,7 @@ func NewRegistration(p RegistrationParams) (Registration, error) {
 		heartbeatTimeout:     heartbeatTimeout,
 		heartbeatMaxFailures: maxFailures,
 		optionsEnabled:       p.OptionsEnabled,
+		allowNoAuth:          p.AllowNoAuth,
 	}, nil
 }
 
@@ -193,6 +202,18 @@ func (r Registration) MaxHeartbeatFailures() uint32 { return r.heartbeatMaxFailu
 // OptionsEnabled reports whether the node should probe the upstream with
 // periodic OPTIONS requests in addition to the MESSAGE keepalive.
 func (r Registration) OptionsEnabled() bool { return r.optionsEnabled }
+
+// Password returns the configured cleartext password. It exists so a node
+// configuration store can round-trip a Registration through its database;
+// String() never includes it, so it is safe to read for persistence. Callers
+// that need to send it over the wire should go through CredentialsFor.
+func (r Registration) Password() string { return r.password }
+
+// AllowNoAuth reports whether this registration was configured to accept
+// challenge responses that omit a password. A store round-tripping a node
+// needs to see this so that an empty password in the database can rebuild
+// a Registration that does not fail the password check in NewRegistration.
+func (r Registration) AllowNoAuth() bool { return r.allowNoAuth }
 
 // CredentialsFor builds the credentials used to answer a challenge issued
 // for realm. The realm only becomes known when the platform challenges us,

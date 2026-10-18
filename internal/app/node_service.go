@@ -10,6 +10,7 @@ import (
 
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
 	"github.com/your-org/gb28181-simulator/internal/domain/port"
+	"github.com/your-org/gb28181-simulator/internal/platform/events"
 )
 
 // TransportFactory binds a signalling listener on addr for the node with
@@ -60,6 +61,8 @@ type NodeService struct {
 	faults         port.FaultStore
 	captures       port.CaptureStore
 	channels       port.ChannelStore
+	nodeStore      port.NodeConfigurationStore
+	events         *events.Hub
 
 	// splits holds the message splitter of every node that is both halves
 	// of a cascade. A platform-small serves and registers over one
@@ -129,6 +132,17 @@ func (s *NodeService) WithRegistrar(r *Registrar) (*NodeService, error) {
 		return nil, fmt.Errorf("app: NodeService requires a non-nil Registrar")
 	}
 	s.registrar = r
+	return s, nil
+}
+
+// WithEvents attaches the domain-event hub every status transition is
+// published to. Nil is allowed for callers (most tests) that do not care
+// about events; stamp then only keeps its changedAt bookkeeping.
+func (s *NodeService) WithEvents(h *events.Hub) (*NodeService, error) {
+	if h == nil {
+		return nil, fmt.Errorf("app: NodeService requires a non-nil events.Hub")
+	}
+	s.events = h
 	return s, nil
 }
 
@@ -272,6 +286,15 @@ func (s *NodeService) WithKeepaliveCodec(c port.KeepaliveCodec) (*NodeService, e
 		return nil, fmt.Errorf("app: NodeService requires a non-nil KeepaliveCodec")
 	}
 	s.keepaliveCodec = c
+	return s, nil
+}
+
+// WithNodeStore attaches the persisted node-configuration store behind
+// the CRUD paths. Passing nil is allowed: the service then runs in
+// pure-memory mode, registering nodes that die with the process — what
+// the legacy Create callers and most tests want.
+func (s *NodeService) WithNodeStore(st port.NodeConfigurationStore) (*NodeService, error) {
+	s.nodeStore = st
 	return s, nil
 }
 
@@ -1306,9 +1329,22 @@ func (s *NodeService) Snapshot(ctx context.Context, id model.NodeID, channelID s
 }
 
 func (s *NodeService) stamp(id model.NodeID) {
+	now := s.clock.Now()
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.changedAt[id.String()] = s.clock.Now()
+	s.changedAt[id.String()] = now
+	s.mu.Unlock()
+	if s.events != nil {
+		// Status transitions are domain facts with a stable wire shape; the
+		// hub is drop-on-slow, so a stalled dashboard cannot wedge us.
+		if n, ok := s.registry.Get(context.Background(), id); ok {
+			s.events.Publish(events.Event{
+				Type:   events.TypeNodeStatusChanged,
+				ID:     id.String(),
+				Status: n.Status().String(),
+				At:     now,
+			})
+		}
+	}
 }
 
 // realClock is the default Clock; it reads the system time. It keeps this

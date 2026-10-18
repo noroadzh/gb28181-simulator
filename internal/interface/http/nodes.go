@@ -48,6 +48,17 @@ type NodeView interface {
 	Start(ctx context.Context, id model.NodeID) error
 	Stop(ctx context.Context, id model.NodeID) error
 	Unregister(ctx context.Context, id model.NodeID) error
+
+	// Node definition CRUD: create, update, delete, cascade edit.
+	// These treat the persistence store as the source of truth.
+	CreateNode(ctx context.Context, sn model.StoredNode) (model.Node, error)
+	UpdateNode(ctx context.Context, sn model.StoredNode) error
+	DeleteNode(ctx context.Context, id model.NodeID) error
+	UpdateCascade(ctx context.Context, id model.NodeID, parent string, children []string) error
+	// GetStoredNode reads the persisted definition of one node — the
+	// update and cascade endpoints need it to overlay a partial edit
+	// before writing back. Missing from the store returns ok=false.
+	GetStoredNode(ctx context.Context, id model.NodeID) (model.StoredNode, bool)
 	Devices(ctx context.Context, id model.NodeID) ([]model.DownstreamDevice, error)
 	Device(ctx context.Context, id model.NodeID, deviceID string) (model.DownstreamDevice, error)
 	// TriggerAlarm makes the node emit an Alarm NOTIFY upstream and records

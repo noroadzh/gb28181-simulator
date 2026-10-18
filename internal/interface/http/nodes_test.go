@@ -27,6 +27,7 @@ import (
 type fakeNodeView struct {
 	mu      sync.Mutex
 	nodes   map[string]model.Node
+	stored  map[string]model.StoredNode
 	devices map[string]map[string]model.DownstreamDevice
 	faults  map[string]*fakeFaultEntry
 	events  map[string][]port.CaptureEvent
@@ -42,6 +43,7 @@ type fakeFaultEntry struct {
 func newFakeNodeView() *fakeNodeView {
 	return &fakeNodeView{
 		nodes:   map[string]model.Node{},
+		stored:  map[string]model.StoredNode{},
 		devices: map[string]map[string]model.DownstreamDevice{},
 		faults:  map[string]*fakeFaultEntry{},
 		events:  map[string][]port.CaptureEvent{},
@@ -197,6 +199,72 @@ func (f *fakeNodeView) bumpCounter(t *testing.T, nodeID string, action model.Fau
 		f.faults[nodeID] = e
 	}
 	e.counters[action] += delta
+}
+
+// Node definition CRUD, backed by the stored map.
+func (f *fakeNodeView) CreateNode(_ context.Context, sn model.StoredNode) (model.Node, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.stored[sn.ID.String()]; ok {
+		return model.Node{}, fmt.Errorf("node %s already exists", sn.ID)
+	}
+	profile, err := sn.Profile()
+	if err != nil {
+		return model.Node{}, err
+	}
+	f.stored[sn.ID.String()] = sn
+	f.nodes[sn.ID.String()] = model.NewNode(profile)
+	return f.nodes[sn.ID.String()], nil
+}
+
+func (f *fakeNodeView) UpdateNode(_ context.Context, sn model.StoredNode) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.stored[sn.ID.String()]; !ok {
+		return fmt.Errorf("node %s not found", sn.ID)
+	}
+	profile, err := sn.Profile()
+	if err != nil {
+		return err
+	}
+	f.stored[sn.ID.String()] = sn
+	f.nodes[sn.ID.String()] = model.NewNode(profile)
+	return nil
+}
+
+func (f *fakeNodeView) DeleteNode(_ context.Context, id model.NodeID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.stored, id.String())
+	delete(f.nodes, id.String())
+	return nil
+}
+
+func (f *fakeNodeView) UpdateCascade(_ context.Context, id model.NodeID, parent string, children []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	sn, ok := f.stored[id.String()]
+	if !ok {
+		return fmt.Errorf("node %s not found", id)
+	}
+	// Overlay the cascade fields, then rebuild the live node so List/Get
+	// observe the same definition.
+	sn.CascadeParent = parent
+	sn.CascadeChildren = children
+	profile, err := sn.Profile()
+	if err != nil {
+		return err
+	}
+	f.stored[id.String()] = sn
+	f.nodes[id.String()] = model.NewNode(profile)
+	return nil
+}
+
+func (f *fakeNodeView) GetStoredNode(_ context.Context, id model.NodeID) (model.StoredNode, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	sn, ok := f.stored[id.String()]
+	return sn, ok
 }
 
 func (f *fakeNodeView) List(_ context.Context) []model.Node {

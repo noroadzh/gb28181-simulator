@@ -11,6 +11,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 
 	"github.com/your-org/gb28181-simulator/internal/adapter/cascade"
@@ -123,10 +124,8 @@ func (r *Registry) validateCascadeAcyclicLocked(profile model.NodeProfile) error
 			current = ent.node.Profile().CascadeParent()
 		}
 	}
-	for _, child := range profile.CascadeChildren() {
-		if child == id {
-			return fmt.Errorf("nodereg: cascade child of node %s is itself", id)
-		}
+	if slices.Contains(profile.CascadeChildren(), id) {
+		return fmt.Errorf("nodereg: cascade child of node %s is itself", id)
 	}
 	return nil
 }
@@ -155,15 +154,15 @@ func (r *Registry) Register(_ context.Context, profile model.NodeProfile) (model
 	if existing, ok := r.nodes[id]; ok {
 		r.log().Warn("node register rejected: duplicate id", "node_id", id,
 			"reason", "already registered", "current_status", existing.node.Status())
-		return model.Node{}, fmt.Errorf("nodereg: node %s is already registered (status %s)",
-			id, existing.node.Status())
+		return model.Node{}, fmt.Errorf("nodereg: node %s is already registered (status %s): %w",
+			id, existing.node.Status(), port.ErrNodeAlreadyExists)
 	}
 	if incumbent, ok := r.addrIndex[profile.Addr()]; ok {
 		r.log().Warn("node register rejected: address claimed", "node_id", id,
 			"reason", "address in use", "addr", profile.Addr(), "held_by", incumbent)
 		return model.Node{}, fmt.Errorf(
-			"nodereg: address %s is already claimed by node %s; node %s cannot bind it",
-			profile.Addr(), incumbent, id)
+			"nodereg: address %s is already claimed by node %s; node %s cannot bind it: %w",
+			profile.Addr(), incumbent, id, port.ErrAddrClaimed)
 	}
 	if err := r.validateCascadeAcyclicLocked(profile); err != nil {
 		r.log().Warn("node register rejected: cascade cycle", "node_id", id, "error", err.Error())
@@ -220,8 +219,26 @@ func (r *Registry) MutateProfile(_ context.Context, id model.NodeID,
 	if err != nil {
 		return model.Node{}, fmt.Errorf("nodereg: mutate %s: %w", key, err)
 	}
+	// The mutator may move the node to a new signalling address, so the
+	// index has to follow the same rules Register applies: one address,
+	// one holder. Reject the change when another node holds the target
+	// address; otherwise move the claim.
+	if oldAddr, newAddr := ent.node.Profile().Addr(), np.Addr(); oldAddr != newAddr {
+		if holder, ok := r.addrIndex[newAddr]; ok && holder != key {
+			return model.Node{}, fmt.Errorf(
+				"nodereg: mutate %s: address %s is already claimed by node %s",
+				key, newAddr, holder)
+		}
+		delete(r.addrIndex, oldAddr)
+		r.addrIndex[newAddr] = key
+	}
 	updated := ent.node.WithProfile(np)
 	ent.node = updated
+	// A profile's cascade fields feed the forwarding topology exactly as
+	// a node joining or leaving does, so the handler's view is refreshed
+	// here too. Without this, a cascade edit through MutateProfile would
+	// route on the pre-edit graph.
+	r.refreshCascadeTopologyLocked()
 	return updated, nil
 }
 
