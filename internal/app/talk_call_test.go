@@ -201,3 +201,74 @@ func TestTalkStart_SendFailureIsUnreachable(t *testing.T) {
 		t.Fatalf("err = %v, want ErrControlTargetUnreachable", err)
 	}
 }
+
+func talkSessionCount(svc *NodeService) int {
+	svc.talk.mu.Lock()
+	defer svc.talk.mu.Unlock()
+	return len(svc.talk.calls)
+}
+
+// startTalk begins a session and answers the INVITE, leaving one live call.
+func startTalk(t *testing.T, h *talkHarness) string {
+	t.Helper()
+	type result struct {
+		session string
+		err     error
+	}
+	done := make(chan result, 1)
+	go func() {
+		session, _, err := h.svc.TalkStart(context.Background(), h.device, "ch-1")
+		done <- result{session, err}
+	}()
+	invite := waitForSend(t, h.tr)
+	h.answer(t, invite)
+	res := <-done
+	if res.err != nil {
+		t.Fatalf("TalkStart: %v", res.err)
+	}
+	return res.session
+}
+
+// Task 1.3: a session nobody closes is reclaimed, and the device is told.
+func TestTalk_IdleSessionReclaimsItself(t *testing.T) {
+	h := newTalkHarness(t)
+	h.svc.talkIdle = 20 * time.Millisecond
+	startTalk(t, h)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if talkSessionCount(h.svc) == 0 {
+			waitForMethod(t, h.tr, "BYE")
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("the idle talk session was never reclaimed")
+}
+
+// Task 1.3: the device may hang up first; the local session must go away
+// without waiting for the browser to stop.
+func TestTalk_PeerByeReclaims(t *testing.T) {
+	h := newTalkHarness(t)
+	session := startTalk(t, h)
+
+	bye, err := model.NewRequest("BYE", "sip:34020000002000000001@3402000000", []model.Header{
+		model.NewHeader("From", "<sip:34020000001310000001@3402000000>;tag=device"),
+		model.NewHeader("To", "<sip:34020000002000000001@3402000000>;tag=platform"),
+		model.NewHeader("Call-ID", session),
+		model.NewHeader("CSeq", "3 BYE"),
+	}, "")
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	h.tr.inbound <- bye
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if talkSessionCount(h.svc) == 0 {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("a peer BYE left the talk session registered")
+}

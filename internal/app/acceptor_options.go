@@ -52,6 +52,10 @@ type Acceptor struct {
 	cascade port.CascadeHandler
 	faults  port.FaultStore
 
+	// talkHangup is told about every BYE the node receives, so a talk
+	// dialog the device ends is reclaimed without waiting for the browser.
+	talkHangup func(model.NodeID, string)
+
 	// relay carries the cascade hand-offs this node is waiting on: which
 	// requester is waiting for which downstream answer. relayWait bounds the
 	// wait before the node answers the requester itself.
@@ -217,6 +221,13 @@ func (a *Acceptor) WithMediaService(svc *MediaService) *Acceptor {
 // asks for.
 func (a *Acceptor) WithCascadeHandler(h port.CascadeHandler) *Acceptor {
 	a.cascade = h
+	return a
+}
+
+// WithTalkHangup registers the callback told about every received BYE. The
+// callback decides whether the Call-ID belongs to one of its sessions.
+func (a *Acceptor) WithTalkHangup(fn func(model.NodeID, string)) *Acceptor {
+	a.talkHangup = fn
 	return a
 }
 

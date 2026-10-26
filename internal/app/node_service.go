@@ -68,11 +68,14 @@ type NodeService struct {
 	playbackMu   sync.Mutex
 	playback     map[string]*playbackSession
 	playbackIdle time.Duration
-	faults       port.FaultStore
-	captures     port.CaptureStore
-	channels     port.ChannelStore
-	nodeStore    port.NodeConfigurationStore
-	events       *events.Hub
+
+	// talkIdle reclaims a talk session nobody closed.
+	talkIdle  time.Duration
+	faults    port.FaultStore
+	captures  port.CaptureStore
+	channels  port.ChannelStore
+	nodeStore port.NodeConfigurationStore
+	events    *events.Hub
 
 	// splits holds the message splitter of every node that is both halves
 	// of a cascade. A platform-small serves and registers over one
@@ -119,6 +122,7 @@ func NewNodeService(
 		changedAt:    make(map[string]time.Time),
 		playback:     make(map[string]*playbackSession),
 		playbackIdle: time.Minute,
+		talkIdle:     time.Minute,
 	}, nil
 }
 
@@ -286,6 +290,8 @@ func (s *NodeService) WithAcceptor(a *Acceptor) (*NodeService, error) {
 		return nil, fmt.Errorf("app: NodeService requires a non-nil Acceptor")
 	}
 	s.acceptor = a
+	// A device that hangs up ends its talk session immediately.
+	a.WithTalkHangup(s.onPeerTalkBye)
 	return s, nil
 }
 

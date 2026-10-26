@@ -100,6 +100,14 @@ func (a *Acceptor) run(ctx context.Context, p *platform) {
 			}
 			continue
 		}
+		// A BYE for a talk dialog ends it here, whoever sent it: the device
+		// may hang up before the browser asks to stop. The callback filters
+		// by Call-ID, so non-talk dialogs are unaffected.
+		if msg.Method() == "BYE" && a.talkHangup != nil {
+			if callID := headerValue(msg, "Call-ID"); callID != "" {
+				a.talkHangup(p.id, callID)
+			}
+		}
 		// Fault gate (Change 13, design D6): consult the node's armed
 		// fault profile before any handler runs. A skip swallows the
 		// request, an answer short-circuits the dispatch with the canned

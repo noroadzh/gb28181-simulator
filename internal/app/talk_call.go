@@ -23,6 +23,7 @@ type talkCall struct {
 	target  string
 	addr    string
 	rtp     net.PacketConn
+	cancel  context.CancelFunc
 }
 
 // talkSessionState is the per-service bookkeeping for talk. It is a separate
@@ -92,6 +93,7 @@ func (s *NodeService) TalkStart(ctx context.Context, id model.NodeID, channelID 
 	}
 	s.talk.calls[callID] = call
 	s.talk.mu.Unlock()
+	s.armTalkReclaim(call)
 
 	wsURL := fmt.Sprintf("/v1/nodes/%s/channels/%s/talk/audio?session=%s", id.String(), channelID, callID)
 	s.log.Info("talk started", "node_id", id.String(), "channel", channelID, "session", callID)
@@ -108,6 +110,9 @@ func (s *NodeService) TalkStop(ctx context.Context, id model.NodeID, channelID, 
 	if call == nil {
 		return nil
 	}
+	if call.cancel != nil {
+		call.cancel()
+	}
 	if call.rtp != nil {
 		_ = call.rtp.Close()
 	}
@@ -121,4 +126,60 @@ func (s *NodeService) TalkStop(ctx context.Context, id model.NodeID, channelID, 
 	}
 	s.log.Info("talk stopped", "node_id", id.String(), "channel", channelID, "session", sessionID)
 	return nil
+}
+
+// armTalkReclaim ends a talk session nobody closed. The timer is cancelled by
+// TalkStop or by the device's own BYE, so only a genuinely idle dialog is
+// reclaimed.
+func (s *NodeService) armTalkReclaim(call *talkCall) {
+	ctx, cancel := context.WithCancel(context.Background())
+	call.cancel = cancel
+	idle := s.talkIdle
+	if idle <= 0 {
+		idle = time.Minute
+	}
+	go func() {
+		timer := time.NewTimer(idle)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+		}
+		s.talk.mu.Lock()
+		current := s.talk.calls[call.id] == call
+		if current {
+			delete(s.talk.calls, call.id)
+		}
+		s.talk.mu.Unlock()
+		if !current {
+			return
+		}
+		if call.rtp != nil {
+			_ = call.rtp.Close()
+		}
+		if s.acceptor != nil {
+			_ = s.acceptor.Bye(context.Background(), call.node, call.target, call.addr, call.id)
+		}
+		s.log.Info("talk reclaimed after idle", "node_id", call.node.String(), "session", call.id)
+	}()
+}
+
+// onPeerTalkBye reclaims a session the device ended. It is safe for any BYE:
+// an unknown Call-ID is simply not a talk session.
+func (s *NodeService) onPeerTalkBye(node model.NodeID, callID string) {
+	s.talk.mu.Lock()
+	call := s.talk.calls[callID]
+	delete(s.talk.calls, callID)
+	s.talk.mu.Unlock()
+	if call == nil {
+		return
+	}
+	if call.cancel != nil {
+		call.cancel()
+	}
+	if call.rtp != nil {
+		_ = call.rtp.Close()
+	}
+	s.log.Info("talk ended by the device", "node_id", node.String(), "session", callID)
 }
