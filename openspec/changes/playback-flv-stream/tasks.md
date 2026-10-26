@@ -2,7 +2,7 @@
 
 ## 1. 回放信令与设备供流
 
-- [ ] 1.1 回放 SDP 的构造与解析（`s=Playback`、`u=`、`t=`、`m=video`）；验收：**字节级 golden test**（构造与解析互逆）
+- [x] 1.1 回放 SDP 的构造与解析（`s=Playback`、`u=`、`t=`、`m=video`）；验收：**字节级 golden test**（构造与解析互逆）
 - [ ] 1.2 设备受理回放 INVITE：200 OK + SDP 或 404（无源/窗口越界）；验收：单测覆盖两条
 - [ ] 1.3 设备按时间窗供流：定位到 start、按 end 停止，PS/RTP 发往平台端口；验收：单测断言首包与停止条件，日志记录 seek 退化
 - [ ] 1.4 平台接流：回放 INVITE 成功后在该端口收 RTP，按 `node|channel|sn` 建 FLV 会话；验收：单测喂 RTP 断言 FLV 头
