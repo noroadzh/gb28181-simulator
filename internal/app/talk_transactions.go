@@ -11,16 +11,41 @@ import (
 	"github.com/your-org/gb28181-simulator/internal/domain/port"
 )
 
-// Invite opens a dialog with the device that owns the channel and waits for
-// its 2xx answer. The transaction runs here (the acceptor is the node's only
-// socket reader), keyed the same way as record queries.
+// Invite opens a talk dialog with the device that owns the channel and waits
+// for its 2xx answer. The transaction runs here (the acceptor is the node's
+// only socket reader), keyed the same way as record queries.
 //
 // A non-2xx answer is reported as unsupported: the device understood the
 // INVITE and refused it, which is a capability answer rather than a timeout.
 func (a *Acceptor) Invite(ctx context.Context, id model.NodeID, target, addr, body string) (string, string, error) {
+	callID, resp, err := a.invite(ctx, id, target, addr, body, port.ErrTalkUnsupported)
+	if err != nil {
+		return "", "", err
+	}
+	remote, perr := parseRTPEndpoint(resp.Body())
+	if perr != nil {
+		return "", "", fmt.Errorf("%w: answer from %s: %v",
+			port.ErrControlTargetUnreachable, target, perr)
+	}
+	return callID, remote, nil
+}
+
+// InvitePlayback opens a historical playback dialog. Its answer names a video
+// stream rather than the talk audio endpoint, so only the 2xx matters here.
+func (a *Acceptor) InvitePlayback(ctx context.Context, id model.NodeID, target, addr, body string) (string, error) {
+	callID, _, err := a.invite(ctx, id, target, addr, body, port.ErrPlaybackUnsupported)
+	if err != nil {
+		return "", err
+	}
+	return callID, nil
+}
+
+// invite is the shared INVITE transaction: build, send, wait for the 2xx, and
+// report a refusal with the capability's own sentinel.
+func (a *Acceptor) invite(ctx context.Context, id model.NodeID, target, addr, body string, unsupported error) (string, model.Message, error) {
 	p, ok := a.platformByID(id)
 	if !ok || p.tr == nil {
-		return "", "", fmt.Errorf("%w: node %s is not serving", port.ErrControlTargetUnreachable, id)
+		return "", model.Message{}, fmt.Errorf("%w: node %s is not serving", port.ErrControlTargetUnreachable, id)
 	}
 	callID := randomCallID()
 	req, err := model.NewRequest("INVITE", fmt.Sprintf("sip:%s@%s", target, addr), []model.Header{
@@ -33,16 +58,16 @@ func (a *Acceptor) Invite(ctx context.Context, id model.NodeID, target, addr, bo
 		model.NewHeader("Content-Type", "application/sdp"),
 	}, body)
 	if err != nil {
-		return "", "", fmt.Errorf("app: build INVITE: %w", err)
+		return "", model.Message{}, fmt.Errorf("app: build INVITE: %w", err)
 	}
 
 	key, answer, ok := a.responses.put(id, req)
 	if !ok {
-		return "", "", fmt.Errorf("%w: INVITE carries no transaction identity", port.ErrTalkUnsupported)
+		return "", model.Message{}, fmt.Errorf("%w: INVITE carries no transaction identity", unsupported)
 	}
 	if err := p.tr.Send(ctx, req, addr); err != nil {
 		a.responses.drop(key)
-		return "", "", fmt.Errorf("app: send INVITE to %s: %w: %w",
+		return "", model.Message{}, fmt.Errorf("app: send INVITE to %s: %w: %w",
 			addr, port.ErrControlTargetUnreachable, err)
 	}
 
@@ -55,22 +80,17 @@ func (a *Acceptor) Invite(ctx context.Context, id model.NodeID, target, addr, bo
 	select {
 	case resp := <-answer:
 		if resp.StatusCode() < 200 || resp.StatusCode() >= 300 {
-			return "", "", fmt.Errorf("%w: device answered %d %s",
-				port.ErrTalkUnsupported, resp.StatusCode(), resp.StatusText())
+			return "", model.Message{}, fmt.Errorf("%w: device answered %d %s",
+				unsupported, resp.StatusCode(), resp.StatusText())
 		}
-		remote, perr := parseRTPEndpoint(resp.Body())
-		if perr != nil {
-			return "", "", fmt.Errorf("%w: answer from %s: %v",
-				port.ErrControlTargetUnreachable, target, perr)
-		}
-		return callID, remote, nil
+		return callID, resp, nil
 	case <-ctx.Done():
 		a.responses.drop(key)
-		return "", "", ctx.Err()
+		return "", model.Message{}, ctx.Err()
 	case <-timer.C:
 		a.responses.drop(key)
-		a.log.Warn("talk INVITE timed out", "node_id", id.String(), "target", target, "wait", wait)
-		return "", "", fmt.Errorf("%w: INVITE to %s after %s", port.ErrControlTimeout, target, wait)
+		a.log.Warn("INVITE timed out", "node_id", id.String(), "target", target, "wait", wait)
+		return "", model.Message{}, fmt.Errorf("%w: INVITE to %s after %s", port.ErrControlTimeout, target, wait)
 	}
 }
 

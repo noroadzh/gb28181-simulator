@@ -70,7 +70,13 @@ type NodeService struct {
 	playbackIdle time.Duration
 
 	// talkIdle reclaims a talk session nobody closed.
-	talkIdle  time.Duration
+	talkIdle time.Duration
+
+	// playbackStreams holds the platform side of historical playback, keyed
+	// by sn: which channel, which window, and the dialog it opened.
+	streamsMu       sync.Mutex
+	playbackStreams map[string]*playbackStream
+
 	faults    port.FaultStore
 	captures  port.CaptureStore
 	channels  port.ChannelStore
@@ -112,17 +118,18 @@ func NewNodeService(
 		clock = realClock{}
 	}
 	return &NodeService{
-		registry:     registry,
-		lifecycle:    lifecycle,
-		advancer:     advancer,
-		factory:      factory,
-		clock:        clock,
-		log:          slog.Default(),
-		splits:       newSplitters(),
-		changedAt:    make(map[string]time.Time),
-		playback:     make(map[string]*playbackSession),
-		playbackIdle: time.Minute,
-		talkIdle:     time.Minute,
+		registry:        registry,
+		lifecycle:       lifecycle,
+		advancer:        advancer,
+		factory:         factory,
+		clock:           clock,
+		log:             slog.Default(),
+		splits:          newSplitters(),
+		changedAt:       make(map[string]time.Time),
+		playback:        make(map[string]*playbackSession),
+		playbackIdle:    time.Minute,
+		talkIdle:        time.Minute,
+		playbackStreams: make(map[string]*playbackStream),
 	}, nil
 }
 
