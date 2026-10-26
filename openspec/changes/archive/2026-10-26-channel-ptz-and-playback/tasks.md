@@ -24,3 +24,7 @@
 
 - [x] 4.1 文档：`docs/architecture.md` 增补通道控制面路径（PTZ/录像/回放）与 501/502/504 语义；验收：人工审阅
 - [x] 4.2 收尾：`openspec validate channel-ptz-and-playback --strict --type change` 与 `make lint` 通过，`go test ./...` 全绿。**例外已记录**：`make test`（-race）在 `siptest.TestE2E_PlatformLargeUpstreamKeepalive` 上偶发数据竞争（`siptransport` 的 Close 与转发 goroutine），在本次改动之前的提交上同样 2/5 复现，属既有问题，与本 change 的代码无关；修复留待独立 change
+
+## 归档补记
+
+- 2026-10-26：任务 4.2 记录的 `siptest` 数据竞争已由提交 `4198e9e` 修复——`siptransport.Close` 原先在转发 goroutine 可能仍在发送时直接关闭 `out`，现在 `out` 只由转发 goroutine 在退出时关闭，`Close` 先等 `done` 再释放 layer。修复后 `make test`（-race）全绿：`MAKE_EXIT=0`，33 个包，无 race 报告。
