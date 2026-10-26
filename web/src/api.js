@@ -94,7 +94,44 @@ export const api = {
     return `${BASE}/v1/nodes/${encodeURIComponent(nodeId)}/channels/${encodeURIComponent(ch)}/media-file`
   },
 
-  // ─── Existing API ───────────────────────────────────────────────────────────
+  // ─── Node definition CRUD (runtime-node-configuration) ─────────────────────
+
+  createNode (payload) {
+    return fetch(`${BASE}/v1/nodes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(ok)
+  },
+  updateNode (id, payload) {
+    return fetch(`${BASE}/v1/nodes/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(ok)
+  },
+  deleteNode (id) {
+    return fetch(`${BASE}/v1/nodes/${encodeURIComponent(id)}`, { method: 'DELETE' }).then(ok)
+  },
+  updateNodeCascade (id, { parent, children }) {
+    return fetch(`${BASE}/v1/nodes/${encodeURIComponent(id)}/cascade`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ parent, children })
+    }).then(ok)
+  },
+
+  // 节点状态推送（/v1/nodes/stream）。帧是 events.Event 的 JSON：
+  // {type, id, status?, at}。返回 socket 本身，由调用方管理重连与关闭。
+  nodesStream (onMessage, onClose) {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+    const ws = new WebSocket(`${proto}://${location.host}/v1/nodes/stream`)
+    ws.onmessage = (ev) => {
+      try { onMessage(JSON.parse(ev.data)) } catch (_) {}
+    }
+    ws.onclose = () => { if (onClose) onClose() }
+    return ws
+  },
 
   listNodes () {
     return fetch(`${BASE}/v1/nodes`).then(ok)

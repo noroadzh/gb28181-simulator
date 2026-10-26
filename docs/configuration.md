@@ -106,3 +106,49 @@ sqlite3 gb28181.db < migration.sql
 ```
 
 首次迁移后建议从 YAML 中移除 `nodes:` 段，并删除其中已不再使用的密码。
+
+## 节点配置回滚
+
+迁移是一次性的单向切换，但切换之后仍然要能退回去。回滚分三种情形，按"损失多少"排序：
+
+### 一、只想回到用 YAML 定义节点（推荐）
+
+这是最常见的情况——DB 里的节点配置有问题，但不需要退回旧版本二进制。**清空三张表即可**，进程下次启动会因为 DB 为空而重新导入 YAML 中的 `nodes:`：
+
+```sh
+sqlite3 gb28181.db <<'SQL'
+BEGIN;
+DELETE FROM node_platforms;
+DELETE FROM node_registrations;
+DELETE FROM nodes;
+COMMIT;
+SQL
+```
+
+先备份再执行（`cp gb28181.db gb28181.db.bak`）。注意这会丢掉运行期通过 API / WebUI 做过的所有节点改动——如果只想回退某一个节点，用下面的二。
+
+### 二、只想回退某一个节点
+
+不要清库。取该节点当前的 DB 行，把 YAML 里改回旧值，再走 API 写回：
+
+```sh
+# 读当前定义（含注册与平台配置，分三块返回）
+curl -s http://127.0.0.1:8080/v1/nodes/34020000011310000001 | jq
+
+# 改完用 PUT 覆盖；cascade 段用单独的端点
+curl -s -X PUT http://127.0.0.1:8080/v1/nodes/34020000011310000001 \
+  -H 'Content-Type: application/json' -d @corrected-node.json | jq
+```
+
+`PUT /v1/nodes/{id}` 是一次覆盖写：请求体中省略的字段会被重置为默认值，不是保留旧值。因此务必先 `GET` 再整体改好再整体 `PUT`，不要只发改动的那一个字段。
+
+### 三、退回旧版本二进制
+
+旧版本的节点真源是 YAML，没有这三张表。步骤：
+
+1. 从 DB **导出**节点定义——用 `yaml_to_db` 的逆过程，或直接 `sqlite3 gb28181.db "SELECT ... FROM nodes"` 后手工还原成 YAML；`cascade_children` 是 JSON 数组，还原成 YAML 的列表。
+2. 把导出的 YAML 放回配置文件（§节点定义持久化 那张表里的 `nodes` / `node_registrations` / `node_platforms` 三块对应 `nodes:` / `registration:` / `platform:`）。
+3. 停掉新版本，用旧版本二进制 + 该 YAML 启动。
+4. 保留 DB 文件但**不要让旧版本碰它**——旧版本不认这三张表，但也不会删它们；确认新版本恢复正常后再决定是否清理。
+
+回滚过程中**不需要**撤销数据库迁移本身：这三张表是纯新增，旧二进制忽略它们，不会因此启动失败。这正是把节点配置放进独立三张表（而不是加列到已有表）的原因。

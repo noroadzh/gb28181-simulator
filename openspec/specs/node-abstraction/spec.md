@@ -120,13 +120,7 @@
 
 ### Requirement: Node configuration is declarative and backward compatible
 
-系统 MUST 接受可选的 `nodes:` 列表，在 YAML 配置中每个条目至少包含
-`id`、`kind`、`domain` 和 `addr`。条目可以额外携带可选的注册段，包含上游平台地址、
-鉴权用户名与密码、请求的 `expires` 和 `transport`；省略该段保持节点未注册状态。条目
-还可以携带可选的 platform 段，包含对下游挑战的 realm、接受的账号，以及授予的
-有效期窗口；省略它以记录的默认值使节点提供服务（见 `platform-large-node`）。省略整个
-`nodes:` 段 MUST 保持当前行为（进程以零节点启动）；id 非法、kind 未知或注册/
-platform 值非法的条目 MUST 使配置加载失败并返回可操作的错误，而非被静默跳过。
+系统 MUST 在进程启动时按照以下顺序初始化节点：1）从 SQLite 数据库的 `nodes` 表读取所有节点定义；2）使用读取到的节点定义装配 `NodeService`（对每个节点调用 `NodeService.Create`，在 `auto_start: true` 时调用 `NodeService.Start`）。配置文件中的 `nodes` 段、节点级 `registration` 段、节点级 `platform` 段 MUST NOT 被装配代码消费。节点定义的真源为 DB，YAML 中残留的节点段在启动时记录 `warn` 级别日志后被忽略。
 
 #### Scenario: 声明两个节点后被加载
 
@@ -162,6 +156,21 @@ platform 值非法的条目 MUST 使配置加载失败并返回可操作的错�
 
 - **WHEN** 某条目的 `platform.realm` 为空、`accounts` 含重复 username 或空密码，或有效期三档不满足 `0 < min ≤ default ≤ max`
 - **THEN** 配置加载返回错误并指出条目序号与字段名；进程不启动；错误体不含密码明文
+
+#### Scenario: DB 节点装配
+
+- **WHEN** DB `nodes` 表存在 2 条记录
+- **THEN** 进程启动后 `NodeService` 中存在 2 个节点，其 ID、kind、addr 等与 DB 行一致
+
+#### Scenario: 配置文件残留 nodes 段被忽略
+
+- **WHEN** 配置文件包含 `nodes:` 段而 DB 为空
+- **THEN** 进程启动后 `NodeService` 中无任何节点，启动日志包含 `warn` 级别 `"ignoring deprecated nodes section in config"`
+
+#### Scenario: 运行时通过 API 添加节点
+
+- **WHEN** 进程已启动，操作者调用 `POST /v1/nodes` 创建新节点
+- **THEN** `nodes` 表新增一行，DB 优先于配置生效
 
 ### Requirement: HTTP API exposes node inventory and per-node control
 

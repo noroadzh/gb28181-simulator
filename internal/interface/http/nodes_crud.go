@@ -55,13 +55,13 @@ type platformInput struct {
 // are optional: a bare device node needs neither, a node that dials
 // upstream needs the first, a node that serves downstreams the second.
 type nodeCreateRequest struct {
-	ID              string   `json:"id"`
-	Kind            string   `json:"kind"`
-	Domain          string   `json:"domain"`
-	Addr            string   `json:"addr"`
-	Vendor          string   `json:"vendor"`
-	CascadeParent   string   `json:"cascade_parent"`
-	CascadeChildren []string `json:"cascade_children"`
+	ID              string             `json:"id"`
+	Kind            string             `json:"kind"`
+	Domain          string             `json:"domain"`
+	Addr            string             `json:"addr"`
+	Vendor          string             `json:"vendor"`
+	CascadeParent   string             `json:"cascade_parent"`
+	CascadeChildren []string           `json:"cascade_children"`
 	Registration    *registrationInput `json:"registration"`
 	Platform        *platformInput     `json:"platform"`
 }
@@ -95,15 +95,15 @@ type cascadeEditRequest struct {
 // create/update caller wants one round trip, not two.
 type nodeDetailResponse struct {
 	nodeResponse
-	Domain          string                `json:"domain,omitempty"`
-	Vendor          string                `json:"vendor,omitempty"`
-	CascadeParent   string                `json:"cascade_parent,omitempty"`
-	CascadeChildren []string              `json:"cascade_children"`
-	Registration    *registrationInput    `json:"registration,omitempty"`
-	Platform        *platformInput        `json:"platform,omitempty"`
-	CatalogPollMs   int                   `json:"catalog_poll_interval_ms,omitempty"`
-	CreatedAt       string                `json:"created_at,omitempty"`
-	UpdatedAt       string                `json:"updated_at,omitempty"`
+	Domain          string             `json:"domain,omitempty"`
+	Vendor          string             `json:"vendor,omitempty"`
+	CascadeParent   string             `json:"cascade_parent,omitempty"`
+	CascadeChildren []string           `json:"cascade_children"`
+	Registration    *registrationInput `json:"registration,omitempty"`
+	Platform        *platformInput     `json:"platform,omitempty"`
+	CatalogPollMs   int                `json:"catalog_poll_interval_ms,omitempty"`
+	CreatedAt       string             `json:"created_at,omitempty"`
+	UpdatedAt       string             `json:"updated_at,omitempty"`
 }
 
 func (s *Server) handleNodeCreate(c echo.Context) error {
@@ -449,11 +449,11 @@ func newNodeDetailResponse(n model.Node, sn model.StoredNode) nodeDetailResponse
 	if sn.HasPlatform {
 		p := sn.Platform
 		resp.Platform = &platformInput{
-			Realm:       p.Realm(),
-			MinExpires:  p.Policy().Min(),
+			Realm:          p.Realm(),
+			MinExpires:     p.Policy().Min(),
 			DefaultExpires: p.Policy().Default(),
-			MaxExpires:  p.Policy().Max(),
-			AllowNoAuth: p.AllowNoAuth(),
+			MaxExpires:     p.Policy().Max(),
+			AllowNoAuth:    p.AllowNoAuth(),
 		}
 	}
 	if !sn.CreatedAt.IsZero() {
@@ -485,25 +485,41 @@ func (s *Server) nodeCRUDError(c echo.Context, action string, id model.NodeID, e
 		s.log.Warn("node crud refused: node not quiescent",
 			"action", action, "node_id", id.String(), "status", status())
 		return c.JSON(http.StatusConflict, nodeError{
-			Error: "node must be stopped before this operation",
+			Error:  "node must be stopped before this operation",
 			Status: status(), Action: action,
 		})
+	case errors.Is(err, app.ErrCascadeSelfParent):
+		s.log.Warn("node cascade refused: self parent",
+			"action", action, "node_id", id.String())
+		return c.JSON(http.StatusBadRequest, errorBody{Error: "node cannot be its own parent"})
+	case errors.Is(err, app.ErrCascadeInvalidID):
+		s.log.Warn("node cascade refused: bad id",
+			"action", action, "node_id", id.String(), "error", err.Error())
+		return c.JSON(http.StatusBadRequest, errorBody{Error: err.Error()})
+	case errors.Is(err, app.ErrCascadeParentNotFound):
+		s.log.Warn("node cascade refused: unknown parent",
+			"action", action, "node_id", id.String())
+		return c.JSON(http.StatusNotFound, errorBody{Error: "parent node not found"})
+	case errors.Is(err, app.ErrCascadeChildNotFound):
+		s.log.Warn("node cascade refused: unknown child",
+			"action", action, "node_id", id.String())
+		return c.JSON(http.StatusNotFound, errorBody{Error: "child node not found"})
 	case errors.Is(err, app.ErrCascadeCycle):
 		s.log.Warn("node cascade refused: cycle", "action", action, "node_id", id.String())
 		return c.JSON(http.StatusConflict, nodeError{
-			Error: "cascade change would create a cycle",
+			Error:  "cascade change would create a cycle",
 			Status: status(), Action: action,
 		})
 	case errors.Is(err, port.ErrNodeAlreadyExists):
 		s.log.Warn("node create refused: already exists", "action", action, "node_id", id.String())
 		return c.JSON(http.StatusConflict, nodeError{
-			Error: "node already exists: " + id.String(),
+			Error:  "node already exists: " + id.String(),
 			Status: status(), Action: action,
 		})
 	case errors.Is(err, port.ErrAddrClaimed):
 		s.log.Warn("node create refused: address in use", "action", action, "node_id", id.String())
 		return c.JSON(http.StatusConflict, nodeError{
-			Error: "listen address already claimed by another node: " + err.Error(),
+			Error:  "listen address already claimed by another node: " + err.Error(),
 			Status: status(), Action: action,
 		})
 	}

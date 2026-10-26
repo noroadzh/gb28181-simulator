@@ -37,6 +37,23 @@ var ErrNodeNotStoppable = errors.New("app: node must be stopped before this oper
 // becoming its own parent, child, or an ancestor of itself.
 var ErrCascadeCycle = errors.New("app: cascade change would close a loop")
 
+// ErrCascadeSelfParent marks a cascade edit that would make a node its own
+// parent. It is distinct from ErrCascadeCycle so the HTTP layer can answer
+// the 400 the API contract names for it, rather than the 409 a loop earns.
+var ErrCascadeSelfParent = errors.New("app: node cannot be its own parent")
+
+// ErrCascadeInvalidID marks a cascade edit naming something that is not a
+// GB/T 28181 node id. It is a caller mistake, not a server fault.
+var ErrCascadeInvalidID = errors.New("app: cascade id is not a valid node id")
+
+// ErrCascadeParentNotFound marks a cascade edit whose parent is not a node
+// this process knows.
+var ErrCascadeParentNotFound = errors.New("app: cascade parent not found")
+
+// ErrCascadeChildNotFound marks a cascade edit naming a child this process
+// does not know.
+var ErrCascadeChildNotFound = errors.New("app: cascade child not found")
+
 // nodeQuiescent reports whether a node sits in a status from which its
 // definition may be edited or deleted: nothing of it is running, so there
 // is no live state to disagree with the new definition.
@@ -245,6 +262,9 @@ func (s *NodeService) UpdateCascade(ctx context.Context, id model.NodeID, parent
 
 	parent = strings.TrimSpace(parent)
 	children = normalizeCascadeChildren(children, id.String())
+	if err := s.validateCascadeEdges(ctx, id, parent, children); err != nil {
+		return err
+	}
 	if err := cascadeWouldCycle(ctx, s.registry, id.String(), parent); err != nil {
 		return err
 	}
@@ -438,6 +458,36 @@ func cascadeWouldCycle(ctx context.Context, r port.NodeRegistry, self, parent st
 			return nil
 		}
 		cur = n.Profile().CascadeParent()
+	}
+	return nil
+}
+
+// validateCascadeEdges rejects a cascade edit that names an id which is not
+// a node id at all, or one this process does not host. The graph is
+// in-process (the cascade handler resolves hops from the registry), so an
+// edge to an unknown id would be stored and then route nowhere — better to
+// refuse it at the boundary than to accept a definition that cannot work.
+func (s *NodeService) validateCascadeEdges(ctx context.Context, id model.NodeID, parent string, children []string) error {
+	if parent != "" {
+		if parent == id.String() {
+			return fmt.Errorf("app: update cascade %s: %w", id, ErrCascadeSelfParent)
+		}
+		pid, err := model.ParseNodeID(parent)
+		if err != nil {
+			return fmt.Errorf("app: update cascade %s: parent %q: %w: %w", id, parent, ErrCascadeInvalidID, err)
+		}
+		if _, ok := s.registry.Get(ctx, pid); !ok {
+			return fmt.Errorf("app: update cascade %s: parent %s: %w", id, pid, ErrCascadeParentNotFound)
+		}
+	}
+	for _, child := range children {
+		cid, err := model.ParseNodeID(child)
+		if err != nil {
+			return fmt.Errorf("app: update cascade %s: child %q: %w: %w", id, child, ErrCascadeInvalidID, err)
+		}
+		if _, ok := s.registry.Get(ctx, cid); !ok {
+			return fmt.Errorf("app: update cascade %s: child %s: %w", id, cid, ErrCascadeChildNotFound)
+		}
 	}
 	return nil
 }

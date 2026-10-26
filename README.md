@@ -140,7 +140,7 @@ nodes:
       heartbeat_max_failures: 3    # 可选；默认 3
 ```
 
-> **节点配置已迁移至数据库**（自 Change "runtime-node-configuration"）。上面的 `nodes:` 段仅作为迁移期的解析兼容保留：DB 为空时被一次性导入，DB 非空时被忽略。运行期改节点请通过 WebUI 或 `POST /v1/nodes`（完整 API 与真源表结构见 [`docs/configuration.md`](docs/configuration.md)）。迁移脚本：`go run scripts/migrations/yaml_to_db.go <release.yaml>` 输出 SQL，请人工核对后再入库。回滚请参同节"节点配置回滚"。
+> **节点配置已迁移至数据库**（自 Change "runtime-node-configuration"）。上面的 `nodes:` 段仅作为迁移期的解析兼容保留：DB 为空时被一次性导入，DB 非空时被忽略。运行期改节点请通过 WebUI 或 `POST /v1/nodes`（完整 API 与真源表结构见 [`docs/configuration.md`](docs/configuration.md)）。迁移脚本：`go run scripts/migrations/yaml_to_db.go <release.yaml>` 输出 SQL，请人工核对后再入库。回滚请参 [`docs/configuration.md` 的"节点配置回滚"](docs/configuration.md#节点配置回滚)。
 
 ## 技术栈
 
