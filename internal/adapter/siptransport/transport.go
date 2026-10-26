@@ -45,8 +45,13 @@ type Transport struct {
 	addr     string
 	nodeID   string
 
-	out    chan sip.Message
-	stop   chan struct{}
+	out  chan sip.Message
+	stop chan struct{}
+	// done closes when the forwarding goroutine has exited. Close waits on
+	// it before releasing the layer, so `out` is closed by its owner
+	// (the goroutine) rather than by Close — closing it from another
+	// goroutine raced with a send still in flight.
+	done   chan struct{}
 	once   sync.Once
 	closed bool
 	mu     sync.Mutex // guards closed
@@ -84,7 +89,12 @@ func New(bind string, opts ...Option) (*Transport, error) {
 	// so we forward non-blockingly and drop under back-pressure (design R5).
 	out := make(chan sip.Message, cfg.receiveBuffer)
 	stop := make(chan struct{})
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
+		// Only the owner closes out: a receiver parked in Receive unblocks
+		// when it sees the closed channel.
+		defer close(out)
 		for {
 			select {
 			case <-stop:
@@ -110,6 +120,7 @@ func New(bind string, opts ...Option) (*Transport, error) {
 	}()
 	return &Transport{
 		layer:    layer,
+		done:     done,
 		bind:     bind,
 		protocol: scheme,
 		addr:     addr,
@@ -204,12 +215,12 @@ func (t *Transport) Close() error {
 	t.once.Do(func() {
 		t.mu.Lock()
 		t.closed = true
-		close(t.stop)
-		// Closing out unblocks any pending Receive calls with io.ErrClosedPipe.
-		// Safe because the forwarding goroutine has exited (stop is closed)
-		// and Send rejects new requests via the closed flag above.
-		close(t.out)
 		t.mu.Unlock()
+
+		// Stop the reader and wait for it: it closes out on its way out, so
+		// no send can race a close made here.
+		close(t.stop)
+		<-t.done
 		t.layer.Cancel()
 		// gosip's layer.Cancel() only closes a "canceled" channel; the
 		// listening socket is released by its own goroutine afterwards, so
