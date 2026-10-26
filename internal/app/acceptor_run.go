@@ -80,7 +80,17 @@ func (a *Acceptor) run(ctx context.Context, p *platform) {
 					a.forwardRelayResponse(ctx, p, msg, entry)
 					continue
 				}
-
+			}
+			// Then: an answer to a control request this node sent itself
+			// (a record query). The waiter is already parked; hand it over.
+			if a.responses != nil {
+				if ch, ok := a.responses.take(p.id, msg); ok {
+					select {
+					case ch <- msg:
+					default:
+					}
+					continue
+				}
 			}
 			// A platform sends no unprompted SIP requests; any Response that
 			// arrives here is the device's answer to a catalog Query we sent.

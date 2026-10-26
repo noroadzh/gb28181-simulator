@@ -60,6 +60,9 @@ type MANSCDPCodec interface {
 	// MarshalDeviceInfoResponse renders a DeviceInfo answer.
 	MarshalDeviceInfoResponse(resp model.DeviceInfoResponse) (string, error)
 
+	// MarshalPlaybackControl renders a PlaybackControl command body.
+	MarshalPlaybackControl(ctrl model.PlaybackControl, scale string) (string, error)
+
 	// MarshalRecordInfoQuery renders a RecordInfo query body.
 	MarshalRecordInfoQuery(query model.RecordInfoQuery, sn uint32) (string, error)
 

@@ -26,6 +26,10 @@ PTZ / 录像查询 / 回放的目标是 device 节点自身（本进程内的 ch
 
 `SendPTZ`/`ListRecords`/`StartPlayback`/`ControlPlayback` 无调用方，直接删除，避免两套语义并存误导读者。
 
+### Decision 6: 录像查询的请求/应答事务放在 acceptor
+
+acceptor 是节点 socket 的唯一读者，事务放别处必然收不到应答。它维护一张与级联中继同构的表：键为 (nodeID, Call-ID, CSeq)，值是等待者通道；等待上限 controlWait（默认 5s），超时返回 ErrControlTimeout（HTTP 504），发送失败返回 ErrControlTargetUnreachable（502）。NodeService 只做目标解析并委托。
+
 ## Risks / Trade-offs
 
 - **R1 真实设备应答差异** → RecordInfo 应答的字段缺失要按空值处理而不是整条丢弃，并记 warn。

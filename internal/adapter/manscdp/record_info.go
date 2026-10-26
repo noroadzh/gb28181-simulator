@@ -161,3 +161,37 @@ func (c *MANSCDPCodecAdapter) MarshalRecordInfoResponse(resp model.RecordInfoRes
 	}
 	return xmlHeader + string(body) + "\n", nil
 }
+
+// playbackControlEnvelope is the wire shape of a PlaybackControl command.
+type playbackControlEnvelope struct {
+	XMLName   xml.Name `xml:"Control"`
+	CmdType   string   `xml:"CmdType"`
+	SN        uint32   `xml:"SN"`
+	DeviceID  string   `xml:"DeviceID"`
+	ChannelID string   `xml:"ChannelID,omitempty"`
+	Cmd       string   `xml:"Cmd,omitempty"`
+	Scale     string   `xml:"Scale,omitempty"`
+}
+
+// MarshalPlaybackControl renders a PlaybackControl command body. scale is
+// only meaningful for the "speed" action and is omitted otherwise.
+func (c *MANSCDPCodecAdapter) MarshalPlaybackControl(ctrl model.PlaybackControl, scale string) (string, error) {
+	if !IsValidDeviceID(ctrl.DeviceID()) {
+		return "", fmt.Errorf("manscdp: playback control without a device id")
+	}
+	if strings.TrimSpace(ctrl.Command()) == "" {
+		return "", fmt.Errorf("manscdp: playback control without a command")
+	}
+	body, err := xml.MarshalIndent(playbackControlEnvelope{
+		CmdType:   model.CmdTypePlaybackControl,
+		SN:        ctrl.SN(),
+		DeviceID:  ctrl.DeviceID(),
+		ChannelID: ctrl.ChannelID(),
+		Cmd:       ctrl.Command(),
+		Scale:     strings.TrimSpace(scale),
+	}, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("manscdp: marshal playback control: %w", err)
+	}
+	return xmlHeader + string(body) + "\n", nil
+}

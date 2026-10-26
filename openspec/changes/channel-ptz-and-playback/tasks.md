@@ -15,9 +15,9 @@
 ## 3. 录像查询与回放
 
 - [x] 3.1 RecordInfo Query 编码与应答解析；验收：golden test（查询 XML + 应答字段），空应答返回空数组而非错误
-- [ ] 3.2 `Records` 实现：发查询并等待应答（超时 504、不可达 502）；验收：app 单测覆盖成功/超时/不可达
-- [ ] 3.3 PlaybackControl（play/pause/teardown/speed）编码与 `Playback` 实现；验收：golden test + 单测断言下发内容
-- [ ] 3.4 回放会话表：重复 play 先拆旧会话、teardown 释放端口与 BYE、空闲超时回收；验收：单测覆盖三条
+- [x] 3.2 `Records` 实现：发查询并等待应答（超时 504、不可达 502）；验收：app 单测覆盖成功/超时/不可达
+- [x] 3.3 PlaybackControl（play/pause/teardown/speed）编码与 `Playback` 实现；验收：golden test + 单测断言下发内容
+- [x] 3.4 回放会话表：重复 play 先拆旧会话、teardown 释放端口与 BYE、空闲超时回收；验收：单测覆盖三条
 - [ ] 3.5 FLV 历史流：复用 `internal/adapter/flv` 接回放源；若需拆出，任务行显式标注为后续；验收：e2e 或单测断言 FLV 头可解析
 
 ## 4. 收尾

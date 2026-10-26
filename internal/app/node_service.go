@@ -59,11 +59,17 @@ type NodeService struct {
 	acceptor       *Acceptor
 	keepaliveCodec port.KeepaliveCodec
 	controlCodec   port.MANSCDPCodec
-	faults         port.FaultStore
-	captures       port.CaptureStore
-	channels       port.ChannelStore
-	nodeStore      port.NodeConfigurationStore
-	events         *events.Hub
+
+	// playback holds one session per node|channel. A second play tears the
+	// old session down first; an idle session tears itself down.
+	playbackMu   sync.Mutex
+	playback     map[string]*playbackSession
+	playbackIdle time.Duration
+	faults       port.FaultStore
+	captures     port.CaptureStore
+	channels     port.ChannelStore
+	nodeStore    port.NodeConfigurationStore
+	events       *events.Hub
 
 	// splits holds the message splitter of every node that is both halves
 	// of a cascade. A platform-small serves and registers over one
@@ -100,14 +106,16 @@ func NewNodeService(
 		clock = realClock{}
 	}
 	return &NodeService{
-		registry:  registry,
-		lifecycle: lifecycle,
-		advancer:  advancer,
-		factory:   factory,
-		clock:     clock,
-		log:       slog.Default(),
-		splits:    newSplitters(),
-		changedAt: make(map[string]time.Time),
+		registry:     registry,
+		lifecycle:    lifecycle,
+		advancer:     advancer,
+		factory:      factory,
+		clock:        clock,
+		log:          slog.Default(),
+		splits:       newSplitters(),
+		changedAt:    make(map[string]time.Time),
+		playback:     make(map[string]*playbackSession),
+		playbackIdle: time.Minute,
 	}, nil
 }
 
@@ -1279,26 +1287,23 @@ func buildDeviceControl(domain, from, target, targetAddr, body string) (model.Me
 	}, body)
 }
 
-// Records returns the recording list for the channel in [start, end].
-//
-// The RecordInfo query is not implemented yet; an empty list would read as
-// "this channel has no recordings", which is a different answer from "we
-// never asked". It therefore reports the missing capability.
+// Records asks the device that owns the channel for its recordings in
+// [start, end]. The query/answer transaction runs in the acceptor (the only
+// reader of the node's socket); this method resolves the target and hands
+// over.
 func (s *NodeService) Records(ctx context.Context, id model.NodeID, channelID string, start, end time.Time) ([]model.RecordInfoItem, error) {
-	return nil, port.RecordUnsupported(id, channelID, "record query is not implemented")
-}
-
-// Playback issues a PLAY/PAUSE/TEARDOWN command for the channel.
-// action ∈ {"play","pause","teardown"}；scale ∈ {-4,-2,1,2,4}.
-//
-// Currently returns ErrPlaybackUnsupported. Full implementation: look up
-// device registration → send playback control XML → manage playback session.
-func (s *NodeService) Playback(ctx context.Context, id model.NodeID, channelID, action string, scale int) error {
-	_ = id
-	_ = channelID
-	_ = action
-	_ = scale
-	return port.ErrPlaybackUnsupported
+	node, ok := s.registry.Get(ctx, id)
+	if !ok {
+		return nil, model.ErrUnknownNode
+	}
+	if s.acceptor == nil {
+		return nil, port.RecordUnsupported(id, channelID, "no acceptor wired")
+	}
+	target, addr, err := s.controlTarget(ctx, node, channelID)
+	if err != nil {
+		return nil, err
+	}
+	return s.acceptor.QueryRecords(ctx, id, target, addr, channelID, start, end)
 }
 
 // TalkStart opens a voice-talk session for the channel. The returned

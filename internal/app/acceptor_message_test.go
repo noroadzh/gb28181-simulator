@@ -140,6 +140,10 @@ func (f *fakeMANSCDP) MarshalDeviceInfoResponse(resp model.DeviceInfoResponse) (
 	return "device-info-response", nil
 }
 
+func (f *fakeMANSCDP) MarshalPlaybackControl(ctrl model.PlaybackControl, scale string) (string, error) {
+	return "<Control/>", nil
+}
+
 func (f *fakeMANSCDP) MarshalRecordInfoQuery(query model.RecordInfoQuery, sn uint32) (string, error) {
 	return "<Query/>", nil
 }

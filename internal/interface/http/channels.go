@@ -503,7 +503,12 @@ func (s *Server) handleChannelRecords(c echo.Context) error {
 	recs, err := s.channels.Records(c.Request().Context(), id, channelID, start, end)
 	if err != nil {
 		var unsupported port.ErrRecordUnsupported
-		if errors.As(err, &unsupported) {
+		switch {
+		case errors.Is(err, port.ErrControlTargetUnreachable):
+			return c.JSON(http.StatusBadGateway, errorBody{Error: err.Error()})
+		case errors.Is(err, port.ErrControlTimeout):
+			return c.JSON(http.StatusGatewayTimeout, errorBody{Error: err.Error()})
+		case errors.As(err, &unsupported):
 			return c.JSON(http.StatusNotImplemented, errorBody{Error: err.Error()})
 		}
 		return c.JSON(http.StatusInternalServerError, errorBody{Error: err.Error()})

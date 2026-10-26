@@ -322,3 +322,60 @@ func (a *Acceptor) answerRelayFailure(ctx context.Context, p *platform, req mode
 			"node_id", p.id.String(), "peer", peer, "error", err.Error())
 	}
 }
+
+// responseTable holds the control requests this node is waiting on an answer
+// for (record queries today, playback acks if they become transactional). It
+// is keyed the same way as the relay table — node, Call-ID, CSeq — for the
+// same reason: one Acceptor serves every node in the process.
+type responseTable struct {
+	mu      sync.Mutex
+	pending map[relayKey]chan model.Message
+}
+
+func newResponseTable() *responseTable {
+	return &responseTable{pending: map[relayKey]chan model.Message{}}
+}
+
+// put registers a waiter for the answer to req and returns the channel it
+// will arrive on.
+func (t *responseTable) put(node model.NodeID, req model.Message) (relayKey, chan model.Message, bool) {
+	key, ok := relayKeyOf(node, req)
+	if !ok {
+		return relayKey{}, nil, false
+	}
+	ch := make(chan model.Message, 1)
+	t.mu.Lock()
+	t.pending[key] = ch
+	t.mu.Unlock()
+	return key, ch, true
+}
+
+// take removes the waiter a response belongs to. A second answer for the same
+// transaction finds nothing: the first one already released it.
+func (t *responseTable) take(node model.NodeID, msg model.Message) (chan model.Message, bool) {
+	key, ok := relayKeyOf(node, msg)
+	if !ok {
+		return nil, false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	ch, ok := t.pending[key]
+	if !ok {
+		return nil, false
+	}
+	delete(t.pending, key)
+	return ch, true
+}
+
+// drop removes a waiter that gave up (timeout, cancelled context).
+func (t *responseTable) drop(key relayKey) {
+	t.mu.Lock()
+	delete(t.pending, key)
+	t.mu.Unlock()
+}
+
+func (t *responseTable) size() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return len(t.pending)
+}

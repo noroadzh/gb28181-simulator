@@ -20,6 +20,10 @@ import (
 // no signalling address. HTTP callers map it to 502.
 var ErrControlTargetUnreachable = errors.New("port: control target unreachable")
 
+// ErrControlTimeout signals that a control request was sent but its answer did
+// not arrive in time. HTTP callers map it to 504.
+var ErrControlTimeout = errors.New("port: control request timed out")
+
 // ErrPTZUnsupported signals that the platform cannot send a PTZ command to
 // the device — typically because the node is not a device, or the device
 // does not expose PTZ.

@@ -58,6 +58,11 @@ type Acceptor struct {
 	relay     *relayTable
 	relayWait time.Duration
 
+	// responses carries the control requests waiting for an answer (record
+	// queries). controlWait bounds that wait.
+	responses   *responseTable
+	controlWait time.Duration
+
 	// catalogPollEvery configures the catalog pull interval for each serving
 	// node. Zero means the poller is disabled (the default). Set through
 	// WithCatalogPollInterval before the first call to Serve.
@@ -166,6 +171,8 @@ func NewAcceptor(
 		inviteWatchers: make(map[string]chan struct{}),
 		relay:          newRelayTable(nil),
 		relayWait:      relayTimeout,
+		responses:      newResponseTable(),
+		controlWait:    5 * time.Second,
 	}, nil
 }
 
