@@ -1,11 +1,15 @@
 package app
 
 import (
+	"bytes"
+	"net"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/your-org/gb28181-simulator/internal/adapter/media"
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/your-org/gb28181-simulator/internal/domain/port"
 )
 
 func playbackInvite(t *testing.T, deviceID model.NodeID, callID, sn string) model.Message {
@@ -78,5 +82,76 @@ func TestDevice_PlaybackWithoutSourceIs404(t *testing.T) {
 	resp := h.tr.deliver(t, playbackInvite(t, deviceID, "play-call-2", "777"))
 	if resp.StatusCode() != 404 {
 		t.Fatalf("status = %d, want 404", resp.StatusCode())
+	}
+}
+
+// Task 1.3: the device sends the recording to the endpoint the offer named,
+// as PS over RTP, for the length of the requested window.
+func TestDevice_PlaybackStreamsRTP(t *testing.T) {
+	listener, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer func() { _ = listener.Close() }()
+	rtpPort := listener.LocalAddr().(*net.UDPAddr).Port
+
+	deviceID := mustDeviceNodeID(t, "34020000001310000008")
+	mediaCfg := model.MediaConfig{Kind: model.SourceKindSynthetic, FPS: 25}
+	h := newDeviceHarness(t, deviceID, nil, &mediaCfg)
+	ms := NewMediaService(
+		func(cfg model.MediaConfig) port.MediaSource {
+			if cfg.Kind == model.SourceKindSynthetic {
+				return media.NewSyntheticSource(cfg)
+			}
+			return nil
+		},
+		func() port.PSPacketizer { return media.NewPSPacketizer(nil) },
+		func(mtu int) port.RTPizer { return media.NewRTPizer(0, mtu, nil) },
+		nil,
+	)
+	h.acceptor.WithMediaService(ms)
+	t.Cleanup(func() { _ = ms.Close() })
+
+	start := time.Now()
+	body, err := model.PlaybackSDPBytes(model.PlaybackSDP{
+		DeviceID: "34020000001310000001001",
+		SN:       "55",
+		ConnIP:   "127.0.0.1",
+		RTPPort:  rtpPort,
+		Start:    start,
+		End:      start.Add(2 * time.Second),
+	})
+	if err != nil {
+		t.Fatalf("PlaybackSDPBytes: %v", err)
+	}
+	invite, err := model.NewRequest("INVITE", "sip:"+deviceID.String()+"@3402000000", []model.Header{
+		model.NewHeader("From", "<sip:platform@3402000000>;tag=p-play"),
+		model.NewHeader("To", "<sip:"+deviceID.String()+"@3402000000>"),
+		model.NewHeader("Call-ID", "play-stream-1"),
+		model.NewHeader("CSeq", "1 INVITE"),
+		model.NewHeader("Via", "SIP/2.0/UDP 127.0.0.1:15060;branch=z9hG4bK-play"),
+		model.NewHeader("Content-Type", "application/sdp"),
+	}, body)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	if resp := h.tr.deliver(t, invite); resp.StatusCode() != 200 {
+		t.Fatalf("INVITE status = %d, want 200", resp.StatusCode())
+	}
+
+	buf := make([]byte, 2048)
+	_ = listener.SetReadDeadline(time.Now().Add(3 * time.Second))
+	n, _, err := listener.ReadFrom(buf)
+	if err != nil {
+		t.Fatalf("no RTP reached the platform endpoint: %v", err)
+	}
+	if n < 12 {
+		t.Fatalf("RTP packet is %d bytes, want a 12-byte header plus payload", n)
+	}
+	if buf[0] != 0x80 {
+		t.Errorf("first byte = 0x%02X, want 0x80 (RTP v2)", buf[0])
+	}
+	if !bytes.HasPrefix(buf[12:n], []byte{0x00, 0x00, 0x01, 0xBA}) {
+		t.Errorf("payload does not start with a PS pack header: % X", buf[12:min(20, n)])
 	}
 }

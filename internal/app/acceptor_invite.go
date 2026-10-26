@@ -9,6 +9,7 @@ package app
 import (
 	"context"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -311,6 +312,7 @@ func (a *Acceptor) answerDevicePlaybackInvite(p *platform, req model.Message) (m
 	}
 	a.devicePlaybacks[callID] = conn
 	a.deviceTalksMu.Unlock()
+	go a.streamPlayback(callID, p, conn, offer)
 
 	hdrs := []model.Header{
 		model.NewHeader("Contact", "<sip:"+p.id.String()+"@"+p.realm+">"),
@@ -323,20 +325,24 @@ func (a *Acceptor) answerDevicePlaybackInvite(p *platform, req model.Message) (m
 	return buildResponse(200, "OK", req, hdrs, body)
 }
 
-// deviceHasMediaSource reports whether the node can produce a recording for
-// channelID: a per-channel source wins, then the node-level one.
-func (a *Acceptor) deviceHasMediaSource(p *platform, channelID string) bool {
+// deviceMediaConfig returns the source the node would play for channelID: a
+// per-channel source wins, then the node-level one.
+func (a *Acceptor) deviceMediaConfig(p *platform, channelID string) (model.MediaConfig, bool) {
 	if a.registry == nil {
-		return false
+		return model.MediaConfig{}, false
 	}
 	node, ok := a.registry.Get(context.Background(), p.id)
 	if !ok {
-		return false
+		return model.MediaConfig{}, false
 	}
-	if _, ok := node.Profile().ChannelMediaConfig(channelID); ok {
-		return true
+	if cfg, ok := node.Profile().ChannelMediaConfig(channelID); ok {
+		return cfg, true
 	}
-	_, ok = node.Profile().MediaConfig()
+	return node.Profile().MediaConfig()
+}
+
+func (a *Acceptor) deviceHasMediaSource(p *platform, channelID string) bool {
+	_, ok := a.deviceMediaConfig(p, channelID)
 	return ok
 }
 
@@ -350,4 +356,46 @@ func (a *Acceptor) closeDevicePlayback(callID string) {
 	if conn != nil {
 		_ = conn.Close()
 	}
+}
+
+// streamPlayback sends the recording to the endpoint the offer named, from now
+// until the offer's end time (or until the port is closed by a BYE). The
+// source is read from its beginning: the file demuxer has no time seek, so a
+// window that starts later is served from the first frame rather than not at
+// all — the log says so at debug level.
+func (a *Acceptor) streamPlayback(callID string, p *platform, conn net.PacketConn, offer model.PlaybackSDP) {
+	if a.mediaService == nil {
+		a.log.Debug("playback stream skipped: no media service wired",
+			"node_id", p.id.String(), "sn", offer.SN)
+		return
+	}
+	cfg, ok := a.deviceMediaConfig(p, offer.DeviceID)
+	if !ok {
+		return
+	}
+	dst, err := net.ResolveUDPAddr("udp", net.JoinHostPort(offer.ConnIP, strconv.Itoa(offer.RTPPort)))
+	if err != nil {
+		a.log.Warn("playback destination is unusable",
+			"node_id", p.id.String(), "dst", offer.ConnIP, "error", err.Error())
+		return
+	}
+	window := time.Until(offer.End)
+	if window <= 0 {
+		a.log.Debug("playback window already closed", "node_id", p.id.String(), "sn", offer.SN)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), window)
+	defer cancel()
+
+	a.log.Debug("playback stream starting",
+		"node_id", p.id.String(), "sn", offer.SN, "dst", dst.String(), "window", window.String())
+	err = a.mediaService.PacketizeOutbound(ctx, cfg, func(pkt model.RTPPacket) error {
+		_, werr := conn.WriteTo(pkt.Bytes(), dst)
+		return werr
+	})
+	if err != nil && ctx.Err() == nil {
+		a.log.Debug("playback stream ended early",
+			"node_id", p.id.String(), "sn", offer.SN, "error", err.Error())
+	}
+	a.closeDevicePlayback(callID)
 }
