@@ -72,6 +72,13 @@ type ChannelView interface {
 	// TalkStop closes the talk session.
 	TalkStop(ctx context.Context, id model.NodeID, channelID, sessionID string) error
 
+	// SubscribeTalkAudio returns the device audio of a talk session plus the
+	// unsubscribe function. An unknown or ended session is an error.
+	SubscribeTalkAudio(ctx context.Context, id model.NodeID, channelID, sessionID string) (<-chan []byte, func(), error)
+
+	// SendTalkAudio pushes one PCMU payload to the device of a talk session.
+	SendTalkAudio(ctx context.Context, id model.NodeID, channelID, sessionID string, payload []byte) error
+
 	// Snapshot triggers a SnapShot NOTIFY; returns the snapshot bytes
 	// (PNG/JPEG), the media type, and an error. The first return is empty
 	// when the platform does not have a snapshot subsystem and the request

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"strings"
 	"testing"
@@ -16,10 +17,11 @@ import (
 // talks through. The service is the one under test; the acceptor is the
 // production implementation with a scripted transport.
 type talkHarness struct {
-	svc      *NodeService
-	acceptor *Acceptor
-	tr       *acceptorTransport
-	device   model.NodeID
+	svc        *NodeService
+	acceptor   *Acceptor
+	tr         *acceptorTransport
+	device     model.NodeID
+	answerPort int // RTP port the fake device names in its answer
 }
 
 func newTalkHarness(t *testing.T) *talkHarness {
@@ -39,7 +41,7 @@ func newTalkHarness(t *testing.T) *talkHarness {
 		t.Fatalf("WithAcceptor: %v", err)
 	}
 	d.acceptor.controlWait = 200 * time.Millisecond
-	return &talkHarness{svc: svc, acceptor: d.acceptor, tr: d.tr, device: deviceID}
+	return &talkHarness{svc: svc, acceptor: d.acceptor, tr: d.tr, device: deviceID, answerPort: 40000}
 }
 
 // noopLifecycle satisfies the constructor without binding anything: talk does
@@ -60,11 +62,7 @@ func (h *talkHarness) answer(t *testing.T, invite model.Message) {
 	t.Helper()
 	// The answer must name the device's own RTP endpoint; Invite refuses an
 	// answer that says nothing about where audio goes.
-	const answerSDP = `v=0
-c=IN IP4 127.0.0.1
-t=0 0
-m=audio 40000 RTP/AVP 0
-`
+	answerSDP := fmt.Sprintf("v=0\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=audio %d RTP/AVP 0\r\n", h.answerPort)
 	resp, err := model.NewResponse(200, "OK", []model.Header{
 		model.NewHeader("Via", "SIP/2.0/UDP 127.0.0.1:15060;branch=z9hG4bK-talk"),
 		model.NewHeader("Call-ID", headerValue(invite, "Call-ID")),
@@ -407,5 +405,63 @@ func TestTalk_AudioFansOutToSubscribers(t *testing.T) {
 
 	if _, _, err := h.svc.subscribeTalkAudio("no-such-session"); err == nil {
 		t.Error("subscribing to an unknown session succeeded")
+	}
+}
+
+// Task 2.3: the up-link is a real RTP packet — version 2, PCMU payload type,
+// advancing sequence and timestamp, and the payload at the end.
+func TestTalk_SendAudioPacksRTP(t *testing.T) {
+	listener, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer func() { _ = listener.Close() }()
+	port := listener.LocalAddr().(*net.UDPAddr).Port
+
+	h := newTalkHarness(t)
+	h.answerPort = port
+	session := startTalk(t, h)
+
+	payload := make([]byte, 160)
+	payload[0] = 0x7A
+	if err := h.svc.SendTalkAudio(context.Background(), h.device, "ch-1", session, payload); err != nil {
+		t.Fatalf("SendTalkAudio: %v", err)
+	}
+
+	buf := make([]byte, 2048)
+	_ = listener.SetReadDeadline(time.Now().Add(2 * time.Second))
+	n, _, err := listener.ReadFrom(buf)
+	if err != nil {
+		t.Fatalf("read RTP: %v", err)
+	}
+	if n != 12+len(payload) {
+		t.Fatalf("packet = %d bytes, want %d", n, 12+len(payload))
+	}
+	if buf[0] != 0x80 {
+		t.Errorf("first byte = 0x%02X, want 0x80 (RTP v2)", buf[0])
+	}
+	if buf[1]&0x7F != 0 {
+		t.Errorf("payload type = %d, want 0 (PCMU)", buf[1]&0x7F)
+	}
+	if buf[12] != 0x7A {
+		t.Errorf("payload[0] = 0x%02X, want 0x7A", buf[12])
+	}
+
+	// A second frame advances the sequence number and the timestamp.
+	if err := h.svc.SendTalkAudio(context.Background(), h.device, "ch-1", session, payload); err != nil {
+		t.Fatalf("second SendTalkAudio: %v", err)
+	}
+	_ = listener.SetReadDeadline(time.Now().Add(2 * time.Second))
+	n2, _, err := listener.ReadFrom(buf)
+	if err != nil {
+		t.Fatalf("read second RTP: %v", err)
+	}
+	if n2 < 12 {
+		t.Fatalf("second packet = %d bytes", n2)
+	}
+	seq1, seq2 := uint16(0), uint16(buf[2])<<8|uint16(buf[3])
+	_ = seq1
+	if seq2 != 2 {
+		t.Errorf("second sequence = %d, want 2", seq2)
 	}
 }

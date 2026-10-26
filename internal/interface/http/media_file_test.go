@@ -338,3 +338,13 @@ func TestMediaFile_LocalFileAliasNormalized(t *testing.T) {
 		t.Fatalf("body = %q, want %q", got, content)
 	}
 }
+
+// The base fake has no talk bridge; tests that exercise it embed this fake
+// and override these two methods.
+func (f *fakeChannelView) SubscribeTalkAudio(_ context.Context, _ model.NodeID, _, _ string) (<-chan []byte, func(), error) {
+	return nil, nil, fmt.Errorf("talk audio unsupported")
+}
+
+func (f *fakeChannelView) SendTalkAudio(_ context.Context, _ model.NodeID, _, _ string, _ []byte) error {
+	return fmt.Errorf("talk audio unsupported")
+}

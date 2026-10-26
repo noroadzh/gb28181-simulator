@@ -18,8 +18,8 @@ import (
 
 	"github.com/your-org/gb28181-simulator/internal/domain/port"
 	"github.com/your-org/gb28181-simulator/internal/interface/webui"
-	"github.com/your-org/gb28181-simulator/internal/platform/events"
 	platformconfig "github.com/your-org/gb28181-simulator/internal/platform/config"
+	"github.com/your-org/gb28181-simulator/internal/platform/events"
 	"github.com/your-org/gb28181-simulator/internal/platform/observability/logging"
 )
 
@@ -165,6 +165,7 @@ func (s *Server) registerRoutes(e *echo.Echo) {
 	// Capture endpoints (Change 13): per-node wire capture as JSON and as
 	// a downloadable pcap document. Queries never evict the buffer.
 	e.GET("/v1/nodes/:id/capture", s.handleQueryCapture)
+	e.GET("/v1/nodes/:id/channels/:ch/talk/audio", s.handleTalkAudio)
 	e.GET("/v1/nodes/:id/capture.pcap", s.handleCapturePCAP)
 
 	// Media-source endpoints (media-source-config change): get, set, or clear

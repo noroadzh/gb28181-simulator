@@ -34,6 +34,10 @@ type talkCall struct {
 	subMu   sync.Mutex
 	subs    map[uint64]chan []byte
 	nextSub uint64
+
+	sendMu sync.Mutex
+	seq    uint16
+	ts     uint32
 }
 
 // talkSessionState is the per-service bookkeeping for talk. It is a separate
@@ -244,4 +248,54 @@ func (s *NodeService) pumpTalkAudio(call *talkCall) {
 		}
 		call.subMu.Unlock()
 	}
+}
+
+// SubscribeTalkAudio exposes the session's audio to the HTTP layer.
+func (s *NodeService) SubscribeTalkAudio(ctx context.Context, id model.NodeID, channelID, sessionID string) (<-chan []byte, func(), error) {
+	return s.subscribeTalkAudio(sessionID)
+}
+
+// SendTalkAudio packs one PCMU payload as RTP and sends it to the device
+// endpoint the answer named. Sequence and timestamp advance per frame so a
+// device can order and time the audio.
+func (s *NodeService) SendTalkAudio(ctx context.Context, id model.NodeID, channelID, sessionID string, payload []byte) error {
+	s.talk.mu.Lock()
+	call := s.talk.calls[sessionID]
+	s.talk.mu.Unlock()
+	if call == nil {
+		return errTalkSessionNotFound
+	}
+	if len(payload) == 0 || len(payload) > 320 {
+		return fmt.Errorf("app: talk audio frame must be 1..320 bytes, got %d", len(payload))
+	}
+	remote, err := net.ResolveUDPAddr("udp", call.remote)
+	if err != nil {
+		return fmt.Errorf("app: talk audio endpoint %q: %w", call.remote, err)
+	}
+
+	call.sendMu.Lock()
+	call.seq++
+	seq := call.seq
+	packet := make([]byte, 12+len(payload))
+	packet[0] = 0x80 // version 2
+	packet[1] = 0    // PCMU, marker clear
+	packet[2] = byte(seq >> 8)
+	packet[3] = byte(seq)
+	ts := call.ts
+	packet[4] = byte(ts >> 24)
+	packet[5] = byte(ts >> 16)
+	packet[6] = byte(ts >> 8)
+	packet[7] = byte(ts)
+	// SSRC derived from the session so it is stable across packets.
+	for i := 0; i < 4; i++ {
+		packet[8+i] = byte(len(call.id) >> (8 * i))
+	}
+	call.ts += uint32(len(payload)) // 8 kHz PCMU: one byte per sample
+	call.sendMu.Unlock()
+
+	copy(packet[12:], payload)
+	if _, err := call.rtp.WriteTo(packet, remote); err != nil {
+		return fmt.Errorf("app: send talk audio to %s: %w", call.remote, err)
+	}
+	return nil
 }

@@ -668,3 +668,11 @@ func mustParseNodeID(t *testing.T, raw string) model.NodeID {
 	}
 	return id
 }
+
+func (a autoIDChannelView) SubscribeTalkAudio(_ context.Context, _ model.NodeID, _, _ string) (<-chan []byte, func(), error) {
+	return nil, nil, fmt.Errorf("talk audio unsupported")
+}
+
+func (a autoIDChannelView) SendTalkAudio(_ context.Context, _ model.NodeID, _, _ string, _ []byte) error {
+	return fmt.Errorf("talk audio unsupported")
+}
