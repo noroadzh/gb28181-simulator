@@ -19,6 +19,8 @@ const playerRef = ref(null)
 let player = null
 const playing = ref(false)
 const playError = ref('')
+// activeSn is the playback session currently streaming, if any.
+let activeSn = ''
 
 function formatTime (offsetSec) {
   const d = new Date(Date.now() + offsetSec * 1000)
@@ -43,19 +45,44 @@ function fmtDuration (sec) {
   return `${Math.floor(sec/3600)}时${Math.floor((sec%3600)/60)}分`
 }
 
-function playRecord (rec) {
-  if (!rec || !rec.playback_url) {
-    playError.value = '该录像没有回放URL'
-    return
-  }
+// rfc3339 normalises a record timestamp so the backend's parser accepts it:
+// records may carry "2026-10-01T00:00:00" while play expects RFC 3339.
+function rfc3339 (value) {
+  const d = new Date(value)
+  return isNaN(d.getTime()) ? value : d.toISOString()
+}
+
+// sessionSn derives a stable id for one recording: the file path when the
+// device reports it, otherwise its channel and start time.
+function sessionSn (rec) {
+  const raw = rec.file_path || `${rec.channel_id}_${rec.start_time}`
+  return String(raw).replace(/[^0-9A-Za-z]/g, '').slice(-24) || String(Date.now())
+}
+
+async function playRecord (rec) {
+  if (!rec) return
   destroyPlayer()
   if (!flvjs.isSupported()) {
     playError.value = '浏览器不支持 FLV'
     return
   }
+  const sn = sessionSn(rec)
+  try {
+    await api.startPlayback(nodeId.value, channelId.value, {
+      sn,
+      start: rfc3339(rec.start_time),
+      end: rfc3339(rec.end_time)
+    })
+  } catch (e) {
+    playError.value = e.message
+    ElMessage.error(`回放建立失败：${e.message}`)
+    return
+  }
+  activeSn = sn
+  playError.value = ''
   player = flvjs.createPlayer({
     type: 'flv',
-    url: rec.playback_url,
+    url: api.playbackFlvUrl(nodeId.value, channelId.value, sn),
     isLive: false
   }, {
     // 同 ChannelDetailView，关闭 worker 避免 flv.js + Vite 5 的模块继承链崩溃。
@@ -78,6 +105,12 @@ function playRecord (rec) {
 }
 
 function destroyPlayer () {
+  // Ending the local view also ends the server-side session, so the device
+  // stops sending.
+  if (activeSn) {
+    api.stopPlayback(nodeId.value, channelId.value, activeSn).catch(() => {})
+    activeSn = ''
+  }
   if (!player) return
   player.pause()
   player.unload()

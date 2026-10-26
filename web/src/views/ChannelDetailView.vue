@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api'
 import { ElMessage } from 'element-plus'
 import flvjs from 'flv.js'
+import { encode as ulawEncode, decode as ulawDecode } from '../utils/ulaw'
 
 const route = useRoute()
 const router = useRouter()
@@ -57,6 +58,11 @@ const ptzActions = [
 // Talk
 const talkActive = ref(false)
 const talkError = ref('')
+let talkWS = null
+let talkStream = null
+let talkCtx = null
+let talkNode = null
+let talkPlayCtx = null
 
 // Snapshot
 const snapshotData = ref(null)
@@ -260,20 +266,90 @@ function stopPtz (key) {
   api.ptzControl(nodeId.value, channelId.value, ptzCmdFor('stop')).catch(() => {})
 }
 
-// Talk
+// Talk：SIP 对话由后端建立，音频在浏览器与 /talk/audio 之间以 PCMU 帧直传。
+async function cleanupTalk () {
+  if (talkWS) {
+    try { talkWS.close() } catch (_) {}
+    talkWS = null
+  }
+  if (talkNode) {
+    try { talkNode.disconnect() } catch (_) {}
+    talkNode = null
+  }
+  if (talkStream) {
+    talkStream.getTracks().forEach((t) => t.stop())
+    talkStream = null
+  }
+  if (talkCtx) {
+    try { await talkCtx.close() } catch (_) {}
+    talkCtx = null
+  }
+  if (talkPlayCtx) {
+    try { await talkPlayCtx.close() } catch (_) {}
+    talkPlayCtx = null
+  }
+}
+
 async function startTalk () {
   try {
-    await api.startTalk(nodeId.value, channelId.value)
+    const info = await api.startTalk(nodeId.value, channelId.value)
+    const session = info && info.session_id
+    if (!session) throw new Error('对讲会话缺少 session_id')
+
+    const Ctx = window.AudioContext || window.webkitAudioContext
+    talkWS = new WebSocket(api.talkAudioUrl(nodeId.value, channelId.value, session))
+    talkWS.binaryType = 'arraybuffer'
+    await new Promise((resolve, reject) => {
+      talkWS.onopen = resolve
+      talkWS.onerror = () => reject(new Error('音频通道连接失败'))
+    })
+
+    talkStream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, sampleRate: 8000, echoCancellation: true, noiseSuppression: true }
+    })
+    talkCtx = new Ctx({ sampleRate: 8000 })
+    talkNode = talkCtx.createScriptProcessor(1024, 1, 1)
+    talkNode.onaudioprocess = (ev) => {
+      if (!talkWS || talkWS.readyState !== WebSocket.OPEN) return
+      const input = ev.inputBuffer.getChannelData(0)
+      const pcm = new Int16Array(input.length)
+      for (let i = 0; i < input.length; i++) {
+        const v = Math.max(-1, Math.min(1, input[i]))
+        pcm[i] = v < 0 ? v * 0x8000 : v * 0x7fff
+      }
+      talkWS.send(ulawEncode(pcm))
+    }
+    talkCtx.createMediaStreamSource(talkStream).connect(talkNode)
+    talkNode.connect(talkCtx.destination)
+
+    // 下行：设备的 PCMU 帧解码后排队播放。
+    talkPlayCtx = new Ctx({ sampleRate: 8000 })
+    talkWS.onmessage = (ev) => {
+      if (!(ev.data instanceof ArrayBuffer) || !talkPlayCtx) return
+      const samples = ulawDecode(new Uint8Array(ev.data))
+      const buf = talkPlayCtx.createBuffer(1, samples.length, 8000)
+      const ch = buf.getChannelData(0)
+      for (let i = 0; i < samples.length; i++) ch[i] = samples[i] / 0x8000
+      const src = talkPlayCtx.createBufferSource()
+      src.buffer = buf
+      src.connect(talkPlayCtx.destination)
+      src.start()
+    }
+
     talkActive.value = true
     talkError.value = ''
     ElMessage.success('对讲已启动')
   } catch (e) {
     talkError.value = e.message
+    talkActive.value = false
+    await cleanupTalk()
+    try { await api.stopTalk(nodeId.value, channelId.value) } catch (_) {}
     ElMessage.error(`对讲启动失败：${e.message}`)
   }
 }
 
 async function stopTalk () {
+  await cleanupTalk()
   try {
     await api.stopTalk(nodeId.value, channelId.value)
     talkActive.value = false
@@ -310,6 +386,7 @@ function copyPlayUrl () {
 }
 
 onBeforeUnmount(() => {
+  cleanupTalk()
   stopPlay()
   if (ptzInterval.value) clearInterval(ptzInterval.value)
   if (snapshotData.value) URL.revokeObjectURL(snapshotData.value)

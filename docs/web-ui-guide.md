@@ -273,9 +273,10 @@ device 节点可展开查看所有通道。该页面从 `GET /v1/nodes/:id/chann
 
 ![通道详情 - 语音对讲](screenshots/14-channel-detail-talk.png)
 
-- 点击「开始对讲」：浏览器请求麦克风权限，采集 PCM 通过 WebSocket 上行到 `/v1/talk/ws/:session_id`。
+- 点击「开始对讲」：浏览器请求麦克风权限，8kHz 单声道采集后在浏览器内编码为 **G.711 μ-law**，经 `/v1/nodes/:id/channels/:ch/talk/audio?session=<id>` 以二进制帧上行；下行帧同样经 μ-law 解码后播放。
 - 后端基于 SIP INVITE 建立音频 RTP 会话（PCMU 编码），下行音频通过 WebSocket 推回浏览器播放。
-- 点击「停止对讲」：关闭 WebSocket，发送 SIP BYE 结束会话。
+- 点击「停止对讲」：关闭 WebSocket，并调用 `talk/stop` 发送 SIP BYE 结束会话。
+- 前提与失败码：目标是 `device` 节点；麦克风被拒或会话失败不会进入「对讲中」；非 device / 能力缺失 501、设备不可达 502、无应答 504、未知 session 404。
 - 后端对应 `POST /v1/nodes/:id/channels/:ch/talk/start` 与 `.../talk/stop`：平台向设备发 INVITE（SDP 携带 PCMU，端口为平台侧的 RTP 接收口），设备以 200 OK + 自己的 SDP 应答；`talk/stop` 发 BYE。
 - 音频走 `GET /v1/nodes/:id/channels/:ch/talk/audio?session=<id>`：二进制帧下行是设备的 PCMU 载荷，上行被封装成 RTP 发往设备。关闭 WebSocket 只退订，不结束对话——结束对话请用 `talk/stop`。
 - 前提：目标是 `device` 节点，且它接受音频 INVITE；未知或已结束的 session 返回 404。
@@ -283,7 +284,8 @@ device 节点可展开查看所有通道。该页面从 `GET /v1/nodes/:id/chann
 ### 5.4 录像列表抽屉
 
 - 点击「录像」按钮展开抽屉：从 `GET /v1/nodes/:id/channels/:ch/records` 查询录像列表（已实现 RecordInfo 查询；下游超时 504、设备不可达 502）。
-- 点击「回放」时，前端以录像条目的 `sn` 与起止时间调用 `POST /playback {action:"play", sn, start, end}`，后端向设备发起带 `t=` 窗口的回放 INVITE；随后从 `GET /v1/nodes/:id/channels/:ch/playback/flv?sn=<sn>` 取 FLV 流。
+- 点击某条录像时，前端以该条目的 `sn`（文件路径或通道+起始时间派生）与起止时间调用 `POST /playback {action:"play", sn, start, end}`，后端向设备发起带 `t=` 窗口的回放 INVITE；成功后用 `GET /v1/nodes/:id/channels/:ch/playback/flv?sn=<sn>` 作为 FLV 源播放。
+- 离开回放页或停止播放时前端发送 `action:"teardown"`，设备停止供流；建立失败（设备拒绝/不可达）直接显示错误，不创建播放器。
 - 每条录像显示开始/结束时间；点击「回放」跳转到录像回放页面。
 
 ### 5.6 能力与限制（2026-10-26）
