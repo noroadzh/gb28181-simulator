@@ -60,6 +60,12 @@ type MANSCDPCodec interface {
 	// MarshalDeviceInfoResponse renders a DeviceInfo answer.
 	MarshalDeviceInfoResponse(resp model.DeviceInfoResponse) (string, error)
 
+	// MarshalRecordInfoQuery renders a RecordInfo query body.
+	MarshalRecordInfoQuery(query model.RecordInfoQuery, sn uint32) (string, error)
+
+	// DecodeRecordInfoResponse parses a RecordInfo answer.
+	DecodeRecordInfoResponse(body string) (model.RecordInfoResponse, error)
+
 	// DecodeRecordInfoQuery parses a RecordInfo query.
 	DecodeRecordInfoQuery(body string) (model.RecordInfoQuery, error)
 

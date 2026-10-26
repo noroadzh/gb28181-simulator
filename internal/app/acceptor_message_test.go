@@ -140,6 +140,14 @@ func (f *fakeMANSCDP) MarshalDeviceInfoResponse(resp model.DeviceInfoResponse) (
 	return "device-info-response", nil
 }
 
+func (f *fakeMANSCDP) MarshalRecordInfoQuery(query model.RecordInfoQuery, sn uint32) (string, error) {
+	return "<Query/>", nil
+}
+
+func (f *fakeMANSCDP) DecodeRecordInfoResponse(body string) (model.RecordInfoResponse, error) {
+	return model.RecordInfoResponse{}, nil
+}
+
 func (f *fakeMANSCDP) DecodeRecordInfoQuery(body string) (model.RecordInfoQuery, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

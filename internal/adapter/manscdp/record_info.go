@@ -3,6 +3,7 @@ package manscdp
 import (
 	"encoding/xml"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
@@ -77,6 +78,33 @@ func (c *MANSCDPCodecAdapter) DecodeRecordInfoQuery(body string) (model.RecordIn
 		return model.RecordInfoQuery{}, err
 	}
 	return model.NewRecordInfoQuery(env.DeviceID, sn, env.StartTime, env.EndTime), nil
+}
+
+// MarshalRecordInfoQuery renders a RecordInfo query body: the platform asks a
+// device which recordings it holds for a channel in a time window.
+func (c *MANSCDPCodecAdapter) MarshalRecordInfoQuery(query model.RecordInfoQuery, sn uint32) (string, error) {
+	deviceID := strings.TrimSpace(query.DeviceID)
+	if deviceID == "" {
+		return "", fmt.Errorf("manscdp: record info query without a device id")
+	}
+	if sn == 0 {
+		sn = query.SN
+	}
+	if sn == 0 {
+		return "", fmt.Errorf("manscdp: record info query with sn 0")
+	}
+	body, err := xml.MarshalIndent(recordInfoQueryEnvelope{
+		CmdType:   model.CmdTypeRecordInfo,
+		SN:        strconv.FormatUint(uint64(sn), 10),
+		DeviceID:  deviceID,
+		StartTime: strings.TrimSpace(query.StartTime),
+		EndTime:   strings.TrimSpace(query.EndTime),
+		Secrecy:   query.Secrecy,
+	}, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("manscdp: marshal record info query: %w", err)
+	}
+	return xmlHeader + string(body) + "\n", nil
 }
 
 // DecodeRecordInfoResponse parses a MANSCDP RecordInfo response body.

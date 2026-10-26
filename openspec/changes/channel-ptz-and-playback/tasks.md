@@ -14,7 +14,7 @@
 
 ## 3. 录像查询与回放
 
-- [ ] 3.1 RecordInfo Query 编码与应答解析；验收：golden test（查询 XML + 应答字段），空应答返回空数组而非错误
+- [x] 3.1 RecordInfo Query 编码与应答解析；验收：golden test（查询 XML + 应答字段），空应答返回空数组而非错误
 - [ ] 3.2 `Records` 实现：发查询并等待应答（超时 504、不可达 502）；验收：app 单测覆盖成功/超时/不可达
 - [ ] 3.3 PlaybackControl（play/pause/teardown/speed）编码与 `Playback` 实现；验收：golden test + 单测断言下发内容
 - [ ] 3.4 回放会话表：重复 play 先拆旧会话、teardown 释放端口与 BYE、空闲超时回收；验收：单测覆盖三条
