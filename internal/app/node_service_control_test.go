@@ -16,6 +16,9 @@ import (
 func TestPTZAndRecordsReportUnsupported(t *testing.T) {
 	ctx := context.Background()
 	svc, _, _, _ := newTestService(t)
+	if _, err := svc.Create(ctx, testProfile(t, "34020000001310000001", "127.0.0.1:15061")); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
 	id := mustParse(t, "34020000001310000001")
 
 	var ptzErr port.ErrPTZUnsupported

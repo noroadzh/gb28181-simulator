@@ -466,6 +466,11 @@ func run() error {
 			if _, err := svc.WithLogger(logging.L()); err != nil {
 				return nil, fmt.Errorf("node service: %w", err)
 			}
+			// Device control (PTZ) renders its MANSCDP body through the same
+			// codec the acceptor decodes with, so the two sides cannot drift.
+			if _, err := svc.WithControlCodec(manscdp.NewMANSCDPCodec()); err != nil {
+				return nil, fmt.Errorf("node service: %w", err)
+			}
 			// Device registration: the use case lives in app, the Digest
 			// client behind it is an adapter, and the app sees only the
 			// domain port.

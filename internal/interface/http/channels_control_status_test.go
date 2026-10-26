@@ -2,6 +2,7 @@ package httpapi_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -51,5 +52,32 @@ func TestChannelControl_UnsupportedIs501(t *testing.T) {
 	defer func() { _ = resp2.Body.Close() }()
 	if resp2.StatusCode != http.StatusNotImplemented {
 		t.Errorf("records status = %d, want 501", resp2.StatusCode)
+	}
+}
+
+// unreachableControlView reports the downstream device as offline.
+type unreachableControlView struct{ *fakeChannelView }
+
+func (v unreachableControlView) PTZ(_ context.Context, _ model.NodeID, _, _ string, _, _ int) error {
+	return fmt.Errorf("%w: device 34020000001310000001 is not online", port.ErrControlTargetUnreachable)
+}
+
+// An offline downstream is 502, not 501: the capability exists, the target
+// does not.
+func TestChannelControl_UnreachableIs502(t *testing.T) {
+	nodes := newFakeNodeView()
+	node := nodes.seed(t, "34020000001310000001", "127.0.0.1:15061", model.StatusOnline)
+	ts := newMediaFileServer(t, nodes, unreachableControlView{newFakeChannelView()})
+	defer ts.Close()
+
+	resp, err := http.Post(
+		ts.URL+"/v1/nodes/"+node.ID().String()+"/channels/34020000001310000001001/ptz",
+		"application/json", strings.NewReader(`{"direction":"up","speed":128}`))
+	if err != nil {
+		t.Fatalf("POST ptz: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Errorf("PTZ status = %d, want 502", resp.StatusCode)
 	}
 }

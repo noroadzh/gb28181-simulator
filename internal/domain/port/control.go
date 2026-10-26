@@ -9,10 +9,16 @@
 package port
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
 )
+
+// ErrControlTargetUnreachable signals that the device a control command
+// targets cannot be reached: it is not in the node's online table, or it has
+// no signalling address. HTTP callers map it to 502.
+var ErrControlTargetUnreachable = errors.New("port: control target unreachable")
 
 // ErrPTZUnsupported signals that the platform cannot send a PTZ command to
 // the device — typically because the node is not a device, or the device

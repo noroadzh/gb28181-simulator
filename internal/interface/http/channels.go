@@ -428,6 +428,9 @@ func (s *Server) handleChannelPTZ(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, errorBody{Error: "duration_ms must be >= 0"})
 	}
 	if err := s.channels.PTZ(c.Request().Context(), id, channelID, in.Direction, in.Speed, in.DurationMs); err != nil {
+		if errors.Is(err, port.ErrControlTargetUnreachable) {
+			return c.JSON(http.StatusBadGateway, errorBody{Error: err.Error()})
+		}
 		var unsupported port.ErrPTZUnsupported
 		if errors.As(err, &unsupported) ||
 			errors.Is(err, port.ErrTalkUnsupported) ||

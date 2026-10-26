@@ -58,6 +58,7 @@ type NodeService struct {
 	keeper         *Keeper
 	acceptor       *Acceptor
 	keepaliveCodec port.KeepaliveCodec
+	controlCodec   port.MANSCDPCodec
 	faults         port.FaultStore
 	captures       port.CaptureStore
 	channels       port.ChannelStore
@@ -281,6 +282,16 @@ func (s *NodeService) WithAcceptor(a *Acceptor) (*NodeService, error) {
 // notify bodies (keepalive, alarm). Without one TriggerAlarm records the
 // snapshot but does not send upstream, which is what tests that do not
 // exercise the wire path want.
+// WithControlCodec attaches the MANSCDP codec used to render outbound
+// device-control bodies (PTZ, and later playback control and record queries).
+func (s *NodeService) WithControlCodec(c port.MANSCDPCodec) (*NodeService, error) {
+	if c == nil {
+		return nil, fmt.Errorf("app: NodeService requires a non-nil MANSCDP codec")
+	}
+	s.controlCodec = c
+	return s, nil
+}
+
 func (s *NodeService) WithKeepaliveCodec(c port.KeepaliveCodec) (*NodeService, error) {
 	if c == nil {
 		return nil, fmt.Errorf("app: NodeService requires a non-nil KeepaliveCodec")
@@ -1179,7 +1190,93 @@ func (s *NodeService) Channel(ctx context.Context, id model.NodeID, channelID st
 // of returning nil: a silent 200 told the dashboard a camera had moved when
 // nothing had been sent, which is worse than an honest 501.
 func (s *NodeService) PTZ(ctx context.Context, id model.NodeID, channelID, direction string, speed, durationMs int) error {
-	return port.PTZUnsupported(id, channelID, "outbound device control is not implemented")
+	node, ok := s.registry.Get(ctx, id)
+	if !ok {
+		return model.ErrUnknownNode
+	}
+	if s.controlCodec == nil {
+		return port.PTZUnsupported(id, channelID, "no MANSCDP codec wired")
+	}
+	command, err := model.EncodePTZCmd(direction, speed)
+	if err != nil {
+		return port.PTZUnsupported(id, channelID, err.Error())
+	}
+	tr := s.lifecycle.Transport(id)
+	if tr == nil {
+		return port.PTZUnsupported(id, channelID, "node has no bound listener")
+	}
+	target, addr, err := s.controlTarget(ctx, node, channelID)
+	if err != nil {
+		return err
+	}
+
+	sn := uint32(s.clock.Now().UnixNano())
+	body, err := s.controlCodec.MarshalPTZControl(
+		model.NewPTZControl(target, channelID, command, sn, speed, 0))
+	if err != nil {
+		return port.PTZUnsupported(id, channelID, err.Error())
+	}
+	msg, err := buildDeviceControl(node.Profile().Domain(), id.String(), target, addr, body)
+	if err != nil {
+		return fmt.Errorf("app: build PTZ message: %w", err)
+	}
+	if err := tr.Send(ctx, msg, addr); err != nil {
+		return fmt.Errorf("app: send PTZ to %s: %w: %w", addr, port.ErrControlTargetUnreachable, err)
+	}
+	// durationMs has no field in the direction-encoded PTZCmd; a continuous
+	// move is stopped by a "stop" command, as the standard intends.
+	s.log.Info("ptz sent",
+		"node_id", id.String(), "target", target, "channel", channelID,
+		"direction", direction, "speed", speed)
+	return nil
+}
+
+// controlTarget resolves who a control command is sent to and where.
+//
+// A device node is the simulated device itself, so the command loops back to
+// its own listener: the device's acceptor then decodes it through the same
+// path a real platform's command would take. A platform node owns no media
+// itself; the command goes to the online downstream device that owns the
+// channel (by the channel's parent), or to the only online device when the
+// channel does not name one.
+func (s *NodeService) controlTarget(ctx context.Context, node model.Node, channelID string) (string, string, error) {
+	if node.ID().Kind() == model.NodeKindDevice {
+		return node.ID().String(), node.Profile().Addr(), nil
+	}
+	owner := ""
+	if ch, ok := node.Profile().ChannelByID(channelID); ok {
+		owner = ch.ParentID()
+	}
+	devices, err := s.Devices(ctx, node.ID())
+	if err != nil {
+		return "", "", err
+	}
+	if owner != "" {
+		for _, d := range devices {
+			if d.DeviceID() == owner {
+				return owner, d.Addr(), nil
+			}
+		}
+		return "", "", fmt.Errorf("%w: device %s is not online", port.ErrControlTargetUnreachable, owner)
+	}
+	if len(devices) == 1 {
+		return devices[0].DeviceID(), devices[0].Addr(), nil
+	}
+	return "", "", fmt.Errorf("%w: node %s has %d online devices and channel %s names no owner",
+		port.ErrControlTargetUnreachable, node.ID(), len(devices), channelID)
+}
+
+// buildDeviceControl renders the MESSAGE that carries a device-control body.
+func buildDeviceControl(domain, from, target, targetAddr, body string) (model.Message, error) {
+	uri := fmt.Sprintf("sip:%s@%s", target, targetAddr)
+	return model.NewRequest("MESSAGE", uri, []model.Header{
+		model.NewHeader("From", fmt.Sprintf("<sip:%s@%s>;tag=%s", from, domain, randomTag())),
+		model.NewHeader("To", fmt.Sprintf("<sip:%s@%s>", target, targetAddr)),
+		model.NewHeader("Call-ID", randomCallID()),
+		model.NewHeader("CSeq", "1 MESSAGE"),
+		model.NewHeader("Max-Forwards", "70"),
+		model.NewHeader("Content-Type", "Application/MANSCDP+XML"),
+	}, body)
 }
 
 // Records returns the recording list for the channel in [start, end].
