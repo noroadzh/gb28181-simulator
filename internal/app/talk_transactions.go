@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"fmt"
+	"net"
+	"strings"
 	"time"
 
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
@@ -15,10 +17,10 @@ import (
 //
 // A non-2xx answer is reported as unsupported: the device understood the
 // INVITE and refused it, which is a capability answer rather than a timeout.
-func (a *Acceptor) Invite(ctx context.Context, id model.NodeID, target, addr, body string) (string, error) {
+func (a *Acceptor) Invite(ctx context.Context, id model.NodeID, target, addr, body string) (string, string, error) {
 	p, ok := a.platformByID(id)
 	if !ok || p.tr == nil {
-		return "", fmt.Errorf("%w: node %s is not serving", port.ErrControlTargetUnreachable, id)
+		return "", "", fmt.Errorf("%w: node %s is not serving", port.ErrControlTargetUnreachable, id)
 	}
 	callID := randomCallID()
 	req, err := model.NewRequest("INVITE", fmt.Sprintf("sip:%s@%s", target, addr), []model.Header{
@@ -31,16 +33,16 @@ func (a *Acceptor) Invite(ctx context.Context, id model.NodeID, target, addr, bo
 		model.NewHeader("Content-Type", "application/sdp"),
 	}, body)
 	if err != nil {
-		return "", fmt.Errorf("app: build INVITE: %w", err)
+		return "", "", fmt.Errorf("app: build INVITE: %w", err)
 	}
 
 	key, answer, ok := a.responses.put(id, req)
 	if !ok {
-		return "", fmt.Errorf("%w: INVITE carries no transaction identity", port.ErrTalkUnsupported)
+		return "", "", fmt.Errorf("%w: INVITE carries no transaction identity", port.ErrTalkUnsupported)
 	}
 	if err := p.tr.Send(ctx, req, addr); err != nil {
 		a.responses.drop(key)
-		return "", fmt.Errorf("app: send INVITE to %s: %w: %w",
+		return "", "", fmt.Errorf("app: send INVITE to %s: %w: %w",
 			addr, port.ErrControlTargetUnreachable, err)
 	}
 
@@ -52,18 +54,23 @@ func (a *Acceptor) Invite(ctx context.Context, id model.NodeID, target, addr, bo
 	defer timer.Stop()
 	select {
 	case resp := <-answer:
-		if resp.StatusCode() >= 200 && resp.StatusCode() < 300 {
-			return callID, nil
+		if resp.StatusCode() < 200 || resp.StatusCode() >= 300 {
+			return "", "", fmt.Errorf("%w: device answered %d %s",
+				port.ErrTalkUnsupported, resp.StatusCode(), resp.StatusText())
 		}
-		return "", fmt.Errorf("%w: device answered %d %s",
-			port.ErrTalkUnsupported, resp.StatusCode(), resp.StatusText())
+		remote, perr := parseRTPEndpoint(resp.Body())
+		if perr != nil {
+			return "", "", fmt.Errorf("%w: answer from %s: %v",
+				port.ErrControlTargetUnreachable, target, perr)
+		}
+		return callID, remote, nil
 	case <-ctx.Done():
 		a.responses.drop(key)
-		return "", ctx.Err()
+		return "", "", ctx.Err()
 	case <-timer.C:
 		a.responses.drop(key)
 		a.log.Warn("talk INVITE timed out", "node_id", id.String(), "target", target, "wait", wait)
-		return "", fmt.Errorf("%w: INVITE to %s after %s", port.ErrControlTimeout, target, wait)
+		return "", "", fmt.Errorf("%w: INVITE to %s after %s", port.ErrControlTimeout, target, wait)
 	}
 }
 
@@ -90,4 +97,28 @@ func (a *Acceptor) Bye(ctx context.Context, id model.NodeID, target, addr, callI
 			addr, port.ErrControlTargetUnreachable, err)
 	}
 	return nil
+}
+
+// parseRTPEndpoint reads the device's RTP endpoint out of an SDP answer:
+// the c= connection address and the m=audio port. Both are required — an
+// answer without them says nothing about where audio should go.
+func parseRTPEndpoint(sdp string) (string, error) {
+	host := ""
+	port := ""
+	for _, line := range strings.Split(sdp, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "c=IN IP4 "):
+			host = strings.TrimSpace(strings.TrimPrefix(line, "c=IN IP4 "))
+		case strings.HasPrefix(line, "m=audio "):
+			fields := strings.Fields(strings.TrimPrefix(line, "m=audio "))
+			if len(fields) > 0 {
+				port = fields[0]
+			}
+		}
+	}
+	if host == "" || port == "" || port == "0" {
+		return "", fmt.Errorf("answer carries no RTP endpoint (c=%q m=audio %q)", host, port)
+	}
+	return net.JoinHostPort(host, port), nil
 }

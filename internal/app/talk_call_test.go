@@ -57,11 +57,19 @@ func (noopLifecycle) Fail(context.Context, model.NodeID, error) error { return n
 // transaction identity.
 func (h *talkHarness) answer(t *testing.T, invite model.Message) {
 	t.Helper()
+	// The answer must name the device's own RTP endpoint; Invite refuses an
+	// answer that says nothing about where audio goes.
+	const answerSDP = `v=0
+c=IN IP4 127.0.0.1
+t=0 0
+m=audio 40000 RTP/AVP 0
+`
 	resp, err := model.NewResponse(200, "OK", []model.Header{
 		model.NewHeader("Via", "SIP/2.0/UDP 127.0.0.1:15060;branch=z9hG4bK-talk"),
 		model.NewHeader("Call-ID", headerValue(invite, "Call-ID")),
 		model.NewHeader("CSeq", headerValue(invite, "CSeq")),
-	}, "")
+		model.NewHeader("Content-Type", "application/sdp"),
+	}, answerSDP)
 	if err != nil {
 		t.Fatalf("NewResponse: %v", err)
 	}
@@ -271,4 +279,80 @@ func TestTalk_PeerByeReclaims(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("a peer BYE left the talk session registered")
+}
+
+// Task 1.2: the answer's endpoint is what the up-link will target, so it is
+// kept on the session.
+func TestTalkStart_StoresTheDeviceRTPEndpoint(t *testing.T) {
+	h := newTalkHarness(t)
+	session := startTalk(t, h)
+
+	h.svc.talk.mu.Lock()
+	call := h.svc.talk.calls[session]
+	h.svc.talk.mu.Unlock()
+	if call == nil {
+		t.Fatalf("session %s is not registered", session)
+	}
+	if call.remote != "127.0.0.1:40000" {
+		t.Errorf("remote = %q, want the endpoint from the answer SDP", call.remote)
+	}
+}
+
+// Task 1.2: an answer that names no endpoint is refused rather than guessed.
+func TestTalkStart_AnswerWithoutEndpointIsUnreachable(t *testing.T) {
+	h := newTalkHarness(t)
+
+	type result struct{ err error }
+	done := make(chan result, 1)
+	go func() {
+		_, _, err := h.svc.TalkStart(context.Background(), h.device, "ch-1")
+		done <- result{err}
+	}()
+	invite := waitForSend(t, h.tr)
+	empty, err := model.NewResponse(200, "OK", []model.Header{
+		model.NewHeader("Via", "SIP/2.0/UDP 127.0.0.1:15060;branch=z9hG4bK-talk"),
+		model.NewHeader("Call-ID", headerValue(invite, "Call-ID")),
+		model.NewHeader("CSeq", headerValue(invite, "CSeq")),
+	}, "")
+	if err != nil {
+		t.Fatalf("NewResponse: %v", err)
+	}
+	h.tr.inbound <- empty
+
+	select {
+	case res := <-done:
+		if !errors.Is(res.err, port.ErrControlTargetUnreachable) {
+			t.Fatalf("err = %v, want ErrControlTargetUnreachable", res.err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("TalkStart never returned")
+	}
+}
+
+func TestParseRTPEndpoint(t *testing.T) {
+	cases := []struct {
+		name string
+		sdp  string
+		want string
+		ok   bool
+	}{
+		{"typical", "v=0\nc=IN IP4 10.0.0.5\nt=0 0\nm=audio 40000 RTP/AVP 0\n", "10.0.0.5:40000", true},
+		{"no connection", "m=audio 40000 RTP/AVP 0\n", "", false},
+		{"no audio", "c=IN IP4 10.0.0.5\nm=video 40002 RTP/AVP 96\n", "", false},
+		{"port zero", "c=IN IP4 10.0.0.5\nm=audio 0 RTP/AVP 0\n", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseRTPEndpoint(tc.sdp)
+			if tc.ok {
+				if err != nil || got != tc.want {
+					t.Fatalf("got (%q, %v), want %q", got, err, tc.want)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("got %q, want an error", got)
+			}
+		})
+	}
 }

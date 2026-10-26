@@ -23,6 +23,7 @@ type talkCall struct {
 	target  string
 	addr    string
 	rtp     net.PacketConn
+	remote  string // device RTP endpoint from the answer SDP
 	cancel  context.CancelFunc
 }
 
@@ -80,13 +81,13 @@ func (s *NodeService) TalkStart(ctx context.Context, id model.NodeID, channelID 
 	}
 	body := buildTalkOffer(localIP, localPort)
 
-	callID, err := s.acceptor.Invite(ctx, id, target, addr, body)
+	callID, remote, err := s.acceptor.Invite(ctx, id, target, addr, body)
 	if err != nil {
 		_ = conn.Close()
 		return "", "", err
 	}
 
-	call := &talkCall{id: callID, node: id, channel: channelID, target: target, addr: addr, rtp: conn}
+	call := &talkCall{id: callID, node: id, channel: channelID, target: target, addr: addr, rtp: conn, remote: remote}
 	s.talk.mu.Lock()
 	if s.talk.calls == nil {
 		s.talk.calls = map[string]*talkCall{}

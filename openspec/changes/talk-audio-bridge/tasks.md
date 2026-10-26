@@ -3,7 +3,7 @@
 ## 1. 打通设备侧与端点解析
 
 - [x] 1.1 `acceptor_run.go` 的设备门禁放行 INVITE（保留 ACK 静默、其余方法 405）；验收：单测断言 device 节点收到音频 INVITE 时不再回 405
-- [ ] 1.2 `Invite` 解析 200 OK 的 SDP（`c=IN IP4` + `m=audio`），把设备 RTP 端点存入会话；缺字段返回 502；验收：单测覆盖成功解析与缺行两种
+- [x] 1.2 `Invite` 解析 200 OK 的 SDP（`c=IN IP4` + `m=audio`），把设备 RTP 端点存入会话；缺字段返回 502；验收：单测覆盖成功解析与缺行两种
 - [x] 1.3 设备侧 `handleInvite` 对只有 video m-line 的 INVITE 回 488；验收：单测
 
 ## 2. 音频桥
