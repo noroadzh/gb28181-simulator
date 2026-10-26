@@ -10,9 +10,9 @@
 ## 2. HTTP 与端到端
 
 - [x] 2.1 `GET /v1/nodes/:id/channels/:ch/playback/flv?sn=`；未知/未开流 404，开流后 200 + `video/x-flv`；验收：httptest 三条
-- [ ] 2.2 e2e：真实二进制 → device + 本地文件源 → play（带时间窗）→ 取 FLV，断言 `FLV` 魔数与可解析首帧；验收：`go test ./internal/test/e2e/...` 通过
+- [x] 2.2 e2e：真实二进制 → device + 本地文件源 → play（带时间窗）→ 取 FLV，断言 `FLV` 魔数与可解析首帧；验收：`go test ./internal/test/e2e/...` 通过
 
 ## 3. 收尾
 
-- [ ] 3.1 `docs/web-ui-guide.md`：回放 FLV 从「未实现」改为可用，写明前提与 404 语义；验收：人工审阅
-- [ ] 3.2 `openspec validate playback-flv-stream --strict --type change`、`make lint`、`make test` 通过；验收：退出码 0
+- [x] 3.1 `docs/web-ui-guide.md`：回放 FLV 从「未实现」改为可用，写明前提与 404 语义；验收：人工审阅
+- [x] 3.2 `openspec validate playback-flv-stream --strict --type change`、`make lint`、`make test` 通过；验收：退出码 0

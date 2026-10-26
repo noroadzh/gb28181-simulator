@@ -283,6 +283,7 @@ device 节点可展开查看所有通道。该页面从 `GET /v1/nodes/:id/chann
 ### 5.4 录像列表抽屉
 
 - 点击「录像」按钮展开抽屉：从 `GET /v1/nodes/:id/channels/:ch/records` 查询录像列表（已实现 RecordInfo 查询；下游超时 504、设备不可达 502）。
+- 点击「回放」时，前端以录像条目的 `sn` 与起止时间调用 `POST /playback {action:"play", sn, start, end}`，后端向设备发起带 `t=` 窗口的回放 INVITE；随后从 `GET /v1/nodes/:id/channels/:ch/playback/flv?sn=<sn>` 取 FLV 流。
 - 每条录像显示开始/结束时间；点击「回放」跳转到录像回放页面。
 
 ### 5.6 能力与限制（2026-10-26）
@@ -298,7 +299,7 @@ device 节点可展开查看所有通道。该页面从 `GET /v1/nodes/:id/chann
 | 快照（通道未配置媒体源） | **503** |
 | 录像查询 | 已实现（RecordInfo 查询/应答）；下游超时 **504**、设备不可达 **502** |
 | 回放控制 play / pause / teardown / speed | 已实现；同一通道重复 play 会先拆掉旧会话 |
-| 回放 FLV 历史流 | 未实现（路线图 #37） |
+| 回放 FLV 历史流 | 已实现：`POST /playback` 带 `sn`+`start`+`end` 发起回放 INVITE，`GET …/playback/flv?sn=` 出流；未知或已过期会话 404 |
 | 语音对讲 | 已实现：INVITE/BYE 控制面 + `/talk/audio` WebSocket 音频桥（PCMU）；非 device 501、对端不可达 502、无应答 504、未知 session 404 |
 
 ### 5.5 拉流地址复制
