@@ -12,9 +12,9 @@
 - [x] 2.1 定义 `port.FrameRenderer`（按 `model.MediaConfig` 产出一帧 JPEG）与两个哨兵（`ErrFrameRenderUnsupported`、`ErrSnapshotNoMedia`）；验收：接口与哨兵可被 app 与适配器各自引用，`go build ./...` 通过
 - [x] 2.2 适配器实现合成测试图渲染器（复用 `SyntheticSource.renderFrame` → `image/jpeg`）并在 main 注入；`Snapshot` 读取通道媒体配置后调用渲染器；验收：适配器单测断言 JPEG magic 与尺寸，app 单测用假渲染器断言透传
 - [x] 2.3 失败语义：无媒体源 503、非 device 501、需要解码的编码 501；HTTP 映射补齐；验收：三条单测
-- [ ] 2.4 e2e：对配置本地文件源的 device 抓拍并断言 JPEG；验收：`go test ./internal/test/e2e/...` 通过
+- [x] 2.4 e2e：对配置**合成测试图**源的 device 抓拍并断言 JPEG（SOI 标记、可解码、640x480）；验收：`go test ./internal/test/e2e/...` 通过
 
 ## 3. 收尾
 
-- [ ] 3.1 文档：`docs/web-ui-guide.md` 增补对讲/抓拍的使用前提与失败码；验收：人工审阅
+- [x] 3.1 文档：`docs/web-ui-guide.md` 增补对讲/抓拍的使用前提与失败码；验收：人工审阅
 - [ ] 3.2 `openspec validate channel-talk-and-snapshot --strict --type change`、`make lint`、`make test` 通过；验收：退出码 0

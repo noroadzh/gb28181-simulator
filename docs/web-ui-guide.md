@@ -263,7 +263,7 @@ device 节点可展开查看所有通道。该页面从 `GET /v1/nodes/:id/chann
 ![通道详情 - PTZ 云台控制](screenshots/13-channel-detail-ptz.png)
 
 - **方向按钮**：八方向（上/下/左/右/左上/右上/左下/右下），按住持续发送指令（每 500ms 轮询一次），松开停止。
-- **辅助功能**：变倍（zoom in/out）、变焦（focus near/far）、光圈（iris open/close）。
+- **辅助功能**：变倍（zoom in/out）、变焦（focus near/far）已实现；光圈（iris open/close）与预置位暂不支持，后端返回 501（见 §5.6）。
 - **速度滑块**：控制转动速度（1–10），默认 5。
 - **预置位**：输入预置位号（1–255），点击「预设」保存当前位置，「调用」触发定位。
 - **抓图**：点击「抓图」按钮调用 `GET /v1/nodes/:id/channels/:ch/snapshot`，返回 JPEG 并自动下载。
@@ -276,12 +276,28 @@ device 节点可展开查看所有通道。该页面从 `GET /v1/nodes/:id/chann
 - 点击「开始对讲」：浏览器请求麦克风权限，采集 PCM 通过 WebSocket 上行到 `/v1/talk/ws/:session_id`。
 - 后端基于 SIP INVITE 建立音频 RTP 会话（PCMU 编码），下行音频通过 WebSocket 推回浏览器播放。
 - 点击「停止对讲」：关闭 WebSocket，发送 SIP BYE 结束会话。
-- 后端对应 `POST /v1/nodes/:id/channels/:ch/talk/start` 与 `.../talk/stop`。
+- 后端对应 `POST /v1/nodes/:id/channels/:ch/talk/start` 与 `.../talk/stop`。**当前信令尚未实现，接口返回 501**（见 §5.6）。
 
 ### 5.4 录像列表抽屉
 
-- 点击「录像」按钮展开抽屉：从 `GET /v1/nodes/:id/channels/:ch/records` 查询录像列表。
+- 点击「录像」按钮展开抽屉：从 `GET /v1/nodes/:id/channels/:ch/records` 查询录像列表（已实现 RecordInfo 查询；下游超时 504、设备不可达 502）。
 - 每条录像显示开始/结束时间；点击「回放」跳转到录像回放页面。
+
+### 5.6 能力与限制（2026-10-26）
+
+通道控制面的接口已全部就位，但实现进度不同。遇到未实现或不支持的路径时，后端返回明确的状态码，而不是静默成功：
+
+| 操作 | 当前行为 |
+|---|---|
+| PTZ 八方向 / 变倍 / 聚焦 | 已实现：MANSCDP DeviceControl 下发（device 节点自环、platform 节点转发下级） |
+| PTZ 光圈、预置位 | **501**：这套 PTZCmd 位布局没有对应字段 |
+| 快照（合成测试图源） | 200 + JPEG（640×480） |
+| 快照（file / RTSP / HLS 源） | **501**：需要视频解码器，当前构建不含 |
+| 快照（通道未配置媒体源） | **503** |
+| 录像查询 | 已实现（RecordInfo 查询/应答）；下游超时 **504**、设备不可达 **502** |
+| 回放控制 play / pause / teardown / speed | 已实现；同一通道重复 play 会先拆掉旧会话 |
+| 回放 FLV 历史流 | 未实现（路线图 #37） |
+| 语音对讲 | 接口已定义，信令实现进行中，当前 **501** |
 
 ### 5.5 拉流地址复制
 
