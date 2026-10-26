@@ -250,6 +250,8 @@ func TestNodesCRUD_StatusCodes(t *testing.T) {
 		{"delete unknown", http.MethodDelete, "/v1/nodes/34020000001310000009", "", http.StatusNotFound},
 		{"immutable id", http.MethodPut, "/v1/nodes/" + nodeCRUDDeviceID,
 			`{"id":"` + nodeCRUDSmallID + `"}`, http.StatusBadRequest},
+		{"address claimed", http.MethodPost, "/v1/nodes",
+			`{"id":"34020000001310000002","kind":"device","addr":"127.0.0.1:15061"}`, http.StatusConflict},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

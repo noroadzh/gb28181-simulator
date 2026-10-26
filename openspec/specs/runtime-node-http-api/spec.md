@@ -107,9 +107,9 @@
 
 ### Requirement: WebSocket 状态推送
 
-`/ws/nodes` 端点 MUST 推送节点状态变更事件。事件格式为 JSON：`{"type": "node_status_changed", "id": "<id>", "status": "<status>", "at": "<ISO8601>"}`。当节点状态机推进时（idle → registering → online/fault 等），订阅端点 MUST 收到对应事件。
+`/v1/nodes/stream` 端点 MUST 推送节点状态变更事件。事件格式为 JSON：`{"type": "node_status_changed", "id": "<id>", "status": "<status>", "at": "<ISO8601>"}`。当节点状态机推进时（idle → registering → online/fault 等），订阅端点 MUST 收到对应事件。
 
 #### Scenario: 节点状态变化
 
 - **WHEN** 节点从 `idle` 推进到 `online`
-- **THEN** `/ws/nodes` 订阅客户端在 1 秒内收到 `node_status_changed` 事件
+- **THEN** `/v1/nodes/stream` 订阅客户端在 1 秒内收到 `node_status_changed` 事件

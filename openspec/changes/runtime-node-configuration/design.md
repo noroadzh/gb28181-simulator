@@ -21,9 +21,9 @@
 
 ## Decisions
 
-### Decision 1: 节点定义新增 4 张表，不替换既有 `platform_accounts` / `channels`
+### Decision 1: 节点定义新增 3 张表，不替换既有 `platform_accounts` / `channels`
 
-`nodes` / `node_registrations` / `node_platforms` / `cascade_meta` 单独建表，与 `platform_accounts`（账号密码）/ `channels`（通道元数据）解耦。后两者由 `Change 5 / Change 8` 已经做了 N→1 的归一，符合场景本意，不重复建设。
+`nodes` / `node_registrations` / `node_platforms` 单独建表，与 `platform_accounts`（账号密码）/ `channels`（通道元数据）解耦。级联拓扑不另建 `cascade_meta` 表，而是作为 `nodes` 的两列持有（见 Decision 2）。后两者由 `Change 5 / Change 8` 已经做了 N→1 的归一，符合场景本意，不重复建设。
 
 **替代方案**:
 - *合并到 channels 表*：会让单节点多通道的查询复杂化（一个平台节点 0 通道的 case 无法表达）
@@ -58,11 +58,11 @@ SQLite 没有数组类型。两种选择：JSON 文本 / 关系表 `cascade_edge
 
 不把「校验状态 → Unregister → DB Delete → 拓扑重算」写在 HTTP handler 内，而是封装为 `NodeService.Delete(ctx, id)`。理由：handler 应只做参数解析与状态码映射，业务编排由服务承载，可被 scenario 引擎或未来批处理复用。
 
-**关键不变量**：`Delete` 失败不回滚已成功步骤（已 Unregister 但 DB 删失败时，节点将无法再被 `Start` 因为注册表里没行；这是已知的「需要人工介入」状态，不静默补做）。
+**关键不变量**：内存先改、DB 后写；DB 失败时把节点按原 profile 重新注册回内存（回到 `StatusIdle`）并返回错误，避免出现「DB 还有行、内存已无节点」的半删除状态。回滚本身再失败时只记录日志，交由重启（内存从 DB 重建）收敛。
 
 ### Decision 6: WebSocket 推送 node_status_changed 复用现有 ws_hub
 
-`internal/interface/http/ws_hub.go` 已有事件分发（capture 事件、log 事件都通过它），新增 `node_status_changed` 事件类型。NodeService 在状态机推进后调用 `ws_hub.Broadcast` 推送给订阅 `/ws/nodes` 的客户端。
+`internal/interface/http/ws_hub.go` 已有事件分发（capture 事件、log 事件都通过它），新增 `node_status_changed` 事件类型。实现上事件走 `internal/platform/events` 的独立 Hub（与日志 Hub 分离，避免 UI 事件依赖日志格式），由 `/v1/nodes/stream` 推送给订阅客户端。
 
 **关键点**：状态机推进是 NodeService 内部行为，要在哪里挂钩需要审视 `NodeService.Transition`（`node_service.go:1080` 附近），不引入新 channel。
 
