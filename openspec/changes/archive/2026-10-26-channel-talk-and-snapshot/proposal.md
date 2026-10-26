@@ -6,7 +6,7 @@
 
 ## What Changes
 
-- **语音对讲**：实现 `TalkStart` / `TalkStop`，经 SIP INVITE/SDP 建立音频会话，返回 session id 与浏览器 WebSocket 地址；对端 BYE 或超时后会话回收。
+- **语音对讲（控制面）**：实现 `TalkStart` / `TalkStop`，经 SIP INVITE/SDP 建立音频会话，返回 session id 与浏览器 WebSocket 地址；对端 BYE 或空闲超时后会话回收。音频桥（WebSocket ↔ RTP）**延后**，见 Non-goals。
 - **快照抓图**：实现 `Snapshot`，优先从通道媒体源的最近关键帧解码 JPEG；无媒体源返回 503，平台无抓拍子系统时保持现有 202 排队语义。
 - **错误语义**：对讲与抓拍在能力缺失/对端不可达时返回可辨识错误，不再一律 501。
 
@@ -30,5 +30,6 @@
 ## Non-goals
 
 - 不实现 PTZ / 录像 / 回放（见 `channel-ptz-and-playback`）。
+- 不实现对讲的音频桥：WebSocket 端点在 1.2 完成后才可用，当前 `ws_url` 指向未实现的路由；登记为路线图 #38 `talk-audio-bridge`。
 - 不实现 GB35114 加密对讲。
 - 不实现多路并发对讲的混音。
