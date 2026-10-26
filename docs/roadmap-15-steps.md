@@ -38,9 +38,10 @@
 | 31 | `acceptor-file-split` | acceptor 拆文件 | ✅ 已归档 | 3043 行拆为 12 个同包文件，行为零变化（2026-10-14） |
 | 32 | `cascade-message-relay` | 级联消息中继 | ✅ 已归档 | 下行按 next hop 投递 + 响应回传，修复只挂头不投递（2026-10-26） |
 | 33 | `runtime-node-configuration` | 节点配置运行期化 | ✅ 已归档 | 节点定义落 SQLite，运行期 CRUD 与级联设置（2026-10-26） |
-| 34 | `channel-ptz-and-playback` | PTZ 与录像/回放信令 | 🔨 进行中 | PTZ DeviceControl 下发、RecordInfo 查询、PlaybackControl + 回放会话；先把 PTZ/Records 归零为 501 |
+| 34 | `channel-ptz-and-playback` | PTZ 与录像/回放信令 | ✅ 已归档 | PTZ DeviceControl、RecordInfo 查询、PlaybackControl + 回放会话；FLV 历史流延后为 #37（2026-10-26） |
 | 35 | `channel-talk-and-snapshot` | 对讲与抓拍 | 🔨 进行中 | SIP 对讲会话（INVITE/BYE + WSS 音频）与关键帧 JPEG 抓拍 |
 | 36 | `spec-purpose-backfill` | 主 spec Purpose 补全 | ⬜ 待实施 | 4 个主 spec 仍是占位 Purpose：channel-id-auto-gen、media-loop-validation、platform-large-node-catalog-aggregate、web-realtime-logs |
+| 37 | `playback-flv-stream` | 回放 FLV 历史流 | ⬜ 待实施 | `/playback/flv` 仍未实现：INVITE/SDP 拉起历史流 + RTP 接收 + FLV 转封装（channel-ptz-and-playback 任务 3.5 延后） |
 
 ## 补充归档索引
 
@@ -99,6 +100,6 @@
 - 原始路线图中 #3 为 `core-manscdp-and-ps`，后被 `enterprise-skeleton` 占位，本文件保留原始编号顺序。
 - 部分 change 内部拆分为多个子 change 归档；它们与无编号跟进统一登记在「补充归档索引」。
 - #10 原名 `dynamic-catalog-and-query`，实际由 `dynamic-sim-features` change 实现（动态目录/报警、录像与回放、移动位置、运行时触发 API）。
-- 已完成 33 个编号（#1–#33），对应 48 个归档 change 目录（2026-10-26 同步）。
-- 进行中 2 个编号（#34：channel-ptz-and-playback、#35：channel-talk-and-snapshot）；待实施 1 个（#36：spec-purpose-backfill）。
+- 已完成 34 个编号（#1–#34），对应 50 个归档 change 目录（2026-10-26 同步）。
+- 进行中 1 个编号（#35：channel-talk-and-snapshot）；待实施 2 个（#36：spec-purpose-backfill、#37：playback-flv-stream）。
 - 路线图同步契约见 capability `docs-roadmap-sync`；每次归档必须在同提交更新本文件。

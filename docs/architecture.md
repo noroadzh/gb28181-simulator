@@ -254,6 +254,36 @@ Start ──▶ serve (Acceptor.Serve)  ──▶ advanceOnline ──▶ online
 
 **限制**：只中继 MANSCDP MESSAGE，不中继 INVITE 与媒体；跨进程级联与附录 H.3 的自动路径发现不在范围内。
 
+## 通道控制面（Change `channel-ptz-and-playback`）
+
+通道详情页的 PTZ、录像查询、回放控制都归结为「把 MANSCDP 指令送到设备」，但事务方式与失败语义不同。
+
+**PTZ**
+
+- `model.EncodePTZCmd` 把方向/速度编成 8 字节 PTZCmd 再 base64，放进 `<Control>` 的 `<Cmd>`；方向位 0x01–0x08、变倍 0x10/0x20、聚焦 0x40/0x80，第 8 字节是前七字节和的低 8 位。
+- 目标解析：`device` 节点**自环**到自己的监听口，设备侧 acceptor 走与真实平台下发完全相同的接收路径（抓包页可见）；`platform` 节点按通道的 `ParentID` 找在线下级，只有一个在线下级时直接使用。
+- 光圈（`irisin` / `irisout`）与预置位**不支持**：这套位布局没有对应字段，返回 501 而不是猜一种编码。
+
+**录像查询**
+
+- 请求/应答事务在 `acceptor` 内完成——它是节点 socket 的唯一读者，事务放别处必然收不到应答。表键 `(nodeID, Call-ID, CSeq)`，与级联中继表同构。
+- 等待上限 `controlWait`（默认 5s）；超时 504，发送失败或节点不在服务 502。
+- 空应答（`SumNum=0`）是合法结果：返回空列表，不是错误。
+
+**回放**
+
+- `PlaybackControl`（`<Cmd>` = Play/Pause/Teardown，`<Scale>` 仅 `speed` 动作）经 MESSAGE 下发。
+- 每 `node|channel` 一个会话：重复 `play` 先 Teardown 旧会话；`teardown` 清会话；空闲 `playbackIdle`（默认 60s）自动 Teardown 并回收。
+- **FLV 历史流尚未接入**：`/playback/flv` 仍返回未实现，留给后续 change（需要 INVITE/SDP 拉流 + RTP 接收 + 转封装）。
+
+**失败语义**
+
+| 情况 | HTTP |
+|---|---|
+| 能力缺失（未实现、方向不支持、无会话 pause） | 501 |
+| 目标设备不在线 / 发送失败 | 502 |
+| 下游无应答（录像查询） | 504 |
+
 ## 可观测性
 
 ### 日志

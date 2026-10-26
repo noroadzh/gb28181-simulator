@@ -9,7 +9,7 @@
 - **先归零**：PTZ 与录像查询在未实现前改为返回 501（与 Playback/Talk 一致），任何时刻 UI 不再说谎。
 - **PTZ 下发**：实现 `PTZ`，把方向/速度/时长编译成 MANSCDP DeviceControl（PTZCmd）并经 SIP MESSAGE 发往下级设备；非 device 节点、无在线下级等场景返回可辨识错误。
 - **录像查询**：实现 `Records`，向下级设备发 RecordInfo 查询并解析应答，返回 `sn/start/end/type/size` 列表；设备不可达时返回明确错误而非空列表。
-- **回放控制**：实现 `Playback`（play/pause/teardown/speed），经 PlaybackControl MANSCDP 下发；回放会话与 FLV 历史流复用现有媒体管道。
+- **回放控制**：实现 `Playback`（play/pause/teardown/speed），经 PlaybackControl MANSCDP 下发；每通道一个会话，重复 play 先拆旧会话、空闲自动回收。FLV 历史流（`/playback/flv`）本轮**延后**，见 Non-goals。
 - **清理死桩**：删除无调用方的 `SendPTZ` / `ListRecords` / `StartPlayback` / `ControlPlayback` 四个旧桩。
 
 **BREAKING**：PTZ / 录像查询在实现完成前由 200 改为 501；实现完成后恢复 200 但带真实数据。
@@ -33,6 +33,7 @@
 ## Non-goals
 
 - 不实现语音对讲与抓拍（见 `channel-talk-and-snapshot`）。
+- 不接入 FLV 历史流：`/playback/flv` 仍返回未实现，登记为路线图 #37 的后续 change（需要 INVITE/SDP 拉流 + RTP 接收 + 转封装）。
 - 不实现 GB/T 28181-2022 的 PTZ 精确位置/看守位（属 2022 扩展，已有独立能力）。
 - 不实现跨平台级联的 PTZ 转发路由（沿用本进程内的下级解析）。
 - 不改数据库 schema。

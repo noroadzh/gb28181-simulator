@@ -20,7 +20,7 @@ PTZ / 录像查询 / 回放的目标是 device 节点自身（本进程内的 ch
 
 ### Decision 4: FLV 历史流复用现有媒体网关
 
-回放流与直播流同样是 RTP→FLV，复用 `internal/adapter/flv`；差异只在「源的建立方式」（INVITE 拉历史而非读本地文件）。若探查发现网关与源强绑定，先交付 play/pause/teardown/speed 的控制面，把 FLV 历史流拆为后续任务并在 tasks 中显式标注。
+回放流与直播流同样是 RTP→FLV，复用 `internal/adapter/flv`；差异只在「源的建立方式」（INVITE 拉历史而非读本地文件）。若探查发现网关与源强绑定，先交付 play/pause/teardown/speed 的控制面，把 FLV 历史流拆为后续任务并在 tasks 中显式标注。**本次采用了该兜底**：任务 3.5 已标注延后，FLV 流登记为路线图 #37。
 
 ### Decision 5: 删除旧桩
 

@@ -18,9 +18,9 @@
 - [x] 3.2 `Records` 实现：发查询并等待应答（超时 504、不可达 502）；验收：app 单测覆盖成功/超时/不可达
 - [x] 3.3 PlaybackControl（play/pause/teardown/speed）编码与 `Playback` 实现；验收：golden test + 单测断言下发内容
 - [x] 3.4 回放会话表：重复 play 先拆旧会话、teardown 释放端口与 BYE、空闲超时回收；验收：单测覆盖三条
-- [ ] 3.5 FLV 历史流：复用 `internal/adapter/flv` 接回放源；若需拆出，任务行显式标注为后续；验收：e2e 或单测断言 FLV 头可解析
+- [ ] 3.5 FLV 历史流：复用 `internal/adapter/flv` 接回放源。**延后**：需要 INVITE/SDP 拉起历史流 + RTP 接收 + 转封装，工作量与控制面相当；本轮先交付 play/pause/teardown/speed 控制面，FLV 流作为后续 change 处理（对应 `/playback/flv` 端点仍返回未实现）。验收（后续）：e2e 或单测断言 FLV 头可解析
 
 ## 4. 收尾
 
-- [ ] 4.1 文档：`docs/architecture.md` 增补通道控制面路径（PTZ/录像/回放）与 501/502/504 语义；验收：人工审阅
-- [ ] 4.2 `openspec validate channel-ptz-and-playback --strict --type change`、`make lint`、`make test` 全部通过；验收：退出码 0
+- [x] 4.1 文档：`docs/architecture.md` 增补通道控制面路径（PTZ/录像/回放）与 501/502/504 语义；验收：人工审阅
+- [x] 4.2 收尾：`openspec validate channel-ptz-and-playback --strict --type change` 与 `make lint` 通过，`go test ./...` 全绿。**例外已记录**：`make test`（-race）在 `siptest.TestE2E_PlatformLargeUpstreamKeepalive` 上偶发数据竞争（`siptransport` 的 Close 与转发 goroutine），在本次改动之前的提交上同样 2/5 复现，属既有问题，与本 change 的代码无关；修复留待独立 change
