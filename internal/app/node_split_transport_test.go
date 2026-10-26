@@ -213,10 +213,9 @@ func TestSplitTransportTransactionHandlerOverridesDefaultRouting(t *testing.T) {
 		},
 	})
 
-	// Inject the response after the handler is registered.
-	src.mu.Lock()
-	src.in = append(src.in, incoming{msg: response(t, 200, callIDHeader(callID)), peer: testServer})
-	src.mu.Unlock()
+	// Inject the response after the handler is registered. The split's read
+	// loop is already parked in Receive, so the enqueue must wake it.
+	src.inject(response(t, 200, callIDHeader(callID)), testServer)
 
 	select {
 	case msg := <-got:

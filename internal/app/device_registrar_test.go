@@ -16,13 +16,16 @@ import (
 // --- test doubles ---------------------------------------------------------
 
 // scriptedTransport is a port.SIPTransport that records what was sent and
-// replays a script of incoming messages. An empty script makes Receive
-// block until the context is done, which is how the timeout path is
-// exercised without sleeping.
+// replays a script of incoming messages.
+//
+// Receive parks until a message is available or the context ends, the way a
+// real socket does. A test that enqueues after the transport is already being
+// read must use inject: it is the only writer that wakes a parked reader.
 type scriptedTransport struct {
 	mu   sync.Mutex
 	sent []sentMessage
 	in   []incoming
+	wake chan struct{}
 }
 
 type sentMessage struct {
@@ -43,16 +46,45 @@ func (t *scriptedTransport) Send(_ context.Context, msg model.Message, dst strin
 }
 
 func (t *scriptedTransport) Receive(ctx context.Context) (model.Message, string, error) {
-	t.mu.Lock()
-	if len(t.in) > 0 {
-		next := t.in[0]
-		t.in = t.in[1:]
+	for {
+		t.mu.Lock()
+		if len(t.in) > 0 {
+			next := t.in[0]
+			t.in = t.in[1:]
+			t.mu.Unlock()
+			return next.msg, next.peer, nil
+		}
+		wake := t.wakeChan()
 		t.mu.Unlock()
-		return next.msg, next.peer, nil
+
+		select {
+		case <-ctx.Done():
+			return model.Message{}, "", ctx.Err()
+		case <-wake:
+			// inject queued a message; loop and take it.
+		}
 	}
-	t.mu.Unlock()
-	<-ctx.Done()
-	return model.Message{}, "", ctx.Err()
+}
+
+// wakeChan returns the channel a parked Receive waits on, creating it on
+// first use. Callers must hold t.mu.
+func (t *scriptedTransport) wakeChan() chan struct{} {
+	if t.wake == nil {
+		t.wake = make(chan struct{})
+	}
+	return t.wake
+}
+
+// inject queues a message and wakes any Receive already waiting for input.
+// It is the late-enqueue counterpart of seeding the script at construction.
+func (t *scriptedTransport) inject(msg model.Message, peer string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.in = append(t.in, incoming{msg: msg, peer: peer})
+	if t.wake != nil {
+		close(t.wake)
+		t.wake = nil
+	}
 }
 
 func (t *scriptedTransport) Close() error      { return nil }
