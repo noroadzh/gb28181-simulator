@@ -8,6 +8,7 @@ package app
 
 import (
 	"context"
+	"net"
 	"time"
 
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
@@ -24,6 +25,11 @@ func (a *Acceptor) handleInvite(
 ) (model.Message, error) {
 	a.log.Debug("INVITE received",
 		"node_id", p.id.String(), "call_id", headerValue(req, "Call-ID"))
+	// A device is a camera: a talk INVITE is audio it can answer itself, with
+	// its own RTP port. Anything else keeps the device's usual behaviour.
+	if p.isDevice {
+		return a.answerDeviceTalkInvite(p, req)
+	}
 	callID := headerValue(req, "Call-ID")
 	if callID == "" {
 		return buildResponse(400, "Bad Request", req, nil, "")
@@ -182,4 +188,64 @@ func (a *Acceptor) handleOptions(
 		model.NewHeader("Accept", "Application/MANSCDP+XML"),
 	}
 	return buildResponse(200, "OK", req, hdrs, "")
+}
+
+// answerDeviceTalkInvite answers an audio INVITE from a device node. The node
+// opens its own RTP port and puts it in the answer: echoing the offer's port
+// would point both sides at the same socket and no audio would ever flow.
+//
+// A non-audio INVITE is refused with 488 — the device-as-camera contract this
+// change writes down.
+func (a *Acceptor) answerDeviceTalkInvite(p *platform, req model.Message) (model.Message, error) {
+	mediaType, _, _, err := parseSDPMetadata(req.Body())
+	if err != nil || mediaType != "audio" {
+		a.log.Debug("device refuses a non-audio INVITE",
+			"node_id", p.id.String(), "media", mediaType)
+		return buildResponse(488, "Not Acceptable Here", req,
+			[]model.Header{allowHeader()}, "")
+	}
+	callID := headerValue(req, "Call-ID")
+	if callID == "" {
+		return buildResponse(400, "Bad Request", req, nil, "")
+	}
+
+	conn, lerr := net.ListenPacket("udp4", "0.0.0.0:0")
+	if lerr != nil {
+		a.log.Warn("device cannot open a talk audio port",
+			"node_id", p.id.String(), "error", lerr.Error())
+		return buildResponse(500, "Server Internal Error", req, nil, "")
+	}
+	host := "127.0.0.1"
+	if h, _, splitErr := net.SplitHostPort(p.tr.LocalAddr()); splitErr == nil {
+		host = h
+	}
+	port := conn.LocalAddr().(*net.UDPAddr).Port
+
+	a.deviceTalksMu.Lock()
+	if old := a.deviceTalks[callID]; old != nil {
+		_ = old.Close()
+	}
+	a.deviceTalks[callID] = conn
+	a.deviceTalksMu.Unlock()
+
+	answer := buildTalkOffer(host, port)
+	hdrs := []model.Header{
+		model.NewHeader("Contact", "<sip:"+p.id.String()+"@"+p.realm+">"),
+		model.NewHeader("Content-Type", "application/sdp"),
+		allowHeader(),
+	}
+	a.log.Debug("device answered a talk INVITE",
+		"node_id", p.id.String(), "call_id", callID, "rtp_port", port)
+	return buildResponse(200, "OK", req, hdrs, answer)
+}
+
+// closeDeviceTalk releases the audio port of a finished dialog.
+func (a *Acceptor) closeDeviceTalk(callID string) {
+	a.deviceTalksMu.Lock()
+	conn := a.deviceTalks[callID]
+	delete(a.deviceTalks, callID)
+	a.deviceTalksMu.Unlock()
+	if conn != nil {
+		_ = conn.Close()
+	}
 }

@@ -103,9 +103,13 @@ func (a *Acceptor) run(ctx context.Context, p *platform) {
 		// A BYE for a talk dialog ends it here, whoever sent it: the device
 		// may hang up before the browser asks to stop. The callback filters
 		// by Call-ID, so non-talk dialogs are unaffected.
-		if msg.Method() == "BYE" && a.talkHangup != nil {
+		if msg.Method() == "BYE" {
 			if callID := headerValue(msg, "Call-ID"); callID != "" {
-				a.talkHangup(p.id, callID)
+				// A device's own talk audio port belongs to this dialog.
+				a.closeDeviceTalk(callID)
+				if a.talkHangup != nil {
+					a.talkHangup(p.id, callID)
+				}
 			}
 		}
 		// Fault gate (Change 13, design D6): consult the node's armed
@@ -142,7 +146,7 @@ func (a *Acceptor) run(ctx context.Context, p *platform) {
 		switch {
 		case handled:
 			// The fault gate returned a canned response; nothing else runs.
-		case p.isDevice && msg.Method() != "MESSAGE":
+		case p.isDevice && msg.Method() != "MESSAGE" && msg.Method() != "INVITE":
 			// A device is a UAS that answers one thing: the catalog query
 			// MESSAGE an upstream sends to learn its channels and their
 			// MediaSource extension. Everything else is refused loudly

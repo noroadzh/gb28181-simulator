@@ -97,7 +97,7 @@ func deviceMessageRequest(t *testing.T, toDeviceID, body string) model.Message {
 //   - 平台→设备：<Query>（平台主动询问设备目录）
 //
 // CatalogPoller 主动拉取时发的是 <Query>。DecodeNotify 现在两种根元素都接受
-//（见 internal/adapter/manscdp/notify.go），所以 device 节点作为 UAS 收
+// （见 internal/adapter/manscdp/notify.go），所以 device 节点作为 UAS 收
 // CatalogPoller 发的 <Query> 能正确解析。本测试默认走真实链路 <Query> 封装。
 func catalogQueryBody(deviceID string) string {
 	return `<?xml version="1.0" encoding="UTF-8"?>` + "\n" +
@@ -216,7 +216,9 @@ func TestAcceptor_DeviceAnswersCatalogQuery(t *testing.T) {
 //
 // 验收（tasks.md 3.2）：
 //   - device 节点对 OPTIONS 响应 405，Allow 头含 MESSAGE
-//   - INVITE / BYE / SUBSCRIBE / INFO 同样返回 405
+//   - BYE / SUBSCRIBE / INFO 同样返回 405
+//   - INVITE 不再属于此列：对讲变更让设备受理音频 INVITE（见
+//     acceptor_device_talk_test.go）
 //   - ACK 无响应（RFC 3261 §13.2.2.4：UAS 不答 ACK）
 func TestAcceptor_DeviceReturns405ForNonMessage(t *testing.T) {
 	deviceID := mustDeviceNodeID(t, "34020000001310000002")
@@ -227,7 +229,6 @@ func TestAcceptor_DeviceReturns405ForNonMessage(t *testing.T) {
 		body   string
 	}{
 		{"OPTIONS", ""},
-		{"INVITE", "v=0\r\n"},
 		{"BYE", ""},
 		{"SUBSCRIBE", ""},
 		{"INFO", ""},
@@ -245,10 +246,6 @@ func TestAcceptor_DeviceReturns405ForNonMessage(t *testing.T) {
 			}
 			if tc.method == "SUBSCRIBE" {
 				hdrs = append(hdrs, model.NewHeader("Event", "catalog"))
-			}
-			if tc.method == "INVITE" {
-				hdrs = append(hdrs, model.NewHeader("Contact", "<sip:platform@127.0.0.1:15060>"))
-				hdrs = append(hdrs, model.NewHeader("Content-Type", "application/sdp"))
 			}
 
 			req, err := model.NewRequest(tc.method, "sip:"+deviceID.String()+"@3402000000", hdrs, tc.body)

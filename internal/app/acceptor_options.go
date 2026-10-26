@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"sync"
 	"time"
 
@@ -55,6 +56,12 @@ type Acceptor struct {
 	// talkHangup is told about every BYE the node receives, so a talk
 	// dialog the device ends is reclaimed without waiting for the browser.
 	talkHangup func(model.NodeID, string)
+
+	// deviceTalks holds the audio port each talk dialog opened on this node,
+	// keyed by Call-ID. A device answers a talk INVITE with its own RTP port;
+	// the port lives until the dialog ends.
+	deviceTalksMu sync.Mutex
+	deviceTalks   map[string]net.PacketConn
 
 	// relay carries the cascade hand-offs this node is waiting on: which
 	// requester is waiting for which downstream answer. relayWait bounds the
@@ -176,6 +183,7 @@ func NewAcceptor(
 		relay:          newRelayTable(nil),
 		relayWait:      relayTimeout,
 		responses:      newResponseTable(),
+		deviceTalks:    make(map[string]net.PacketConn),
 		controlWait:    5 * time.Second,
 	}, nil
 }
