@@ -121,6 +121,31 @@ export const api = {
     }).then(ok)
   },
 
+  // 对讲音频 WebSocket：上下行都是二进制 PCMU 帧（每帧一个 RTP 载荷）。
+  talkAudioUrl (nodeId, ch, session) {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+    return `${proto}://${location.host}${BASE}/v1/nodes/${encodeURIComponent(nodeId)}/channels/${encodeURIComponent(ch)}/talk/audio?session=${encodeURIComponent(session)}`
+  },
+
+  // 回放会话：play 带时间窗，成功后用 playbackFlvUrl 播放；teardown 结束。
+  startPlayback (nodeId, ch, { sn, start, end }) {
+    return fetch(`${BASE}/v1/nodes/${encodeURIComponent(nodeId)}/channels/${encodeURIComponent(ch)}/playback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'play', sn, start, end })
+    }).then(ok)
+  },
+  stopPlayback (nodeId, ch, sn) {
+    return fetch(`${BASE}/v1/nodes/${encodeURIComponent(nodeId)}/channels/${encodeURIComponent(ch)}/playback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'teardown', sn })
+    }).then(ok)
+  },
+  playbackFlvUrl (nodeId, ch, sn) {
+    return `${BASE}/v1/nodes/${encodeURIComponent(nodeId)}/channels/${encodeURIComponent(ch)}/playback/flv?sn=${encodeURIComponent(sn)}`
+  },
+
   // 节点状态推送（/v1/nodes/stream）。帧是 events.Event 的 JSON：
   // {type, id, status?, at}。返回 socket 本身，由调用方管理重连与关闭。
   nodesStream (onMessage, onClose) {
