@@ -602,7 +602,12 @@ func (s *Server) handleTalkStart(c echo.Context) error {
 	}
 	sessID, wsURL, err := s.channels.TalkStart(c.Request().Context(), id, channelID)
 	if err != nil {
-		if errors.Is(err, port.ErrTalkUnsupported) {
+		switch {
+		case errors.Is(err, port.ErrControlTargetUnreachable):
+			return c.JSON(http.StatusBadGateway, errorBody{Error: err.Error()})
+		case errors.Is(err, port.ErrControlTimeout):
+			return c.JSON(http.StatusGatewayTimeout, errorBody{Error: err.Error()})
+		case errors.Is(err, port.ErrTalkUnsupported):
 			return c.JSON(http.StatusNotImplemented, errorBody{Error: err.Error()})
 		}
 		return c.JSON(http.StatusInternalServerError, errorBody{Error: err.Error()})
@@ -641,7 +646,12 @@ func (s *Server) handleTalkStop(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, errorBody{Error: "session_id is required"})
 	}
 	if err := s.channels.TalkStop(c.Request().Context(), id, channelID, in.SessionID); err != nil {
-		if errors.Is(err, port.ErrTalkUnsupported) {
+		switch {
+		case errors.Is(err, port.ErrControlTargetUnreachable):
+			return c.JSON(http.StatusBadGateway, errorBody{Error: err.Error()})
+		case errors.Is(err, port.ErrControlTimeout):
+			return c.JSON(http.StatusGatewayTimeout, errorBody{Error: err.Error()})
+		case errors.Is(err, port.ErrTalkUnsupported):
 			return c.JSON(http.StatusNotImplemented, errorBody{Error: err.Error()})
 		}
 		return c.JSON(http.StatusInternalServerError, errorBody{Error: err.Error()})

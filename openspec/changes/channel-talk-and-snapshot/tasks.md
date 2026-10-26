@@ -2,10 +2,10 @@
 
 ## 1. 语音对讲
 
-- [ ] 1.1 `TalkStart`：构造 INVITE（SDP PCMU sendrecv），等待 200 OK 并记录对话；验收：单测断言 INVITE body 的 SDP 与返回的 session id/WSS 地址
+- [x] 1.1 `TalkStart`：构造 INVITE（SDP PCMU sendrecv），等待 200 OK 并记录对话；验收：单测断言 INVITE body 的 SDP 与返回的 session id/WSS 地址
 - [ ] 1.2 音频桥：把入站 RTP 音频帧经 WSS 推给浏览器；验收：单测断言帧率/编码转发，浏览器侧手工验证
-- [ ] 1.3 `TalkStop`：发 BYE 并回收；重复 stop 幂等；对端 BYE/超时回收；验收：三条单测
-- [ ] 1.4 错误语义：非 device 501、对端不可达 502、无 200 OK 504；验收：单测覆盖
+- [ ] 1.3 `TalkStop`：发 BYE 并回收；重复 stop 幂等（**已完成并有测试**）；**未完成**：对端 BYE 与空闲超时的自动回收（需要把 talk 会话接入 acceptor 的请求分派与超时器）
+- [x] 1.4 错误语义：非 device 501、对端不可达 502、无 200 OK 504；验收：单测覆盖
 
 ## 2. 快照抓图
 

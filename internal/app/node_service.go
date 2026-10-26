@@ -61,6 +61,7 @@ type NodeService struct {
 	keepaliveCodec port.KeepaliveCodec
 	controlCodec   port.MANSCDPCodec
 	frameRenderer  port.FrameRenderer
+	talk           talkSessionState
 
 	// playback holds one session per node|channel. A second play tears the
 	// old session down first; an idle session tears itself down.
@@ -1316,53 +1317,6 @@ func (s *NodeService) Records(ctx context.Context, id model.NodeID, channelID st
 		return nil, err
 	}
 	return s.acceptor.QueryRecords(ctx, id, target, addr, channelID, start, end)
-}
-
-// TalkStart opens a voice-talk session for the channel. The returned
-// sessionID is empty and wsURL is empty because the TalkAcceptor is not yet
-// wired. Returns ErrTalkUnsupported until the talk port is integrated.
-func (s *NodeService) TalkStart(ctx context.Context, id model.NodeID, channelID string) (string, string, error) {
-	_ = id
-	_ = channelID
-	return "", "", port.ErrTalkUnsupported
-}
-
-// TalkStop closes the talk session identified by sessionID.
-func (s *NodeService) TalkStop(ctx context.Context, id model.NodeID, channelID, sessionID string) error {
-	_ = id
-	_ = channelID
-	_ = sessionID
-	return port.ErrTalkUnsupported
-}
-
-// StartTalk initiates a two-way audio session with the device channel.
-// Returns ErrTalkUnsupported when the node is not a device or talk is not
-// available.
-func (s *NodeService) StartTalk(ctx context.Context, id model.NodeID, channelID string) (model.TalkSession, error) {
-	n, ok := s.registry.Get(ctx, id)
-	if !ok {
-		return model.TalkSession{}, model.ErrUnknownNode
-	}
-	if n.Profile().ID().Kind() != model.NodeKindDevice {
-		return model.TalkSession{}, port.ErrTalkUnsupported
-	}
-	// TODO: wire talk port (TalkAcceptor) via NodeService
-	s.log.Warn("StartTalk: not yet wired",
-		"node_id", id.String(), "channel_id", channelID)
-	return model.TalkSession{}, fmt.Errorf("port: talk not wired for node %s channel %s: %w", id, channelID, port.ErrTalkUnsupported)
-}
-
-// StopTalk ends the active two-way audio session.
-func (s *NodeService) StopTalk(ctx context.Context, id model.NodeID, channelID string) error {
-	n, ok := s.registry.Get(ctx, id)
-	if !ok {
-		return model.ErrUnknownNode
-	}
-	if n.Profile().ID().Kind() != model.NodeKindDevice {
-		return fmt.Errorf("port: talk unsupported for node %s channel %s: %w", id, channelID, port.ErrTalkUnsupported)
-	}
-	// TODO: implement talk stop
-	return nil
 }
 
 // Snapshot captures the current frame from the device channel.
