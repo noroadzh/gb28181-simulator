@@ -20,6 +20,18 @@
 
 `map[nodeID|channelID]talkSession` 与媒体管道的帧缓存同键，节点停止时一并回收；避免跨节点串话。
 
+### Decision 4: 对讲以 `port.TalkPort` 为准，重写现有 `app.TalkAcceptor`
+
+现状有两套互相矛盾的东西：`port.TalkPort.StartInvite` 的契约是「平台向设备发 INVITE」，而 `internal/app/talk.go` 的 `TalkAcceptor` 实现的是相反方向（等设备发 INVITE 到平台的 talk 端口），并且从未接线（`node_service.go` 里留着 TODO）。本 change 以端口契约为准：实现一个满足 `TalkPort` 的适配器（StartInvite 发 INVITE、Stop 发 BYE），`app.TalkAcceptor` 的旧模型随之删除或改写，避免两套语义并存。
+
+**未决（实现前需确认）**：旧 `TalkAcceptor` 的 WSS 音频帧格式与会话键（`node|channel`）可以复用，但它按「设备主动 INVITE」写的会话建立逻辑不能保留。
+
+### Decision 5: 快照的关键帧缓存放在 MediaService 的入站管道出口
+
+`MediaService` 目前没有帧缓存，`Snapshot` 无处取图。方案：在入站管道（RTP→PS→ES）出口按 `node|channel` 保留最新一个 **IDR 访问单元**（含 SPS/PPS），`Snapshot` 读取后解码为 YUV 再编码 JPEG。缓存只保留一个 AU，内存有界；没有关键帧时按「尚无媒体」处理（504），而不是触发新拉流。
+
+**未决**：解码 H.264/H.265 需要引入纯 Go 解码器（当前仓库只有编码/封装侧）；若不想新增依赖，快照可先只支持 MPEG-4 Part 2 / MP4 直读的关键帧（`mp4-direct-playback` 已有 demuxer），其余编码返回 501。
+
 ## Risks / Trade-offs
 
 - **R1 关键帧可能尚未产生** → 超时返回 504，并在文档写明「先产生媒体再抓拍」。
