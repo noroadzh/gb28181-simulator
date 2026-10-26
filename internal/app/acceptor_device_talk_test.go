@@ -58,12 +58,15 @@ func TestDevice_AnswersTalkInviteWithItsOwnPort(t *testing.T) {
 	}
 }
 
-// Task 1.3: a video-only INVITE is refused with 488.
-func TestDevice_RefusesNonAudioInvite(t *testing.T) {
+// Media the device cannot serve stays 488. Video used to be in this set; the
+// interop-gaps change made the device answer live video INVITEs, so the
+// refusal is checked with a media type it still does not serve.
+func TestDevice_RefusesUnsupportedMediaInvite(t *testing.T) {
 	deviceID := mustDeviceNodeID(t, "34020000001310000004")
 	h := newDeviceHarness(t, deviceID, nil, nil)
 
-	resp := h.tr.deliver(t, deviceInvite(t, deviceID, "video-call-1", videoOfferSDP))
+	const applicationSDP = "v=0\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=application 4000 RTP/AVP 98\r\n"
+	resp := h.tr.deliver(t, deviceInvite(t, deviceID, "app-call-1", applicationSDP))
 	if resp.StatusCode() != 488 {
 		t.Fatalf("status = %d, want 488", resp.StatusCode())
 	}

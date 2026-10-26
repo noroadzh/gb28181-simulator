@@ -63,6 +63,7 @@ type Acceptor struct {
 	deviceTalksMu   sync.Mutex
 	deviceTalks     map[string]net.PacketConn
 	devicePlaybacks map[string]net.PacketConn
+	deviceVideos    map[string]net.PacketConn
 
 	// relay carries the cascade hand-offs this node is waiting on: which
 	// requester is waiting for which downstream answer. relayWait bounds the
@@ -186,6 +187,7 @@ func NewAcceptor(
 		responses:       newResponseTable(),
 		deviceTalks:     make(map[string]net.PacketConn),
 		devicePlaybacks: make(map[string]net.PacketConn),
+		deviceVideos:    make(map[string]net.PacketConn),
 		controlWait:     5 * time.Second,
 	}, nil
 }

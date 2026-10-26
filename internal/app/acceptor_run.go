@@ -109,6 +109,7 @@ func (a *Acceptor) run(ctx context.Context, p *platform) {
 				// this dialog.
 				a.closeDeviceTalk(callID)
 				a.closeDevicePlayback(callID)
+				a.closeDeviceVideo(callID)
 				if a.talkHangup != nil {
 					a.talkHangup(p.id, callID)
 				}

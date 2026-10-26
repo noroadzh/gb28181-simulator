@@ -303,6 +303,7 @@ device 节点可展开查看所有通道。该页面从 `GET /v1/nodes/:id/chann
 | 回放控制 play / pause / teardown / speed | 已实现；同一通道重复 play 会先拆掉旧会话 |
 | 回放 FLV 历史流 | 已实现：`POST /playback` 带 `sn`+`start`+`end` 发起回放 INVITE，`GET …/playback/flv?sn=` 出流；未知或已过期会话 404 |
 | 语音对讲 | 已实现：INVITE/BYE 控制面 + `/talk/audio` WebSocket 音频桥（PCMU）；非 device 501、对端不可达 502、无应答 504、未知 session 404 |
+| 真实平台向设备拉实时流 | 已实现：device 受理 `m=video` INVITE，回 `a=sendonly` SDP 并按通道媒体源发 PS/RTP；通道无源 404、BYE 停流 |
 
 ### 5.5 拉流地址复制
 

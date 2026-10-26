@@ -8,6 +8,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"strconv"
 	"strings"
@@ -27,12 +28,15 @@ func (a *Acceptor) handleInvite(
 ) (model.Message, error) {
 	a.log.Debug("INVITE received",
 		"node_id", p.id.String(), "call_id", headerValue(req, "Call-ID"))
-	// A device is a camera: it answers talk (audio) and historical playback
-	// (video with a time window) itself, each with its own RTP port.
-	// Anything else keeps the device's usual behaviour.
+	// A device is a camera: it answers talk (audio), historical playback
+	// (video with a time window) and live viewing (plain video) itself, each
+	// with its own RTP port. Anything else keeps the device's usual behaviour.
 	if p.isDevice {
 		if strings.Contains(req.Body(), "s=Playback") {
 			return a.answerDevicePlaybackInvite(p, req)
+		}
+		if mediaType, _, _, mErr := parseSDPMetadata(req.Body()); mErr == nil && mediaType == "video" {
+			return a.answerDeviceVideoInvite(p, req)
 		}
 		return a.answerDeviceTalkInvite(p, req)
 	}
@@ -398,4 +402,137 @@ func (a *Acceptor) streamPlayback(callID string, p *platform, conn net.PacketCon
 			"node_id", p.id.String(), "sn", offer.SN, "error", err.Error())
 	}
 	a.closeDevicePlayback(callID)
+}
+
+// answerDeviceVideoInvite answers a live-viewing INVITE. The device opens its
+// own sending port and streams the channel's media source to the endpoint the
+// offer named, until BYE.
+//
+// The channel is the user part of To: a live INVITE carries no u= line.
+func (a *Acceptor) answerDeviceVideoInvite(p *platform, req model.Message) (model.Message, error) {
+	callID := headerValue(req, "Call-ID")
+	channelID := toUser(req)
+	if callID == "" || channelID == "" {
+		a.log.Debug("device cannot route a video INVITE",
+			"node_id", p.id.String(), "call_id", callID, "channel", channelID)
+		return buildResponse(400, "Bad Request", req, nil, "")
+	}
+	dstHost, dstPort, derr := parseVideoOffer(req.Body())
+	if derr != nil {
+		a.log.Warn("device cannot read a video offer",
+			"node_id", p.id.String(), "error", derr.Error())
+		return buildResponse(400, "Bad Request", req, nil, "")
+	}
+	cfg, ok := a.deviceMediaConfig(p, channelID)
+	if !ok {
+		a.log.Debug("device has no source for the requested channel",
+			"node_id", p.id.String(), "channel", channelID)
+		return buildResponse(404, "Not Found", req, []model.Header{allowHeader()}, "")
+	}
+
+	conn, lerr := net.ListenPacket("udp4", "0.0.0.0:0")
+	if lerr != nil {
+		a.log.Warn("device cannot open a video port",
+			"node_id", p.id.String(), "error", lerr.Error())
+		return buildResponse(500, "Server Internal Error", req, nil, "")
+	}
+	localHost := "127.0.0.1"
+	if h, _, splitErr := net.SplitHostPort(p.tr.LocalAddr()); splitErr == nil {
+		localHost = h
+	}
+	localPort := conn.LocalAddr().(*net.UDPAddr).Port
+	answer := fmt.Sprintf("v=0\r\no=%s 0 0 IN IP4 %s\r\ns=Play\r\nc=IN IP4 %s\r\nt=0 0\r\n"+
+		"m=video %d RTP/AVP 96\r\na=sendonly\r\na=rtpmap:96 PS/90000\r\n",
+		p.id.String(), localHost, localHost, localPort)
+
+	a.deviceTalksMu.Lock()
+	if a.deviceVideos == nil {
+		a.deviceVideos = map[string]net.PacketConn{}
+	}
+	if old := a.deviceVideos[callID]; old != nil {
+		_ = old.Close()
+	}
+	a.deviceVideos[callID] = conn
+	a.deviceTalksMu.Unlock()
+
+	dst, rerr := net.ResolveUDPAddr("udp", net.JoinHostPort(dstHost, strconv.Itoa(dstPort)))
+	if rerr != nil {
+		a.closeDeviceVideo(callID)
+		return buildResponse(500, "Server Internal Error", req, nil, "")
+	}
+	go a.streamLiveVideo(callID, p, conn, cfg, dst)
+
+	hdrs := []model.Header{
+		model.NewHeader("Contact", "<sip:"+p.id.String()+"@"+p.realm+">"),
+		model.NewHeader("Content-Type", "application/sdp"),
+		allowHeader(),
+	}
+	a.log.Debug("device answered a live video INVITE",
+		"node_id", p.id.String(), "channel", channelID, "rtp_port", localPort)
+	return buildResponse(200, "OK", req, hdrs, answer)
+}
+
+// streamLiveVideo sends the channel source to the platform until the port is
+// closed (BYE) or the source ends.
+func (a *Acceptor) streamLiveVideo(callID string, p *platform, conn net.PacketConn, cfg model.MediaConfig, dst *net.UDPAddr) {
+	if a.mediaService == nil {
+		a.log.Debug("live video stream skipped: no media service wired",
+			"node_id", p.id.String(), "call_id", callID)
+		return
+	}
+	a.log.Debug("live video stream starting",
+		"node_id", p.id.String(), "call_id", callID, "dst", dst.String())
+	err := a.mediaService.PacketizeOutbound(context.Background(), cfg, func(pkt model.RTPPacket) error {
+		_, werr := conn.WriteTo(pkt.Bytes(), dst)
+		return werr
+	})
+	if err != nil {
+		a.log.Debug("live video stream ended",
+			"node_id", p.id.String(), "call_id", callID, "error", err.Error())
+	}
+	a.closeDeviceVideo(callID)
+}
+
+// closeDeviceVideo releases the sending port of a finished live dialog.
+func (a *Acceptor) closeDeviceVideo(callID string) {
+	a.deviceTalksMu.Lock()
+	conn := a.deviceVideos[callID]
+	delete(a.deviceVideos, callID)
+	a.deviceTalksMu.Unlock()
+	if conn != nil {
+		_ = conn.Close()
+	}
+}
+
+// parseVideoOffer reads the platform's endpoint out of a live video offer.
+func parseVideoOffer(body string) (string, int, error) {
+	host := ""
+	port := 0
+	for _, raw := range strings.Split(body, "\n") {
+		line := strings.TrimSpace(strings.TrimSuffix(raw, "\r"))
+		switch {
+		case strings.HasPrefix(line, "c=IN IP4 "):
+			host = strings.TrimSpace(strings.TrimPrefix(line, "c=IN IP4 "))
+		case strings.HasPrefix(line, "m=video "):
+			fields := strings.Fields(strings.TrimPrefix(line, "m=video "))
+			if len(fields) > 0 {
+				if n, err := strconv.Atoi(fields[0]); err == nil {
+					port = n
+				}
+			}
+		}
+	}
+	if host == "" || port <= 0 || port > 65535 {
+		return "", 0, fmt.Errorf("video offer lacks c= or a usable m=video port")
+	}
+	return host, port, nil
+}
+
+// toUser returns the user part of the To header, which names the channel a
+// live INVITE targets.
+func toUser(msg model.Message) string {
+	if h, ok := msg.Header("To"); ok {
+		return sipUser(h.Value())
+	}
+	return ""
 }
