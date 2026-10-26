@@ -74,11 +74,11 @@
 
 ### Requirement: 删除节点
 
-`DELETE /v1/nodes/:id` MUST 先校验节点当前状态为 `idle` 或 `stopped`，再从 DB 删除该行及 `node_registrations` / `node_platforms` 相关记录，并从 `nodereg.Registry` 注销节点。
+`DELETE /v1/nodes/:id` MUST 先校验节点当前状态为 `idle`、`offline` 或 `fault`（均已停止且无运行中资源），再从 DB 删除该行及 `node_registrations` / `node_platforms` 相关记录，并从 `nodereg.Registry` 注销节点。
 
 #### Scenario: 已停止的节点可删除
 
-- **WHEN** 节点 ID `34020000001310000001` 当前状态为 `idle` 或 `stopped`
+- **WHEN** 节点 ID `34020000001310000001` 当前状态为 `idle`、`offline` 或 `fault`
 - **THEN** HTTP 200，响应体 `{"status": "deleted", "id": "<id>"}`；DB 中 `nodes` 表该行已删除；`nodereg.Registry` 中无该 ID
 
 #### Scenario: 运行中节点拒绝删除

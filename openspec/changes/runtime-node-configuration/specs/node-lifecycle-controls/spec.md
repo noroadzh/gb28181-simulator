@@ -54,7 +54,7 @@
 
 ### Requirement: 节点删除要求先停止
 
-`DELETE /v1/nodes/:id` MUST 在节点当前状态为 `online`、`registering`、`registered`、`offline`、`fault`（即非 `idle` 也非 `stopped`）时返回 HTTP 409。状态为 `idle` 或 `stopped` 时 MUST 继续执行：调用 `Registry.Unregister` 后删除 DB 行并清理 `nodereg` 拓扑条目。
+`DELETE /v1/nodes/:id` MUST 在节点当前状态为 `registering`、`registered`、`online`（监听器或注册事务仍在运行）时返回 HTTP 409。状态为 `idle`、`offline`、`fault`（已释放监听器且无运行中资源）时 MUST 继续执行：调用 `Registry.Unregister` 后删除 DB 行并清理 `nodereg` 拓扑条目。
 
 #### Scenario: 拒绝删除运行中节点
 
@@ -66,18 +66,23 @@
 - **WHEN** 节点 ID `A` 状态为 `idle`（创建后未启动）
 - **THEN** HTTP 200，DB 与 Registry 中 A 均已移除
 
-#### Scenario: 允许删除 stopped 节点
+#### Scenario: 允许删除 offline 节点
 
-- **WHEN** 节点 ID `A` 状态为 `stopped`（启动后被显式停止）
+- **WHEN** 节点 ID `A` 状态为 `offline`（启动后被显式停止）
+- **THEN** HTTP 200，DB 与 Registry 中 A 均已移除
+
+#### Scenario: 允许删除 fault 节点
+
+- **WHEN** 节点 ID `A` 状态为 `fault`（启动失败或运行中断连）
 - **THEN** HTTP 200，DB 与 Registry 中 A 均已移除
 
 ### Requirement: NodeService.Delete 编排
 
-`NodeService.Delete(ctx, id)` MUST 顺序执行：1）查询节点当前状态；2）若状态非 `idle` / `stopped` 则返回 `ErrNodeNotStoppable` 错误；3）调用 `Registry.Unregister(ctx, id)` 注销内存条目；4）调用 `nodesql.NodeStore.Delete(ctx, id)` 删除 DB 行；5）清理 `nodereg` 拓扑。任意步骤失败 MUST 返回错误但已执行成功的步骤不回滚，调用方需自行决定补偿策略。
+`NodeService.Delete(ctx, id)` MUST 顺序执行：1）查询节点当前状态；2）若节点仍有运行中资源（`registering` / `registered` / `online`）则返回 `ErrNodeNotStoppable` 错误；3）调用 `Registry.Unregister(ctx, id)` 注销内存条目；4）调用 `nodesql.NodeStore.Delete(ctx, id)` 删除 DB 行；5）清理 `nodereg` 拓扑。任意步骤失败 MUST 返回错误但已执行成功的步骤不回滚，调用方需自行决定补偿策略。
 
 #### Scenario: Delete 正常路径
 
-- **WHEN** 节点状态为 `stopped`
+- **WHEN** 节点状态为 `offline`（已停止）
 - **THEN** `Delete` 返回 `nil`，内存与 DB 同步清理
 
 #### Scenario: Delete 状态校验失败

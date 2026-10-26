@@ -180,8 +180,14 @@ func TestNodesCRUD_CreateReadUpdateDelete(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("GET = %d, want 200 (body %s)", status, body)
 	}
-	if got := decodeObject(t, body)["addr"]; got != "127.0.0.1:15061" {
-		t.Errorf("GET addr = %v, want 127.0.0.1:15061", got)
+	detail := decodeObject(t, body)
+	if detail["addr"] != "127.0.0.1:15061" {
+		t.Errorf("GET addr = %v, want 127.0.0.1:15061", detail["addr"])
+	}
+	// The detail endpoint must carry the definition, not just the live
+	// summary: the edit form is populated from these fields.
+	if detail["domain"] != "3402000000" || detail["vendor"] != "acme" {
+		t.Errorf("GET detail = %v, want domain 3402000000 and vendor acme", detail)
 	}
 
 	// update
@@ -343,4 +349,98 @@ func TestNodesCascade_UpdateAndErrors(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestNodesList_ReturnsDefinitionsAndFilters covers the list contract: a
+// caller reading the inventory gets the definition fields too (the edit form
+// is populated from them), and the optional kind/domain filters narrow it.
+func TestNodesList_ReturnsDefinitionsAndFilters(t *testing.T) {
+	h := newNodeCRUDHarness(t)
+	h.create(t, nodeCRUDDeviceID, "device", "127.0.0.1:15061")
+	h.create(t, nodeCRUDLargeID, "platform-large", "127.0.0.1:15071")
+
+	status, body := h.request(t, http.MethodGet, "/v1/nodes", "")
+	if status != http.StatusOK {
+		t.Fatalf("GET /v1/nodes = %d, want 200 (body %s)", status, body)
+	}
+	all := decodeList(t, body)
+	if len(all) != 2 {
+		t.Fatalf("list length = %d, want 2", len(all))
+	}
+	for _, item := range all {
+		if item["domain"] != "3402000000" {
+			t.Errorf("%v: domain = %v, want 3402000000", item["id"], item["domain"])
+		}
+		if _, ok := item["cascade_children"]; !ok {
+			t.Errorf("%v: cascade_children missing from a list item", item["id"])
+		}
+	}
+
+	status, body = h.request(t, http.MethodGet, "/v1/nodes?kind=device", "")
+	if status != http.StatusOK {
+		t.Fatalf("filtered list = %d, want 200 (body %s)", status, body)
+	}
+	filtered := decodeList(t, body)
+	if len(filtered) != 1 || filtered[0]["id"] != nodeCRUDDeviceID {
+		t.Errorf("kind=device returned %v, want only %s", filtered, nodeCRUDDeviceID)
+	}
+
+	status, body = h.request(t, http.MethodGet, "/v1/nodes?domain=3402000000", "")
+	if status != http.StatusOK {
+		t.Fatalf("domain filter = %d, want 200 (body %s)", status, body)
+	}
+	if got := len(decodeList(t, body)); got != 2 {
+		t.Errorf("domain filter returned %d nodes, want 2", got)
+	}
+
+	status, body = h.request(t, http.MethodGet, "/v1/nodes?kind=platform-small", "")
+	if status != http.StatusOK {
+		t.Fatalf("empty filter = %d, want 200 (body %s)", status, body)
+	}
+	if got := len(decodeList(t, body)); got != 0 {
+		t.Errorf("kind=platform-small returned %d nodes, want 0", got)
+	}
+}
+
+// TestNodesDelete_FaultedNodeIsAllowed pins the quiescent set: a faulted node
+// has released its listener, so it must be deletable — otherwise an operator
+// could never remove a node that refuses to start.
+func TestNodesDelete_FaultedNodeIsAllowed(t *testing.T) {
+	h := newNodeCRUDHarness(t)
+	h.create(t, nodeCRUDDeviceID, "device", "127.0.0.1:15061")
+	h.advanceTo(t, nodeCRUDDeviceID, []model.Status{model.StatusRegistering, model.StatusFault})
+
+	status, body := h.request(t, http.MethodDelete, "/v1/nodes/"+nodeCRUDDeviceID, "")
+	if status != http.StatusOK {
+		t.Fatalf("DELETE faulted node = %d, want 200 (body %s)", status, body)
+	}
+	nodeID, _ := model.ParseNodeID(nodeCRUDDeviceID)
+	if _, err := h.store.GetNode(context.Background(), nodeID); !errors.Is(err, port.ErrNodeNotFound) {
+		t.Errorf("store still holds the row: %v", err)
+	}
+}
+
+// advanceTo walks the registry along path, which must consist of legal
+// transitions from the node's current status.
+func (h *nodeCRUDHarness) advanceTo(t *testing.T, id string, path []model.Status) {
+	t.Helper()
+	nodeID, err := model.ParseNodeID(id)
+	if err != nil {
+		t.Fatalf("ParseNodeID(%q): %v", id, err)
+	}
+	ctx := context.Background()
+	for _, st := range path {
+		if _, err := h.registry.Advance(ctx, nodeID, st); err != nil {
+			t.Fatalf("advance %s to %s: %v", id, st, err)
+		}
+	}
+}
+
+func decodeList(t *testing.T, raw string) []map[string]any {
+	t.Helper()
+	var out []map[string]any
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		t.Fatalf("decode list %q: %v", raw, err)
+	}
+	return out
 }

@@ -157,14 +157,36 @@ func newNodeResponse(n model.Node, counters map[model.FaultAction]uint64) nodeRe
 // an empty JSON array, never null.
 func (s *Server) handleNodeList(c echo.Context) error {
 	if s.nodes == nil {
-		return c.JSON(http.StatusOK, []nodeResponse{})
+		return c.JSON(http.StatusOK, []nodeDetailResponse{})
 	}
-	nodes := s.nodes.List(c.Request().Context())
-	out := make([]nodeResponse, 0, len(nodes))
+	ctx := c.Request().Context()
+	kind := strings.TrimSpace(c.QueryParam("kind"))
+	domain := strings.TrimSpace(c.QueryParam("domain"))
+	nodes := s.nodes.List(ctx)
+	out := make([]nodeDetailResponse, 0, len(nodes))
 	for _, n := range nodes {
-		out = append(out, newNodeResponse(n, nil))
+		if kind != "" && n.Profile().Kind().String() != kind {
+			continue
+		}
+		if domain != "" && n.Profile().Domain() != domain {
+			continue
+		}
+		out = append(out, s.nodeDefinition(ctx, n))
 	}
 	return c.JSON(http.StatusOK, out)
+}
+
+// nodeDefinition renders a live node together with the definition it was
+// built from. The summary fields are always present; the definition fields
+// (domain, vendor, cascade, registration, platform, timestamps) appear when
+// the service can supply the stored row. Callers that edit a node need the
+// definition — a form populated from the summary alone would silently reset
+// every field it did not show.
+func (s *Server) nodeDefinition(ctx context.Context, n model.Node) nodeDetailResponse {
+	if sn, ok := s.nodes.GetStoredNode(ctx, n.ID()); ok {
+		return newNodeDetailResponse(n, sn)
+	}
+	return nodeDetailResponse{nodeResponse: newNodeResponse(n, nil)}
 }
 
 // handleNodeDetail returns one node, or 404 with a JSON error body.
@@ -182,7 +204,9 @@ func (s *Server) handleNodeDetail(c echo.Context) error {
 	if _, c, ok := s.nodes.GetFault(ctx, id); ok {
 		counters = c
 	}
-	return c.JSON(http.StatusOK, newNodeResponse(n, counters))
+	resp := s.nodeDefinition(ctx, n)
+	resp.FaultCounters = counters
+	return c.JSON(http.StatusOK, resp)
 }
 
 // handleNodeStart starts one node. An unknown id is 404; an illegal status

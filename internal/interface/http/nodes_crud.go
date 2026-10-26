@@ -405,10 +405,13 @@ func normalizeChildren(in []string) []string {
 	return out
 }
 
-// domainFromID derives the home domain from a 20-digit GB id (digits 1-8).
+// domainFromID derives the home domain from a 20-digit GB id: the domain is
+// the 8-digit center code plus the 2-digit industry code, i.e. the id's first
+// ten digits (GB/T 28181 §5.3). It is the same value the YAML seeder takes
+// from a node's `domain:` field.
 func domainFromID(id string) string {
-	if len(id) >= 8 {
-		return id[:8] + "0000"
+	if len(id) >= 10 {
+		return id[:10]
 	}
 	return id
 }
