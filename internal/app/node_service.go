@@ -1175,32 +1175,20 @@ func (s *NodeService) Channel(ctx context.Context, id model.NodeID, channelID st
 // {"up","down","left","right","upleft","upright","downleft","downright","in","out"};
 // speed ∈ [0,255]; durationMs ≥ 0.
 //
-// Currently returns nil (no-op) because sending outbound MANSCDP device
-// control requires access to the device's active Registration object. Full
-// implementation: look up device registration → build PTZControl XML → send
-// MESSAGE via transport → wait for response.
+// The outbound DeviceControl is not implemented yet. It reports that instead
+// of returning nil: a silent 200 told the dashboard a camera had moved when
+// nothing had been sent, which is worse than an honest 501.
 func (s *NodeService) PTZ(ctx context.Context, id model.NodeID, channelID, direction string, speed, durationMs int) error {
-	_ = id
-	_ = channelID
-	_ = direction
-	_ = speed
-	_ = durationMs
-	return nil
+	return port.PTZUnsupported(id, channelID, "outbound device control is not implemented")
 }
 
 // Records returns the recording list for the channel in [start, end].
-// start/end 为零值时返回空切片。
 //
-// Currently returns nil (empty list) because device-side recording metadata
-// is populated via inbound RecordInfo NOTIFY messages handled by the
-// acceptor. A future enhancement would cache those notifications in
-// NodeService and return them here.
+// The RecordInfo query is not implemented yet; an empty list would read as
+// "this channel has no recordings", which is a different answer from "we
+// never asked". It therefore reports the missing capability.
 func (s *NodeService) Records(ctx context.Context, id model.NodeID, channelID string, start, end time.Time) ([]model.RecordInfoItem, error) {
-	_ = id
-	_ = channelID
-	_ = start
-	_ = end
-	return nil, nil
+	return nil, port.RecordUnsupported(id, channelID, "record query is not implemented")
 }
 
 // Playback issues a PLAY/PAUSE/TEARDOWN command for the channel.
@@ -1231,68 +1219,6 @@ func (s *NodeService) TalkStop(ctx context.Context, id model.NodeID, channelID, 
 	_ = channelID
 	_ = sessionID
 	return port.ErrTalkUnsupported
-}
-
-// SendPTZ sends a PTZ command to the device channel.
-// Returns ErrPTZUnsupported when the node is not a device.
-func (s *NodeService) SendPTZ(ctx context.Context, id model.NodeID, channelID string, cmd model.PTZCommand) error {
-	n, ok := s.registry.Get(ctx, id)
-	if !ok {
-		return model.ErrUnknownNode
-	}
-	if n.Profile().ID().Kind() != model.NodeKindDevice {
-		return port.PTZUnsupported(id, channelID, "not a device")
-	}
-	// TODO(#15-scenario-engine): implement actual PTZ MANSCDP control send
-	s.log.Warn("PTZ: not yet implemented",
-		"node_id", id.String(), "channel_id", channelID,
-		"command", fmt.Sprintf("%+v", cmd))
-	return nil
-}
-
-// ListRecords returns available playback sessions for the given channel.
-// Returns ErrRecordUnsupported when the node is not a device or has no
-// playback sessions.
-func (s *NodeService) ListRecords(ctx context.Context, id model.NodeID, channelID string, start, end time.Time) ([]model.RecordInfo, error) {
-	n, ok := s.registry.Get(ctx, id)
-	if !ok {
-		return nil, model.ErrUnknownNode
-	}
-	if n.Profile().ID().Kind() != model.NodeKindDevice {
-		return nil, port.RecordUnsupported(id, channelID, "not a device")
-	}
-	// TODO(#15-scenario-engine): return actual record list from device catalog
-	s.log.Warn("ListRecords: not yet implemented",
-		"node_id", id.String(), "channel_id", channelID,
-		"start", start, "end", end)
-	return nil, nil
-}
-
-// StartPlayback starts a playback session for the channel.
-// Returns ErrPlaybackUnsupported when the node is not a device.
-func (s *NodeService) StartPlayback(ctx context.Context, id model.NodeID, channelID string, req model.PlaybackRequest) (model.PlaybackHandle, error) {
-	n, ok := s.registry.Get(ctx, id)
-	if !ok {
-		return model.PlaybackHandle{}, model.ErrUnknownNode
-	}
-	if n.Profile().ID().Kind() != model.NodeKindDevice {
-		return model.PlaybackHandle{}, port.ErrPlaybackUnsupported
-	}
-	// TODO(#15-scenario-engine): implement playback via device dialog + RTP
-	s.log.Warn("StartPlayback: not yet implemented",
-		"node_id", id.String(), "channel_id", channelID,
-		"start", req.StartTime, "end", req.EndTime, "speed", req.Speed)
-	return model.PlaybackHandle{}, nil
-}
-
-// ControlPlayback sends a control command to an active playback session.
-// Returns ErrPlaybackUnsupported when the handle is invalid.
-func (s *NodeService) ControlPlayback(ctx context.Context, id model.NodeID, channelID string, handle model.PlaybackHandle, cmd model.PlaybackCommand) error {
-	if handle.SessionID == "" {
-		return port.ErrPlaybackUnsupported
-	}
-	// TODO(#15-scenario-engine): implement playback control
-	return nil
 }
 
 // StartTalk initiates a two-way audio session with the device channel.

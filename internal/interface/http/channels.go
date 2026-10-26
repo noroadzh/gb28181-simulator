@@ -428,7 +428,10 @@ func (s *Server) handleChannelPTZ(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, errorBody{Error: "duration_ms must be >= 0"})
 	}
 	if err := s.channels.PTZ(c.Request().Context(), id, channelID, in.Direction, in.Speed, in.DurationMs); err != nil {
-		if errors.Is(err, port.ErrTalkUnsupported) || errors.Is(err, port.ErrPlaybackUnsupported) {
+		var unsupported port.ErrPTZUnsupported
+		if errors.As(err, &unsupported) ||
+			errors.Is(err, port.ErrTalkUnsupported) ||
+			errors.Is(err, port.ErrPlaybackUnsupported) {
 			return c.JSON(http.StatusNotImplemented, errorBody{Error: err.Error()})
 		}
 		return c.JSON(http.StatusInternalServerError, errorBody{Error: err.Error()})
@@ -496,6 +499,10 @@ func (s *Server) handleChannelRecords(c echo.Context) error {
 	}
 	recs, err := s.channels.Records(c.Request().Context(), id, channelID, start, end)
 	if err != nil {
+		var unsupported port.ErrRecordUnsupported
+		if errors.As(err, &unsupported) {
+			return c.JSON(http.StatusNotImplemented, errorBody{Error: err.Error()})
+		}
 		return c.JSON(http.StatusInternalServerError, errorBody{Error: err.Error()})
 	}
 	out := make([]recordResponse, 0, len(recs))
