@@ -351,3 +351,17 @@ Each channel item in the Catalog response MUST include the channel's current sta
 - **WHEN** 节点的 `registration.server` 配置为 `platform.example.com:5060`，但 DNS 解析失败
 - **THEN** 对端匹配返回 false，该响应被忽略并继续等待
 - **AND** `Send` 阶段同样会因为 DNS 解析失败而返回错误，整体行为一致退化，不掩盖底层故障
+
+### Requirement: device 节点接受音频 INVITE
+
+`device` 节点 MUST 接受携带 audio m-line 的 INVITE（PCMU）并以 200 OK + SDP 应答：`c=` 为本节点地址，`m=audio` 为本地 RTP 端口。不含 audio m-line 的 INVITE MAY 以 488 拒绝。MUST NOT 对音频 INVITE 回 405。
+
+#### Scenario: 音频 INVITE 被受理
+
+- **WHEN** 平台向 device 节点发送携带 PCMU audio 的 INVITE
+- **THEN** 节点回 200 OK，SDP 含 `m=audio <port> RTP/AVP 0` 与 `c=IN IP4 <节点地址>`
+
+#### Scenario: 非音频 INVITE 被拒绝
+
+- **WHEN** INVITE 的 SDP 只有 video m-line
+- **THEN** 节点回 488 Not Acceptable Here

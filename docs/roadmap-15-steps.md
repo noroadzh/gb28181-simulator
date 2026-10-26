@@ -42,7 +42,7 @@
 | 35 | `channel-talk-and-snapshot` | 对讲与抓拍 | ✅ 已归档 | 对讲控制面（INVITE/BYE + 空闲/对端挂断回收）与合成源 JPEG 抓拍；音频桥延后为 #38（2026-10-26） |
 | 36 | `spec-purpose-backfill` | 主 spec Purpose 补全 | ⬜ 待实施 | 4 个主 spec 仍是占位 Purpose：channel-id-auto-gen、media-loop-validation、platform-large-node-catalog-aggregate、web-realtime-logs |
 | 37 | `playback-flv-stream` | 回放 FLV 历史流 | ⬜ 待实施 | `/playback/flv` 仍未实现：INVITE/SDP 拉起历史流 + RTP 接收 + FLV 转封装（channel-ptz-and-playback 任务 3.5 延后） |
-| 38 | `talk-audio-bridge` | 对讲音频桥 | ⬜ 待实施 | WebSocket ↔ RTP 的 PCMU 音频桥，含 200 OK SDP 应答解析与设备侧 INVITE 门禁（channel-talk-and-snapshot 任务 1.2 延后） |
+| 38 | `talk-audio-bridge` | 对讲音频桥 | ✅ 已归档 | 设备受理音频 INVITE 并用自己的 RTP 端口应答；平台解析 answer；WebSocket ↔ RTP 双向 PCMU（2026-10-26） |
 
 ## 补充归档索引
 
@@ -101,6 +101,6 @@
 - 原始路线图中 #3 为 `core-manscdp-and-ps`，后被 `enterprise-skeleton` 占位，本文件保留原始编号顺序。
 - 部分 change 内部拆分为多个子 change 归档；它们与无编号跟进统一登记在「补充归档索引」。
 - #10 原名 `dynamic-catalog-and-query`，实际由 `dynamic-sim-features` change 实现（动态目录/报警、录像与回放、移动位置、运行时触发 API）。
-- 已完成 35 个编号（#1–#35），对应 51 个归档 change 目录（2026-10-26 同步）。
-- 待实施 3 个（#36：spec-purpose-backfill、#37：playback-flv-stream、#38：talk-audio-bridge）。
+- 已完成 36 个编号（#1–#35、#38），对应 52 个归档 change 目录（2026-10-26 同步）。
+- 待实施 2 个（#36：spec-purpose-backfill、#37：playback-flv-stream）。
 - 路线图同步契约见 capability `docs-roadmap-sync`；每次归档必须在同提交更新本文件。

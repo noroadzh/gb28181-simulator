@@ -276,7 +276,9 @@ device 节点可展开查看所有通道。该页面从 `GET /v1/nodes/:id/chann
 - 点击「开始对讲」：浏览器请求麦克风权限，采集 PCM 通过 WebSocket 上行到 `/v1/talk/ws/:session_id`。
 - 后端基于 SIP INVITE 建立音频 RTP 会话（PCMU 编码），下行音频通过 WebSocket 推回浏览器播放。
 - 点击「停止对讲」：关闭 WebSocket，发送 SIP BYE 结束会话。
-- 后端对应 `POST /v1/nodes/:id/channels/:ch/talk/start` 与 `.../talk/stop`。**当前信令尚未实现，接口返回 501**（见 §5.6）。
+- 后端对应 `POST /v1/nodes/:id/channels/:ch/talk/start` 与 `.../talk/stop`：平台向设备发 INVITE（SDP 携带 PCMU，端口为平台侧的 RTP 接收口），设备以 200 OK + 自己的 SDP 应答；`talk/stop` 发 BYE。
+- 音频走 `GET /v1/nodes/:id/channels/:ch/talk/audio?session=<id>`：二进制帧下行是设备的 PCMU 载荷，上行被封装成 RTP 发往设备。关闭 WebSocket 只退订，不结束对话——结束对话请用 `talk/stop`。
+- 前提：目标是 `device` 节点，且它接受音频 INVITE；未知或已结束的 session 返回 404。
 
 ### 5.4 录像列表抽屉
 
@@ -297,7 +299,7 @@ device 节点可展开查看所有通道。该页面从 `GET /v1/nodes/:id/chann
 | 录像查询 | 已实现（RecordInfo 查询/应答）；下游超时 **504**、设备不可达 **502** |
 | 回放控制 play / pause / teardown / speed | 已实现；同一通道重复 play 会先拆掉旧会话 |
 | 回放 FLV 历史流 | 未实现（路线图 #37） |
-| 语音对讲 | 接口已定义，信令实现进行中，当前 **501** |
+| 语音对讲 | 已实现：INVITE/BYE 控制面 + `/talk/audio` WebSocket 音频桥（PCMU）；非 device 501、对端不可达 502、无应答 504、未知 session 404 |
 
 ### 5.5 拉流地址复制
 
