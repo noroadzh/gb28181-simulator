@@ -8,7 +8,7 @@
 
 ## 2. PTZ 下发
 
-- [ ] 2.1 MANSCDP DeviceControl（PTZCmd）编码：方向/速度/时长 → 8 字节 PTZCmd；验收：**字节级 golden test**（含八方向 + 预置位调用）
+- [x] 2.1 MANSCDP DeviceControl（PTZCmd）编码：方向/速度/时长 → 8 字节 PTZCmd；验收：**字节级 golden test**（含八方向 + 预置位调用）
 - [ ] 2.2 `PTZ` 实现：定位在线 device 节点 → 构造 MESSAGE（Application/MANSCDP+XML）→ 经节点 transport 发送；非 device 501、节点离线 502；验收：app 单测断言报文目的地址、body 与 200 返回
 - [ ] 2.3 e2e：真实 SIP 抓包断言 PTZ MESSAGE 到达 device 节点且 PTZCmd 内容正确；验收：`go test ./internal/test/e2e/...` 通过
 
