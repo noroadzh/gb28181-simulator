@@ -105,8 +105,10 @@ func (a *Acceptor) run(ctx context.Context, p *platform) {
 		// by Call-ID, so non-talk dialogs are unaffected.
 		if msg.Method() == "BYE" {
 			if callID := headerValue(msg, "Call-ID"); callID != "" {
-				// A device's own talk audio port belongs to this dialog.
+				// A device's own talk audio or playback port belongs to
+				// this dialog.
 				a.closeDeviceTalk(callID)
+				a.closeDevicePlayback(callID)
 				if a.talkHangup != nil {
 					a.talkHangup(p.id, callID)
 				}

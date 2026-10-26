@@ -80,15 +80,33 @@ func TestPlaybackSDP_RejectsBrokenInput(t *testing.T) {
 
 	base := "v=0\r\nc=IN IP4 127.0.0.1\r\nt=2026-10-01T00:00:00 2026-10-01T00:05:00\r\nm=video 50000 RTP/AVP 96\r\n"
 	broken := map[string]string{
-		"no u=":       base,
-		"bad u=":      strings.Replace(base, "v=0\r\n", "v=0\r\nu=no-colon\r\n", 1),
-		"no t=":       strings.Replace(base, "t=2026-10-01T00:00:00 2026-10-01T00:05:00\r\n", "", 1),
-		"bad window":  strings.Replace(base, "t=2026-10-01T00:00:00 2026-10-01T00:05:00", "t=2026-10-01T00:05:00 2026-10-01T00:00:00", 1),
-		"no m=video":  strings.Replace(base, "m=video 50000 RTP/AVP 96\r\n", "", 1),
+		"no u=":      base,
+		"bad u=":     strings.Replace(base, "v=0\r\n", "v=0\r\nu=no-colon\r\n", 1),
+		"no t=":      strings.Replace(base, "t=2026-10-01T00:00:00 2026-10-01T00:05:00\r\n", "", 1),
+		"bad window": strings.Replace(base, "t=2026-10-01T00:00:00 2026-10-01T00:05:00", "t=2026-10-01T00:05:00 2026-10-01T00:00:00", 1),
+		"no m=video": strings.Replace(base, "m=video 50000 RTP/AVP 96\r\n", "", 1),
 	}
 	for name, body := range broken {
 		if _, err := ParsePlaybackSDP(body); err == nil {
 			t.Errorf("%s: parsed without error", name)
 		}
+	}
+}
+
+// The device answers with a=sendonly; the offer keeps the default recvonly.
+func TestPlaybackSDPBytes_Mode(t *testing.T) {
+	start, end := playbackWindow()
+	body, err := PlaybackSDPBytes(PlaybackSDP{
+		DeviceID: "34020000001310000001", SN: "1", ConnIP: "127.0.0.1", RTPPort: 50001,
+		Start: start, End: end, Mode: "sendonly",
+	})
+	if err != nil {
+		t.Fatalf("PlaybackSDPBytes: %v", err)
+	}
+	if !strings.Contains(body, "a=sendonly") {
+		t.Errorf("answer is not sendonly:\n%q", body)
+	}
+	if strings.Contains(body, "a=recvonly") {
+		t.Errorf("answer still carries recvonly:\n%q", body)
 	}
 }

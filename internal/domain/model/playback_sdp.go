@@ -21,6 +21,9 @@ type PlaybackSDP struct {
 	RTPPort  int
 	Start    time.Time
 	End      time.Time
+	// Mode is the a= direction attribute: "recvonly" for the platform's
+	// offer, "sendonly" for the device's answer. Empty means recvonly.
+	Mode string
 }
 
 // PlaybackSDPBytes renders the body that goes into the INVITE (or its 200 OK).
@@ -67,7 +70,11 @@ func PlaybackSDPBytes(p PlaybackSDP) (string, error) {
 	line("c=IN IP4 %s", p.ConnIP)
 	line("t=%s %s", p.Start.Format(playbackTimeFormat), p.End.Format(playbackTimeFormat))
 	line("m=video %d RTP/AVP 96", p.RTPPort)
-	line("a=recvonly")
+	mode := p.Mode
+	if mode == "" {
+		mode = "recvonly"
+	}
+	line("a=%s", mode)
 	line("a=rtpmap:96 PS/90000")
 	return b.String(), nil
 }

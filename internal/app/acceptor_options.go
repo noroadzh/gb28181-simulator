@@ -60,8 +60,9 @@ type Acceptor struct {
 	// deviceTalks holds the audio port each talk dialog opened on this node,
 	// keyed by Call-ID. A device answers a talk INVITE with its own RTP port;
 	// the port lives until the dialog ends.
-	deviceTalksMu sync.Mutex
-	deviceTalks   map[string]net.PacketConn
+	deviceTalksMu   sync.Mutex
+	deviceTalks     map[string]net.PacketConn
+	devicePlaybacks map[string]net.PacketConn
 
 	// relay carries the cascade hand-offs this node is waiting on: which
 	// requester is waiting for which downstream answer. relayWait bounds the
@@ -167,24 +168,25 @@ func NewAcceptor(
 		log = slog.Default()
 	}
 	return &Acceptor{
-		ctx:            ctx,
-		clock:          clock,
-		challenger:     challenger,
-		authenticator:  authenticator,
-		creds:          creds,
-		devices:        devices,
-		manscdp:        manscdp,
-		newTicker:      newTicker,
-		log:            log.With("component", "internal/app", "subsystem", "sip_acceptor"),
-		serving:        make(map[string]*platform),
-		pipelines:      make(map[string]pipelineEntry),
-		inviteTimers:   make(map[string]*time.Timer),
-		inviteWatchers: make(map[string]chan struct{}),
-		relay:          newRelayTable(nil),
-		relayWait:      relayTimeout,
-		responses:      newResponseTable(),
-		deviceTalks:    make(map[string]net.PacketConn),
-		controlWait:    5 * time.Second,
+		ctx:             ctx,
+		clock:           clock,
+		challenger:      challenger,
+		authenticator:   authenticator,
+		creds:           creds,
+		devices:         devices,
+		manscdp:         manscdp,
+		newTicker:       newTicker,
+		log:             log.With("component", "internal/app", "subsystem", "sip_acceptor"),
+		serving:         make(map[string]*platform),
+		pipelines:       make(map[string]pipelineEntry),
+		inviteTimers:    make(map[string]*time.Timer),
+		inviteWatchers:  make(map[string]chan struct{}),
+		relay:           newRelayTable(nil),
+		relayWait:       relayTimeout,
+		responses:       newResponseTable(),
+		deviceTalks:     make(map[string]net.PacketConn),
+		devicePlaybacks: make(map[string]net.PacketConn),
+		controlWait:     5 * time.Second,
 	}, nil
 }
 

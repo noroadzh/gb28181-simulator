@@ -9,6 +9,7 @@ package app
 import (
 	"context"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
@@ -25,9 +26,13 @@ func (a *Acceptor) handleInvite(
 ) (model.Message, error) {
 	a.log.Debug("INVITE received",
 		"node_id", p.id.String(), "call_id", headerValue(req, "Call-ID"))
-	// A device is a camera: a talk INVITE is audio it can answer itself, with
-	// its own RTP port. Anything else keeps the device's usual behaviour.
+	// A device is a camera: it answers talk (audio) and historical playback
+	// (video with a time window) itself, each with its own RTP port.
+	// Anything else keeps the device's usual behaviour.
 	if p.isDevice {
+		if strings.Contains(req.Body(), "s=Playback") {
+			return a.answerDevicePlaybackInvite(p, req)
+		}
 		return a.answerDeviceTalkInvite(p, req)
 	}
 	callID := headerValue(req, "Call-ID")
@@ -244,6 +249,103 @@ func (a *Acceptor) closeDeviceTalk(callID string) {
 	a.deviceTalksMu.Lock()
 	conn := a.deviceTalks[callID]
 	delete(a.deviceTalks, callID)
+	a.deviceTalksMu.Unlock()
+	if conn != nil {
+		_ = conn.Close()
+	}
+}
+
+// answerDevicePlaybackInvite answers a historical playback INVITE: the node
+// opens its own sending port and answers with the same time window and
+// a=sendonly. A channel with no media source is 404 — the platform asked for
+// a recording this device cannot produce.
+func (a *Acceptor) answerDevicePlaybackInvite(p *platform, req model.Message) (model.Message, error) {
+	callID := headerValue(req, "Call-ID")
+	if callID == "" {
+		return buildResponse(400, "Bad Request", req, nil, "")
+	}
+	offer, err := model.ParsePlaybackSDP(req.Body())
+	if err != nil {
+		a.log.Warn("device cannot read a playback INVITE",
+			"node_id", p.id.String(), "error", err.Error())
+		return buildResponse(400, "Bad Request", req, nil, "")
+	}
+	if !a.deviceHasMediaSource(p, offer.DeviceID) {
+		a.log.Debug("device has no source for the requested playback",
+			"node_id", p.id.String(), "channel", offer.DeviceID)
+		return buildResponse(404, "Not Found", req,
+			[]model.Header{allowHeader()}, "")
+	}
+
+	conn, lerr := net.ListenPacket("udp4", "0.0.0.0:0")
+	if lerr != nil {
+		a.log.Warn("device cannot open a playback port",
+			"node_id", p.id.String(), "error", lerr.Error())
+		return buildResponse(500, "Server Internal Error", req, nil, "")
+	}
+	host := "127.0.0.1"
+	if h, _, splitErr := net.SplitHostPort(p.tr.LocalAddr()); splitErr == nil {
+		host = h
+	}
+	answer := model.PlaybackSDP{
+		DeviceID: offer.DeviceID,
+		SN:       offer.SN,
+		ConnIP:   host,
+		RTPPort:  conn.LocalAddr().(*net.UDPAddr).Port,
+		Start:    offer.Start,
+		End:      offer.End,
+		Mode:     "sendonly",
+	}
+	body, berr := model.PlaybackSDPBytes(answer)
+	if berr != nil {
+		_ = conn.Close()
+		return buildResponse(500, "Server Internal Error", req, nil, "")
+	}
+
+	a.deviceTalksMu.Lock()
+	if a.devicePlaybacks == nil {
+		a.devicePlaybacks = map[string]net.PacketConn{}
+	}
+	if old := a.devicePlaybacks[callID]; old != nil {
+		_ = old.Close()
+	}
+	a.devicePlaybacks[callID] = conn
+	a.deviceTalksMu.Unlock()
+
+	hdrs := []model.Header{
+		model.NewHeader("Contact", "<sip:"+p.id.String()+"@"+p.realm+">"),
+		model.NewHeader("Content-Type", "application/sdp"),
+		allowHeader(),
+	}
+	a.log.Debug("device answered a playback INVITE",
+		"node_id", p.id.String(), "channel", offer.DeviceID,
+		"sn", offer.SN, "rtp_port", answer.RTPPort)
+	return buildResponse(200, "OK", req, hdrs, body)
+}
+
+// deviceHasMediaSource reports whether the node can produce a recording for
+// channelID: a per-channel source wins, then the node-level one.
+func (a *Acceptor) deviceHasMediaSource(p *platform, channelID string) bool {
+	if a.registry == nil {
+		return false
+	}
+	node, ok := a.registry.Get(context.Background(), p.id)
+	if !ok {
+		return false
+	}
+	if _, ok := node.Profile().ChannelMediaConfig(channelID); ok {
+		return true
+	}
+	_, ok = node.Profile().MediaConfig()
+	return ok
+}
+
+// closeDevicePlayback releases the playback port of a finished dialog. The
+// port is keyed by Call-ID, the only dialog identity a BYE carries.
+func (a *Acceptor) closeDevicePlayback(callID string) {
+	a.deviceTalksMu.Lock()
+	conn := a.devicePlaybacks[callID]
+	delete(a.devicePlaybacks, callID)
 	a.deviceTalksMu.Unlock()
 	if conn != nil {
 		_ = conn.Close()
