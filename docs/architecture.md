@@ -227,6 +227,33 @@ Start ──▶ serve (Acceptor.Serve)  ──▶ advanceOnline ──▶ online
 
 这只是对单个 socket 的分拣，不是 SIP 事务层。后续变更给 platform-small 带来需要从上游接收的请求（`INVITE`、`SUBSCRIBE`）时，分拣必须从按方向变为按事务匹配。
 
+## 级联中继（Change `cascade-message-relay`）
+
+节点收到的 MANSCDP MESSAGE 先问 cascade handler「这一跳交给谁」：目标是直接下级（或报文 `X-PreferredPath` 指定的邻居）就投递，否则按本地逻辑处理。
+
+**下行投递**
+
+- 报文保持 Call-ID / CSeq / From / To / body 不变，只追加 cascade handler 给出的 `X-RoutePath` / `X-PreferredPath`，发往下一跳的**信令地址**（由 `NodeRegistry` 解析），而不是发回请求方。
+- 出站 Via 不在这里拼：`internal/adapter/siptransport` 对请求一律重新生成 Via，模型层的 Via 不会上线；下游按 UDP 源地址回包，投递并不依赖 Via。
+- 只有**直接下级**才会成为投递目标。handler 在找不到下级时也会返回上级，若照单全收，发给本节点自己设备的消息会被劫持到上游。
+
+**响应回传**
+
+- 每次投递在 `relayTable` 登记 `(nodeID, Call-ID, CSeq) → {原始 peer, 原始请求, deadline}`。节点维度不可省：一个 `Acceptor` 服务进程内所有节点，而中继请求的 Call-ID/CSeq 逐跳不变，缺了节点键第二跳会覆盖第一跳。
+- 下游应答命中登记后，**用保存的原始请求重建响应**（状态码、reason、body 取自下游），发回原始 peer。转发下游字节不行：那会把本节点重新生成的 Via 回给一个从未发过它的发起方。
+
+**失败语义**
+
+| 情况 | 响应 |
+|---|---|
+| handler 判定环路 | `482 Loop Detected` |
+| 下一跳无法解析 / 发送失败 | `500 Server Internal Error` |
+| 5s 内无下游应答 | `504 Server Time-out` |
+
+三者都立即应答并记 `warn`，不会静默超时。`platform-small` 的传输是 split 的：serving 半每发出请求就按其 Call-ID 登记一次性路由，保证应答回到 serving 半；否则没有上游读者的被动 small 会丢弃应答。
+
+**限制**：只中继 MANSCDP MESSAGE，不中继 INVITE 与媒体；跨进程级联与附录 H.3 的自动路径发现不在范围内。
+
 ## 可观测性
 
 ### 日志
@@ -260,9 +287,11 @@ tracing:
 
 `internal/adapter/siptransport` 现在会报告消息的来源对端。gosip 的 `Messages()` 通道不携带它，但其连接处理器在发布每条消息前用 `SetSource` 记录了来源，因此 `Receive` 返回 `(Message, addr, error)`，调用方可以把地址直接交回 `Send` 作答。缺失或缺端口的地址是显式错误 —— 绝不是空串 —— 调用方不会回错目的地。`sipprobe --answer` 依赖这一点回 200 OK，双进程 INVITE → 200 OK 握手已由 `scripts/smoke-sip.sh` 与 `TestAnswer_TwoProcessesExchange` 验证。
 
-### 未决：`modelToGosip` 丢弃头部
+### `modelToGosip` 的头部映射与 Via 重生成
 
-`internal/adapter/siptransport` 经 `internal/adapter/sip` 的 builder 为 gosip 重建 `model.Message`，目前只保留方法/URI（或状态）、body 与 content type —— **调用方传入的头部被丢弃**。请求仍能工作，因为 builder 自己生成 `Via`、`From`、`To`、`Call-ID` 与 `CSeq`，但手工构建的响应会丢头部并被线上拒绝。头部透传留给后续变更；`sipprobe --answer` 不受影响，因为它直接构建 gosip 消息。
+`internal/adapter/siptransport` 经 `internal/adapter/sip` 的 builder 为 gosip 重建 `model.Message`：方法/URI（或状态）、body、`Content-Type`、`From`、`To`、`Call-ID`、`CSeq`、`Contact`、`Expires`、`Max-Forwards`、`User-Agent` 一一映射，未知头按 `GenericHeader` 原样透传。
+
+**`Via` 是例外**：请求的 Via 由 builder 重新生成（模型层拼的 Via 不会上线），响应的 Via 则按调用方给出的顺序写入。级联中继因此不依赖 Via——它按显式目的地址投递，并在回程用保存的原始请求重建响应。
 
 ### 未决：异步端口释放
 

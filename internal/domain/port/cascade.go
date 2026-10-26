@@ -2,12 +2,17 @@
 package port
 
 import (
+	"errors"
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
 )
 
 // CascadeHandler is the boundary through which outbound SIP messages are
 // offered to the cascade subsystem before they hit the wire. Implementations
 // MUST be safe for concurrent use.
+// ErrCascadeLoop marks a forwarding decision rejected because the message
+// has already traversed this node. Callers map it to 482 Loop Detected.
+var ErrCascadeLoop = errors.New("port: cascade loop detected")
+
 type CascadeHandler interface {
 	// Forward receives a message destined for dstDeviceID and returns the
 	// next deviceID the message should be routed to, and any SIP headers

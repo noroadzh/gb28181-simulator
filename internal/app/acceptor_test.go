@@ -19,11 +19,12 @@ import (
 // answers it writes back. Everything else is a fake, because the point here
 // is the decision — challenge, refuse or grant — not the digest maths.
 type acceptorTransport struct {
-	mu      sync.Mutex
-	inbound chan model.Message
-	sent    []model.Message
-	peers   []string
-	closed  bool
+	mu       sync.Mutex
+	inbound  chan model.Message
+	sent     []model.Message
+	peers    []string
+	closed   bool
+	failSend error // when set, every send fails with this error
 }
 
 func newAcceptorTransport() *acceptorTransport {
@@ -42,6 +43,9 @@ func (t *acceptorTransport) Receive(ctx context.Context) (model.Message, string,
 func (t *acceptorTransport) Send(ctx context.Context, msg model.Message, dst string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if t.failSend != nil {
+		return t.failSend
+	}
 	t.sent = append(t.sent, msg)
 	t.peers = append(t.peers, dst)
 	return nil

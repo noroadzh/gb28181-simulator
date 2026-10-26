@@ -6,15 +6,20 @@
 
 当节点收到 MANSCDP MESSAGE，且其目标 deviceID 是本节点的直接下级时，节点 MUST 把报文投递到该下级的信令地址；MUST NOT 把报文回送给请求方。投递时 body MUST 保持不变，并 MUST 由 cascade handler 逐跳追加 `X-RoutePath`。未配置下级的节点保持现有直接应答行为。
 
-#### Scenario: 直接下级收到投递
+#### Scenario: 按 PreferredPath 投递给直接下级
 
-- **WHEN** platform-large 收到面向 device 的 MESSAGE，其 `cascade_children` 为 `[platform-small]`
-- **THEN** 报文被发往 platform-small 的信令地址，携带 `X-RoutePath: <large>`
+- **WHEN** platform-large 收到面向 device、且携带 `X-PreferredPath: <small>` 的 MESSAGE，其 `cascade_children` 为 `[platform-small]`
+- **THEN** 报文被发往 platform-small 的信令地址，携带 `X-RoutePath: <large>`，且 `X-PreferredPath` 已消费掉 `<small>`
 
 #### Scenario: 中间节点继续转发
 
 - **WHEN** platform-small 收到上一条报文，其 `cascade_children` 含 device
 - **THEN** platform-small 把报文发往 device 的地址，携带 `X-RoutePath: <large>,<small>`
+
+#### Scenario: 目标既非下级也无 PreferredPath
+
+- **WHEN** platform-large 收到面向孙节点 device 的 MESSAGE，且报文没有 `X-PreferredPath`
+- **THEN** 不产生任何下游报文，节点按本地逻辑处理该 MESSAGE（与引入本 change 之前一致）
 
 #### Scenario: 无下级时行为不变
 

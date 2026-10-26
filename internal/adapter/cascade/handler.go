@@ -138,8 +138,8 @@ func (h *Handler) Forward(fromNodeID model.NodeID, msg model.Message, dstDeviceI
 			"dst", dstDeviceID,
 			"route", model.FormatRoutePath(route.RoutePath))
 		return "", nil, false, fmt.Errorf(
-			"cascade: loop detected: node %s is already on route %s",
-			self, model.FormatRoutePath(route.RoutePath))
+			"%w: node %s is already on route %s",
+			port.ErrCascadeLoop, self, model.FormatRoutePath(route.RoutePath))
 	}
 
 	topo := h.topoView()

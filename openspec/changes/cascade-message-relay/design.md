@@ -30,23 +30,25 @@ See `proposal.md` — Why. 现状约束：
 
 cascade handler 返回的是 deviceID；用 `registry.Get(ctx, next)` 取 profile 的 `Addr()`。备选：让 `Topology` 直接携带地址——会把传输层细节塞进纯函数的 handler，破坏它「无 socket」的设计。
 
-### Decision 3: 前置自身 Via + (Call-ID, CSeq) 在途表
+### Decision 2b: 跨层投递依赖 X-PreferredPath
 
-转发时必须把响应引回中继节点，否则响应会按原始 Via 直接回到发起方，中继表永远等不到它、还会在超时后补发一个 504。因此投递时构造转发请求：
+cascade handler 只会选**直接下级**或上级作为 next hop，它不认识孙节点。因此「大平台 → 小平台 → 设备」这样的多跳链路必须由发起方（或上级平台）在报文里给出 `X-PreferredPath`，节点按该头逐跳消费并投递：每一跳只负责把它交给列表中的下一个邻居。没有 PreferredPath 时，节点对非直接下级的目标不做下行投递，落到本地处理——这是既有行为，不在本 change 改变。
 
-- **Via**：新增一条指向本节点监听地址的 `Via`（新 branch）作为**最顶层**，原始 Via 原样保留在其下；
-- **Call-ID / CSeq**：保持原值，作为关联键；
-- **X-RoutePath**：由 cascade handler 追加减（复用 `withExtraHeaders`）。
+备选：节点维护「哪个子节点通向某个孙节点」的映射——那属于目录聚合（需要先查询下级目录），远超本 change 范围。
 
-acceptor 维护 `map[callID+cseq]pendingRelay{originalPeer, deadline}`。响应路径：
+### Decision 3: 用 (Call-ID, CSeq) 在途表 + 用原请求重建回程响应
 
-1. 响应到达且命中 → **剥掉本节点那条顶层 Via**，把余下报文发给 `originalPeer`，删除表项；
-2. 未命中（超时后迟到的响应、重传）→ 丢弃并记 debug；
-3. deadline 到期 → 本节点构造 `504 Server Time-out` 回给 `originalPeer`。
+投递时保持 Call-ID / CSeq / From / To / body 不变，只追加 cascade 头。Via 不在这里拼：出站适配器（`internal/adapter/siptransport`）对**请求**一律重新生成 Via，模型层的 Via 不会上线，任何"前置自身 Via"的方案在这一层都不成立。
 
-剥除顶层 Via 是必需的：SIP 客户端按**顶层 Via 的 branch** 匹配事务，留着本节点的 Via 会让发起方匹配不上。
+回程因此不转发下游响应的原始字节，而是**用保存的原始请求重建**：`buildResponse(downstream.status, downstream.reason, entry.request, ...)`。这样响应携带的 Via 正是最初请求方发来的那一条，能匹配上它的事务；中间每一跳都用自己的 entry 重建，逐跳回退。
 
-备选：不前置 Via、让响应走原生 Via 回发起方——实现更简单，但中继无法判断下游是否应答，无法兑现「超时返回 504」，排除。完整代理事务（branch 级重传、失败分支）仍不做。
+acceptor 维护 `map[nodeID+callID+cseq]pendingRelay{peer, request, deadline}`。节点维度不能省：一个 Acceptor 服务进程内所有节点，而中继请求的 Call-ID/CSeq 逐跳不变，少了节点键第二跳会覆盖第一跳的登记（两跳 e2e 就是这么暴露出来的）。
+
+1. 响应到达且命中 → 重建响应并发给 `entry.peer`，删除表项；
+2. 未命中（超时后迟到、重传）→ 丢弃并记 debug；
+3. deadline 到期 → 重建 `504 Server Time-out` 发给 `entry.peer`。
+
+备选：前置自身 Via 并剥除——在本栈上不可行（适配器重生成 Via，且下游按 UDP 源地址回包，不读 Via），已放弃；完整代理事务（branch 级重传）仍不做。
 
 ### Decision 4: 响应不参与 cascade handler
 
@@ -66,12 +68,21 @@ acceptor 维护 `map[callID+cseq]pendingRelay{originalPeer, deadline}`。响应�
 
 单跳等待 5 秒，随后发 504。备选：复用注册事务超时或加配置项——前者语义不匹配（注册是长事务），后者在需求明确前属于过度设计。
 
+### Decision 7: split 传输把 serving 半发出请求的应答送回 serving 半
+
+`platform-small` 的传输是把一个 socket 拆给两个读者（serving / upstream）。原实现把所有**响应**默认投给 upstream 半，这对注册应答是对的，但对节点自己向下游发起的请求（目录查询、级联中继）是错的：没有声明注册的 platform-small 根本不读 upstream 半，应答会被直接丢弃。现在 serving 半每发出一条请求，就按其 Call-ID 登记一次性路由，应答到达时回到 serving 半并自删登记。
+
+## 实现中补齐的既有缺陷
+
+- **无注册的 device 节点不服务**：`Start` 只把这类节点推进到 online，从未调用 `ServeDevice`，于是「被动的 UAS」（`node-abstraction` 早有要求）实际上收不到任何请求——两跳链路的叶子因此不应答。现已在 passive 分支补上。
+- **响应只回显第一条 Via**：`buildResponse` 原来只复制第一个 Via，违反 RFC 3261 §8.2.6；多跳请求的应答因此会丢掉后续 Via。现按序复制全部 Via。
+
 ## Risks / Trade-offs
 
 - **R1 同一 Call-ID/CSeq 并发复用** → 表项键为 `callID|cseq`，并带 deadline；冲突时后写覆盖，日志记录。
 - **R2 下游重传导致重复转发** → 首个响应到达即删除表项，后续同键响应按「无在途请求」丢弃并记 debug。
 - **R3 多跳累计超时超过请求方耐心** → 每跳独立 5s；最坏情况发起方先超时，属预期，日志可定位卡在哪一跳。
-- **R4 Via 处理出错会静默破坏回程** → 忘记前置自身 Via 会让响应绕过中继表；回程忘记剥除顶层 Via 会让发起方匹配不到事务。两者都不会报错，只表现为「发起方一直等到超时」。缓解：为「响应确实回到中继节点」和「回给发起方的报文不含本节点 Via」各写一条断言，两跳 e2e 同时覆盖。
+- **R4 回程重建丢失下游响应头** → 重建只保留状态码、reason、body 与 Content-Type；下游若在响应里带了额外头（如自定义扩展），会被丢弃。缓解：`buildResponse` 复制原始请求的 Via/From/To/Call-ID/CSeq，回程语义完整；额外头的需求出现时再在白名单里加。
 - **R5 环路检测依赖 `X-RoutePath`** → 发起方若不携带该头，多跳仍靠 handler 逐跳追加；无头时只能防直接自环。
 
 ## Migration Plan

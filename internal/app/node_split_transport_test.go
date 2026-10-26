@@ -345,3 +345,37 @@ func TestSplitTransportSubscribeAutoRegistersHandler(t *testing.T) {
 		t.Errorf("status = %d, want 200", resp.StatusCode())
 	}
 }
+
+// A request the serving half sends is answered to the serving half. Before
+// this rule the splitter sent every response upstream, so a passive
+// platform-small (no registrar reading that half) never saw the answers to
+// its own catalog queries or relayed requests.
+func TestSplitTransport_ServingHalfGetsAnswersToItsOwnRequests(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	src := &scriptedTransport{}
+	split := newSplitTransport(ctx, src)
+	defer func() { _ = split.Close() }()
+
+	serving := split.Serving()
+	if err := serving.Send(ctx, requestWithCallID(t, "MESSAGE", "relay-answer"), testServer); err != nil {
+		t.Fatalf("serving send: %v", err)
+	}
+	src.inject(response(t, 200, callIDHeader("relay-answer")), testServer)
+
+	msg, _, err := serving.Receive(ctx)
+	if err != nil {
+		t.Fatalf("serving half did not receive its answer: %v", err)
+	}
+	if msg.StatusCode() != 200 {
+		t.Errorf("status = %d, want 200", msg.StatusCode())
+	}
+
+	// The upstream half must not see it as well.
+	short, shortCancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer shortCancel()
+	if _, _, err := split.Upstream().Receive(short); err == nil {
+		t.Error("the upstream half also received the serving half's answer")
+	}
+}

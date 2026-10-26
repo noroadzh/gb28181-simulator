@@ -52,6 +52,12 @@ type Acceptor struct {
 	cascade port.CascadeHandler
 	faults  port.FaultStore
 
+	// relay carries the cascade hand-offs this node is waiting on: which
+	// requester is waiting for which downstream answer. relayWait bounds the
+	// wait before the node answers the requester itself.
+	relay     *relayTable
+	relayWait time.Duration
+
 	// catalogPollEvery configures the catalog pull interval for each serving
 	// node. Zero means the poller is disabled (the default). Set through
 	// WithCatalogPollInterval before the first call to Serve.
@@ -158,6 +164,8 @@ func NewAcceptor(
 		pipelines:      make(map[string]pipelineEntry),
 		inviteTimers:   make(map[string]*time.Timer),
 		inviteWatchers: make(map[string]chan struct{}),
+		relay:          newRelayTable(nil),
+		relayWait:      relayTimeout,
 	}, nil
 }
 

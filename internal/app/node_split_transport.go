@@ -248,8 +248,38 @@ type splitHalf struct {
 
 // Send goes straight out over the shared socket: a node has one address, and
 // both halves speak from it.
+//
+// A request sent by the serving half registers its Call-ID so the answer comes
+// back to the serving half. The splitter's default sends every response to the
+// upstream half, which is right for registration answers but wrong for the
+// traffic a platform originates downstream (catalog queries, relayed
+// requests): a passive platform-small has no upstream reader, so those answers
+// would be dropped.
 func (h splitHalf) Send(ctx context.Context, msg model.Message, dst string) error {
+	if h.half == halfServing && msg.IsRequest() {
+		h.split.routeAnswerToServing(extractCallID(msg))
+	}
 	return h.split.tr.Send(ctx, msg, dst)
+}
+
+// routeAnswerToServing makes the next response with callID land on the serving
+// half. The registration removes itself as soon as that answer arrives, so a
+// node that talks to many peers does not accumulate handlers.
+func (s *splitTransport) routeAnswerToServing(callID string) {
+	if callID == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.handlers[callID] = &transactionHandler{
+		half: halfServing,
+		fn: func(m model.Message, peer string) {
+			s.mu.Lock()
+			delete(s.handlers, callID)
+			s.mu.Unlock()
+			s.trySend(s.uas, arrival{msg: m, peer: peer})
+		},
+	}
 }
 
 // Receive waits for a message addressed to this half — a request for the

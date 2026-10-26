@@ -72,6 +72,16 @@ func (a *Acceptor) run(ctx context.Context, p *platform) {
 			return
 		}
 		if !msg.IsRequest() {
+			// A relayed answer comes home first: it belongs to a request this
+			// node handed to a cascade neighbour and must reach whoever asked,
+			// not the local catalog logic.
+			if a.relay != nil {
+				if entry, ok := a.relay.take(p.id, msg); ok {
+					a.forwardRelayResponse(ctx, p, msg, entry)
+					continue
+				}
+
+			}
 			// A platform sends no unprompted SIP requests; any Response that
 			// arrives here is the device's answer to a catalog Query we sent.
 			// Only a 2xx means the device answered the catalog successfully.
@@ -146,6 +156,11 @@ func (a *Acceptor) run(ctx context.Context, p *platform) {
 					continue
 				}
 			case "MESSAGE":
+				// A request aimed at a cascade child belongs to the child, not
+				// to this node's own command dispatch.
+				if a.relayToChild(ctx, p, msg, peer) {
+					continue
+				}
 				var answered bool
 				resp, answered = a.handleMessage(ctx, p, msg, peer)
 				if !answered {

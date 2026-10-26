@@ -343,7 +343,21 @@ func (s *NodeService) Start(ctx context.Context, id model.NodeID) error {
 		// to wait for. Leaving it at `registering` would promise a
 		// transaction that never comes, so advance it the same way the
 		// platform kinds do.
-		return s.advanceOnline(ctx, id)
+		if err := s.advanceOnline(ctx, id); err != nil {
+			return err
+		}
+		// Being online is not the same as being reachable: without a read
+		// loop the device answers nobody, so a catalog query from a
+		// platform (or a relayed one) would go unanswered despite the node
+		// reporting online. The registered path starts this loop from
+		// register(); the passive path must start it too.
+		if s.acceptor != nil {
+			if err := s.acceptor.ServeDevice(id, s.lifecycle.Transport(id), node.Profile().Domain()); err != nil {
+				s.stopServing(id)
+				return s.fault(ctx, id, fmt.Errorf("app: serve device %s: %w", id, err))
+			}
+		}
+		return nil
 	case model.NodeKindPlatformLarge:
 		// A platform-large accepts registrations, which is its own way of
 		// coming online. Declaring an `registration:` makes it also a UAC

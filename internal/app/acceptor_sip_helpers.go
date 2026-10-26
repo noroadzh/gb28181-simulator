@@ -52,7 +52,15 @@ func buildResponse(
 	body string,
 ) (model.Message, error) {
 	hdrs := make([]model.Header, 0, 6+len(extra))
-	for _, name := range []string{"Via", "From", "To", "Call-ID", "CSeq"} {
+	// RFC 3261 §8.2.6: a response copies every Via the request carried, in
+	// order. A relayed request carries one Via per hop, and dropping all but
+	// the first would leave the last relay with nothing to strip.
+	for _, h := range req.Headers() {
+		if strings.EqualFold(h.Name(), "Via") {
+			hdrs = append(hdrs, h)
+		}
+	}
+	for _, name := range []string{"From", "To", "Call-ID", "CSeq"} {
 		h, ok := req.Header(name)
 		if !ok {
 			continue

@@ -101,9 +101,9 @@ func bindUDP(addr string) (net.PacketConn, error) {
 	return net.ListenPacket("udp", addr)
 }
 
-// writeSimulatorConfig renders the smallest config that boots a node-less
-// fleet: the store and logs live in the test directory, capture and tracing
-// stay off so the process does no work the lifecycle test does not inspect.
+// writeSimulatorConfig renders the config the e2e fleet boots with: the store
+// and logs live in the test directory, capture is on (the cascade test reads
+// the device's inbound wire), tracing stays off to keep stdout quiet.
 func writeSimulatorConfig(t *testing.T, dir string, httpPort int) string {
 	t.Helper()
 	return writeSimulatorConfigWith(t, filepath.Join(dir, "config.yaml"), dir, httpPort, false)
@@ -126,7 +126,8 @@ log:
 storage:
   path: %q
 capture:
-  enabled: false
+  enabled: true
+  capacity: 256
 tracing:
   enabled: false
 %s`, httpPort,
@@ -144,6 +145,7 @@ type simulatorProcess struct {
 	baseURL string
 	cmd     *exec.Cmd
 	logPath string
+	appLog  string
 	logFile *os.File
 	done    chan struct{}
 	wait    sync.Once
@@ -154,6 +156,7 @@ func startSimulator(t *testing.T, bin, cfgPath, dir string, httpPort int) *simul
 	// The log is named after the config so a test that boots twice over the
 	// same directory keeps both processes' output.
 	logPath := filepath.Join(dir, filepath.Base(cfgPath)+".process.log")
+	appLog := filepath.Join(dir, "app.log")
 	logFile, err := os.Create(logPath)
 	if err != nil {
 		t.Fatalf("create process log: %v", err)
@@ -170,6 +173,7 @@ func startSimulator(t *testing.T, bin, cfgPath, dir string, httpPort int) *simul
 		baseURL: fmt.Sprintf("http://127.0.0.1:%d", httpPort),
 		cmd:     cmd,
 		logPath: logPath,
+		appLog:  appLog,
 		logFile: logFile,
 		done:    make(chan struct{}),
 	}
@@ -218,12 +222,15 @@ func (p *simulatorProcess) stop(t *testing.T) {
 // dumpLog prints the last few kilobytes of the process output on failure.
 func (p *simulatorProcess) dumpLog(t *testing.T) {
 	t.Helper()
-	raw, err := os.ReadFile(p.logPath)
+	raw, err := os.ReadFile(p.appLog)
+	if err != nil {
+		raw, err = os.ReadFile(p.logPath)
+	}
 	if err != nil {
 		t.Logf("read process log: %v", err)
 		return
 	}
-	const tail = 4096
+	const tail = 12000
 	if len(raw) > tail {
 		raw = raw[len(raw)-tail:]
 	}
