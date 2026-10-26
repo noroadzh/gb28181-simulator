@@ -295,3 +295,30 @@ func (r *emptyRegistry) Get(ctx context.Context, id model.NodeID) (model.Node, b
 }
 
 func contains(s, sub string) bool { return strings.Contains(s, sub) }
+
+// Task: the third delivery scenario — a target that is neither a direct child
+// nor named by X-PreferredPath is not relayed at all. The node answers it
+// locally, exactly as it did before this change.
+func TestRelay_LeavesNonChildTargetLocal(t *testing.T) {
+	h := newRelayHarness(t)
+	// No X-PreferredPath: device is a grandchild of large, so the handler has
+	// no hop to hand out.
+	req := relayRequestFor(t, h.codec, relayDeviceID, "relay-7", "1 MESSAGE")
+	h.tr.inbound <- req
+
+	msg, peer := h.waited(t, func(m model.Message, _ string) bool { return !m.IsRequest() })
+	if peer != relayProbe {
+		t.Errorf("answer went to %q, want the requester %q", peer, relayProbe)
+	}
+	if msg.StatusCode() != 200 {
+		t.Errorf("status = %d, want the node's local catalog answer", msg.StatusCode())
+	}
+
+	h.tr.mu.Lock()
+	defer h.tr.mu.Unlock()
+	for i, m := range h.tr.sent {
+		if m.IsRequest() {
+			t.Errorf("a request was forwarded to %s without a matching hop", h.tr.peers[i])
+		}
+	}
+}
