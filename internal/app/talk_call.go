@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"sync"
@@ -10,6 +11,10 @@ import (
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
 	"github.com/your-org/gb28181-simulator/internal/domain/port"
 )
+
+// errTalkSessionNotFound marks a talk operation for a session that is not
+// active (never started, or already reclaimed).
+var errTalkSessionNotFound = errors.New("app: talk session not found")
 
 // talkTimeout bounds how long TalkStart waits for the device's answer.
 const talkTimeout = 5 * time.Second
@@ -25,6 +30,10 @@ type talkCall struct {
 	rtp     net.PacketConn
 	remote  string // device RTP endpoint from the answer SDP
 	cancel  context.CancelFunc
+
+	subMu   sync.Mutex
+	subs    map[uint64]chan []byte
+	nextSub uint64
 }
 
 // talkSessionState is the per-service bookkeeping for talk. It is a separate
@@ -87,7 +96,7 @@ func (s *NodeService) TalkStart(ctx context.Context, id model.NodeID, channelID 
 		return "", "", err
 	}
 
-	call := &talkCall{id: callID, node: id, channel: channelID, target: target, addr: addr, rtp: conn, remote: remote}
+	call := &talkCall{id: callID, node: id, channel: channelID, target: target, addr: addr, rtp: conn, remote: remote, subs: map[uint64]chan []byte{}}
 	s.talk.mu.Lock()
 	if s.talk.calls == nil {
 		s.talk.calls = map[string]*talkCall{}
@@ -95,6 +104,7 @@ func (s *NodeService) TalkStart(ctx context.Context, id model.NodeID, channelID 
 	s.talk.calls[callID] = call
 	s.talk.mu.Unlock()
 	s.armTalkReclaim(call)
+	go s.pumpTalkAudio(call)
 
 	wsURL := fmt.Sprintf("/v1/nodes/%s/channels/%s/talk/audio?session=%s", id.String(), channelID, callID)
 	s.log.Info("talk started", "node_id", id.String(), "channel", channelID, "session", callID)
@@ -183,4 +193,55 @@ func (s *NodeService) onPeerTalkBye(node model.NodeID, callID string) {
 		_ = call.rtp.Close()
 	}
 	s.log.Info("talk ended by the device", "node_id", node.String(), "session", callID)
+}
+
+// subscribeTalkAudio registers a listener for the device's audio and returns
+// its channel plus the unsubscribe function.
+func (s *NodeService) subscribeTalkAudio(sessionID string) (<-chan []byte, func(), error) {
+	s.talk.mu.Lock()
+	call := s.talk.calls[sessionID]
+	s.talk.mu.Unlock()
+	if call == nil {
+		return nil, nil, errTalkSessionNotFound
+	}
+	ch := make(chan []byte, 32)
+	call.subMu.Lock()
+	call.nextSub++
+	id := call.nextSub
+	call.subs[id] = ch
+	call.subMu.Unlock()
+
+	unsubscribe := func() {
+		call.subMu.Lock()
+		delete(call.subs, id)
+		call.subMu.Unlock()
+	}
+	return ch, unsubscribe, nil
+}
+
+// pumpTalkAudio reads RTP from the device for as long as the session lives,
+// strips the 12-byte header and offers the payload to every subscriber. A
+// subscriber that cannot keep up loses frames rather than stalling the read:
+// a slow browser must never apply back-pressure to the SIP side.
+func (s *NodeService) pumpTalkAudio(call *talkCall) {
+	buf := make([]byte, 2048)
+	for {
+		n, _, err := call.rtp.ReadFrom(buf)
+		if err != nil {
+			return // the session was closed
+		}
+		if n <= 12 {
+			continue
+		}
+		payload := append([]byte(nil), buf[12:n]...)
+		call.subMu.Lock()
+		for _, ch := range call.subs {
+			select {
+			case ch <- payload:
+			default:
+				// drop-on-slow
+			}
+		}
+		call.subMu.Unlock()
+	}
 }

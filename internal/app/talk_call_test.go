@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -354,5 +355,57 @@ func TestParseRTPEndpoint(t *testing.T) {
 				t.Fatalf("got %q, want an error", got)
 			}
 		})
+	}
+}
+
+// Task 2.1: RTP from the device reaches a subscriber as its bare payload, and
+// an unknown session is refused rather than silently bridged nowhere.
+func TestTalk_AudioFansOutToSubscribers(t *testing.T) {
+	h := newTalkHarness(t)
+	session := startTalk(t, h)
+
+	audio, unsubscribe, err := h.svc.subscribeTalkAudio(session)
+	if err != nil {
+		t.Fatalf("subscribeTalkAudio: %v", err)
+	}
+	defer unsubscribe()
+
+	h.svc.talk.mu.Lock()
+	conn := h.svc.talk.calls[session].rtp
+	h.svc.talk.mu.Unlock()
+	if conn == nil {
+		t.Fatal("the session has no audio socket")
+	}
+
+	// One PCMU RTP packet: 12-byte header + 160 bytes of payload.
+	packet := make([]byte, 12+160)
+	packet[0] = 0x80 // version 2
+	packet[1] = 0    // PCMU
+	for i := 12; i < len(packet); i++ {
+		packet[i] = 0x55
+	}
+	client, err := net.Dial("udp", conn.LocalAddr().String())
+	if err != nil {
+		t.Fatalf("dial audio socket: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+	if _, err := client.Write(packet); err != nil {
+		t.Fatalf("write RTP: %v", err)
+	}
+
+	select {
+	case payload := <-audio:
+		if len(payload) != 160 {
+			t.Fatalf("payload = %d bytes, want 160", len(payload))
+		}
+		if payload[0] != 0x55 {
+			t.Errorf("payload[0] = 0x%02X, want 0x55 (header not stripped?)", payload[0])
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the subscriber never received the audio payload")
+	}
+
+	if _, _, err := h.svc.subscribeTalkAudio("no-such-session"); err == nil {
+		t.Error("subscribing to an unknown session succeeded")
 	}
 }
