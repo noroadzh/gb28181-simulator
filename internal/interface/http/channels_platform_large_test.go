@@ -676,3 +676,11 @@ func (a autoIDChannelView) SubscribeTalkAudio(_ context.Context, _ model.NodeID,
 func (a autoIDChannelView) SendTalkAudio(_ context.Context, _ model.NodeID, _, _ string, _ []byte) error {
 	return fmt.Errorf("talk audio unsupported")
 }
+
+func (a autoIDChannelView) StartPlaybackStream(_ context.Context, _ model.NodeID, _, _ string, _, _ time.Time) error {
+	return fmt.Errorf("playback streaming unsupported")
+}
+
+func (a autoIDChannelView) PlaybackWindow(_ string) (time.Time, time.Time, bool) {
+	return time.Time{}, time.Time{}, false
+}

@@ -166,6 +166,7 @@ func (s *Server) registerRoutes(e *echo.Echo) {
 	// a downloadable pcap document. Queries never evict the buffer.
 	e.GET("/v1/nodes/:id/capture", s.handleQueryCapture)
 	e.GET("/v1/nodes/:id/channels/:ch/talk/audio", s.handleTalkAudio)
+	e.GET("/v1/nodes/:id/channels/:ch/playback/flv", s.handlePlaybackFLV)
 	e.GET("/v1/nodes/:id/capture.pcap", s.handleCapturePCAP)
 
 	// Media-source endpoints (media-source-config change): get, set, or clear

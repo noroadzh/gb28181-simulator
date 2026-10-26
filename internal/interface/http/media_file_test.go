@@ -348,3 +348,12 @@ func (f *fakeChannelView) SubscribeTalkAudio(_ context.Context, _ model.NodeID, 
 func (f *fakeChannelView) SendTalkAudio(_ context.Context, _ model.NodeID, _, _ string, _ []byte) error {
 	return fmt.Errorf("talk audio unsupported")
 }
+
+// Playback streaming is unsupported unless a test overrides it.
+func (f *fakeChannelView) StartPlaybackStream(_ context.Context, _ model.NodeID, _, _ string, _, _ time.Time) error {
+	return fmt.Errorf("playback streaming unsupported")
+}
+
+func (f *fakeChannelView) PlaybackWindow(_ string) (time.Time, time.Time, bool) {
+	return time.Time{}, time.Time{}, false
+}

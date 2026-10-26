@@ -9,7 +9,7 @@
 
 ## 2. HTTP 与端到端
 
-- [ ] 2.1 `GET /v1/nodes/:id/channels/:ch/playback/flv?sn=`；未知/未开流 404，开流后 200 + `video/x-flv`；验收：httptest 三条
+- [x] 2.1 `GET /v1/nodes/:id/channels/:ch/playback/flv?sn=`；未知/未开流 404，开流后 200 + `video/x-flv`；验收：httptest 三条
 - [ ] 2.2 e2e：真实二进制 → device + 本地文件源 → play（带时间窗）→ 取 FLV，断言 `FLV` 魔数与可解析首帧；验收：`go test ./internal/test/e2e/...` 通过
 
 ## 3. 收尾

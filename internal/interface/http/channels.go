@@ -79,6 +79,13 @@ type ChannelView interface {
 	// SendTalkAudio pushes one PCMU payload to the device of a talk session.
 	SendTalkAudio(ctx context.Context, id model.NodeID, channelID, sessionID string, payload []byte) error
 
+	// StartPlaybackStream opens a historical playback dialog for sn over the
+	// given window.
+	StartPlaybackStream(ctx context.Context, id model.NodeID, channelID, sn string, start, end time.Time) error
+
+	// PlaybackWindow returns the window of an active playback session.
+	PlaybackWindow(sn string) (start, end time.Time, ok bool)
+
 	// Snapshot triggers a SnapShot NOTIFY; returns the snapshot bytes
 	// (PNG/JPEG), the media type, and an error. The first return is empty
 	// when the platform does not have a snapshot subsystem and the request
@@ -540,6 +547,12 @@ func (s *Server) handleChannelRecords(c echo.Context) error {
 type playbackInput struct {
 	Action string `json:"action"`
 	Scale  int    `json:"scale"`
+	// SN, Start and End open a historical stream: when all three are
+	// present on a play, a playback INVITE is sent and the window is
+	// recorded for GET /playback/flv?sn=.
+	SN    string `json:"sn"`
+	Start string `json:"start"`
+	End   string `json:"end"`
 }
 
 func (s *Server) handleChannelPlayback(c echo.Context) error {
@@ -563,6 +576,36 @@ func (s *Server) handleChannelPlayback(c echo.Context) error {
 	}
 	if !isValidPlaybackAction(in.Action) {
 		return c.JSON(http.StatusBadRequest, errorBody{Error: "invalid action: " + in.Action})
+	}
+	// A play that names a window also opens the historical stream: the
+	// playback INVITE goes out and the window is recorded for
+	// GET /playback/flv?sn=.
+	if in.Action == "play" && (in.SN != "" || in.Start != "" || in.End != "") {
+		if in.SN == "" || in.Start == "" || in.End == "" {
+			return c.JSON(http.StatusBadRequest, errorBody{Error: "playback stream needs sn, start and end"})
+		}
+		start, serr := time.Parse(time.RFC3339, in.Start)
+		if serr != nil {
+			return c.JSON(http.StatusBadRequest, errorBody{Error: "invalid start: " + serr.Error()})
+		}
+		end, eerr := time.Parse(time.RFC3339, in.End)
+		if eerr != nil {
+			return c.JSON(http.StatusBadRequest, errorBody{Error: "invalid end: " + eerr.Error()})
+		}
+		if !start.Before(end) {
+			return c.JSON(http.StatusBadRequest, errorBody{Error: "start must be before end"})
+		}
+		if err := s.channels.StartPlaybackStream(c.Request().Context(), id, channelID, in.SN, start, end); err != nil {
+			switch {
+			case errors.Is(err, port.ErrControlTargetUnreachable):
+				return c.JSON(http.StatusBadGateway, errorBody{Error: err.Error()})
+			case errors.Is(err, port.ErrControlTimeout):
+				return c.JSON(http.StatusGatewayTimeout, errorBody{Error: err.Error()})
+			case errors.Is(err, port.ErrPlaybackUnsupported):
+				return c.JSON(http.StatusNotImplemented, errorBody{Error: err.Error()})
+			}
+			return c.JSON(http.StatusInternalServerError, errorBody{Error: err.Error()})
+		}
 	}
 	if err := s.channels.Playback(c.Request().Context(), id, channelID, in.Action, in.Scale); err != nil {
 		if errors.Is(err, port.ErrPlaybackUnsupported) {
