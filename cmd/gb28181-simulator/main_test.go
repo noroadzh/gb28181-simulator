@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -302,4 +304,57 @@ func newTestNodeStore(t *testing.T) *nodesql.Store {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	return nodesql.New(db)
+}
+
+// TestSyncNodeStoreFromYAML_WarnsWhenStoreAlreadyHoldsNodes pins the one
+// operator-visible signal of the YAML deprecation. When the store already owns
+// the definitions the YAML section is ignored; that has to be a warning, not
+// silence, or an operator who edits YAML and restarts watches the edit vanish
+// with no explanation.
+func TestSyncNodeStoreFromYAML_WarnsWhenStoreAlreadyHoldsNodes(t *testing.T) {
+	ctx := context.Background()
+	store := newTestNodeStore(t)
+
+	nodeID, err := model.ParseNodeID("34020000001310000001")
+	if err != nil {
+		t.Fatalf("ParseNodeID: %v", err)
+	}
+	if err := store.CreateNode(ctx, model.StoredNode{
+		ID:     nodeID,
+		Kind:   model.NodeKindDevice,
+		Domain: "3402000000",
+		Addr:   "127.0.0.1:15061",
+	}); err != nil {
+		t.Fatalf("store.CreateNode: %v", err)
+	}
+
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	yamlNodes := []platformconfig.NodeConfig{{
+		ID: "34020000001310000002", Kind: "device",
+		Domain: "3402000000", Addr: "127.0.0.1:15062",
+	}}
+	if err := syncNodeStoreFromYAML(ctx, store, yamlNodes); err != nil {
+		t.Fatalf("syncNodeStoreFromYAML: %v", err)
+	}
+
+	out := logs.String()
+	if !strings.Contains(out, "level=WARN") {
+		t.Errorf("deprecation notice was not logged at WARN level:\n%s", out)
+	}
+	if !strings.Contains(out, "ignoring deprecated nodes section in config") {
+		t.Errorf("log output does not name the deprecated section:\n%s", out)
+	}
+
+	// The whole point of the warning: nothing from YAML was imported.
+	yamlID, err := model.ParseNodeID("34020000001310000002")
+	if err != nil {
+		t.Fatalf("ParseNodeID: %v", err)
+	}
+	if _, err := store.GetNode(ctx, yamlID); err == nil {
+		t.Error("the YAML node was imported even though the store already held definitions")
+	}
 }

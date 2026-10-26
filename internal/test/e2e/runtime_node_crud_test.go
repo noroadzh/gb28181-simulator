@@ -22,6 +22,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 )
@@ -105,6 +106,17 @@ func bindUDP(addr string) (net.PacketConn, error) {
 // stay off so the process does no work the lifecycle test does not inspect.
 func writeSimulatorConfig(t *testing.T, dir string, httpPort int) string {
 	t.Helper()
+	return writeSimulatorConfigWith(t, filepath.Join(dir, "config.yaml"), dir, httpPort, false)
+}
+
+// writeSimulatorConfigWith renders a config at an explicit path. autoStart
+// writes the top-level `auto_start` switch the boot path reads.
+func writeSimulatorConfigWith(t *testing.T, path, dir string, httpPort int, autoStart bool) string {
+	t.Helper()
+	auto := ""
+	if autoStart {
+		auto = "auto_start: true\n"
+	}
 	cfg := fmt.Sprintf(`http:
   host: 127.0.0.1
   port: %d
@@ -117,10 +129,10 @@ capture:
   enabled: false
 tracing:
   enabled: false
-`, httpPort,
+%s`, httpPort,
 		filepath.Join(dir, "app.log"),
-		filepath.Join(dir, "data.db"))
-	path := filepath.Join(dir, "config.yaml")
+		filepath.Join(dir, "data.db"),
+		auto)
 	if err := os.WriteFile(path, []byte(cfg), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -132,11 +144,16 @@ type simulatorProcess struct {
 	baseURL string
 	cmd     *exec.Cmd
 	logPath string
+	logFile *os.File
+	done    chan struct{}
+	wait    sync.Once
 }
 
 func startSimulator(t *testing.T, bin, cfgPath, dir string, httpPort int) *simulatorProcess {
 	t.Helper()
-	logPath := filepath.Join(dir, "process.log")
+	// The log is named after the config so a test that boots twice over the
+	// same directory keeps both processes' output.
+	logPath := filepath.Join(dir, filepath.Base(cfgPath)+".process.log")
 	logFile, err := os.Create(logPath)
 	if err != nil {
 		t.Fatalf("create process log: %v", err)
@@ -153,23 +170,49 @@ func startSimulator(t *testing.T, bin, cfgPath, dir string, httpPort int) *simul
 		baseURL: fmt.Sprintf("http://127.0.0.1:%d", httpPort),
 		cmd:     cmd,
 		logPath: logPath,
+		logFile: logFile,
+		done:    make(chan struct{}),
 	}
-	// LIFO: the kill runs first, then the dump, so a failed test can read
-	// the tail of what the process said before it died.
 	t.Cleanup(func() {
+		p.kill()
 		if t.Failed() {
 			p.dumpLog(t)
 		}
-	})
-	t.Cleanup(func() {
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
-		_ = cmd.Wait()
 		_ = logFile.Close()
 	})
 	p.waitReady(t)
 	return p
+}
+
+// reap closes done once the process has exited, whoever waits first.
+func (p *simulatorProcess) reap() {
+	p.wait.Do(func() {
+		_ = p.cmd.Wait()
+		close(p.done)
+	})
+}
+
+func (p *simulatorProcess) kill() {
+	if p.cmd.Process != nil {
+		_ = p.cmd.Process.Kill()
+	}
+	p.reap()
+}
+
+// stop shuts the process down the way an operator would — SIGINT, then a
+// grace period — so a test can restart it over the same database.
+func (p *simulatorProcess) stop(t *testing.T) {
+	t.Helper()
+	if p.cmd.Process != nil {
+		_ = p.cmd.Process.Signal(os.Interrupt)
+	}
+	go p.reap()
+	select {
+	case <-p.done:
+	case <-time.After(10 * time.Second):
+		_ = p.cmd.Process.Kill()
+		<-p.done
+	}
 }
 
 // dumpLog prints the last few kilobytes of the process output on failure.
