@@ -26,11 +26,13 @@
 
 **未决（实现前需确认）**：旧 `TalkAcceptor` 的 WSS 音频帧格式与会话键（`node|channel`）可以复用，但它按「设备主动 INVITE」写的会话建立逻辑不能保留。
 
-### Decision 5: 快照的关键帧缓存放在 MediaService 的入站管道出口
+### Decision 5: 快照只覆盖「无需解码」的源
 
-`MediaService` 目前没有帧缓存，`Snapshot` 无处取图。方案：在入站管道（RTP→PS→ES）出口按 `node|channel` 保留最新一个 **IDR 访问单元**（含 SPS/PPS），`Snapshot` 读取后解码为 YUV 再编码 JPEG。缓存只保留一个 AU，内存有界；没有关键帧时按「尚无媒体」处理（504），而不是触发新拉流。
+项目约束是纯 Go、无 CGO、单二进制分发，而把 H.264/H.265 关键帧变成 JPEG 需要视频解码器——当前仓库没有，引一个纯 Go 解码器也不现实。因此快照只对**能直接产出像素**的源生成 JPEG：合成测试图（`SyntheticSource.renderFrame` 已返回 `image.Image`，直接 `image/jpeg` 编码）。需要解码的源返回 501 并说明原因，而不是假装成功。
 
-**未决**：解码 H.264/H.265 需要引入纯 Go 解码器（当前仓库只有编码/封装侧）；若不想新增依赖，快照可先只支持 MPEG-4 Part 2 / MP4 直读的关键帧（`mp4-direct-playback` 已有 demuxer），其余编码返回 501。
+渲染能力经 `port.FrameRenderer` 注入（app 不得直接 import adapter），无媒体源返回 503。
+
+**已排除**：运行时调用外部 ffmpeg（破坏纯 Go 单二进制约束）、引入解码器依赖。
 
 ## Risks / Trade-offs
 

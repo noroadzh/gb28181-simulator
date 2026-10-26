@@ -18,12 +18,17 @@
 
 ### Requirement: 快照来源与失败语义
 
-`Snapshot` MUST 从通道媒体源的最近关键帧解码出 JPEG。无媒体源 MUST 返回 503；节点不是 `device` MUST 返回 501；取帧超时 MUST 返回 504。MUST NOT 返回空 body 的 200。
+`Snapshot` MUST 对**能直接产出像素**的媒体源生成 JPEG：合成测试图（彩条/时钟等）直接渲染当前帧；需要解码的视频编码（H.264 / H.265 / MPEG-4 等）MUST 返回 501 并说明原因——本 change 不引入解码器依赖。无媒体源 MUST 返回 503；节点不是 `device` MUST 返回 501；MUST NOT 返回空 body 的 200。
 
-#### Scenario: 有媒体源时抓到 JPEG
+#### Scenario: 合成测试图源抓到 JPEG
 
-- **WHEN** 通道配置了本地文件媒体源并已产生关键帧
-- **THEN** 返回 200，`Content-Type: image/jpeg`，body 为可解码的 JPEG
+- **WHEN** 通道配置了合成测试图媒体源
+- **THEN** 返回 200，`Content-Type: image/jpeg`，body 为可解码的 JPEG（SOI 头 0xFFD8）
+
+#### Scenario: 需要解码的源返回 501
+
+- **WHEN** 通道配置的是 H.264/H.265 等需要解码的文件或流
+- **THEN** 返回 501，错误体说明"需要解码器" 
 
 #### Scenario: 无媒体源
 

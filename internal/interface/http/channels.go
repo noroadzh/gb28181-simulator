@@ -667,6 +667,9 @@ func (s *Server) handleChannelSnapshot(c echo.Context) error {
 	}
 	img, mime, err := s.channels.Snapshot(c.Request().Context(), id, channelID)
 	if err != nil {
+		if errors.Is(err, port.ErrSnapshotNoMedia) {
+			return c.JSON(http.StatusServiceUnavailable, errorBody{Error: err.Error()})
+		}
 		var unsupported port.ErrSnapshotUnsupported
 		if errors.As(err, &unsupported) {
 			return c.JSON(http.StatusNotImplemented, errorBody{Error: err.Error()})

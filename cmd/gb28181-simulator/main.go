@@ -471,6 +471,12 @@ func run() error {
 			if _, err := svc.WithControlCodec(manscdp.NewMANSCDPCodec()); err != nil {
 				return nil, fmt.Errorf("node service: %w", err)
 			}
+			// Snapshots: the adapter draws the frames it can produce without
+			// a video decoder; the service decides what a missing capability
+			// means over HTTP.
+			if _, err := svc.WithFrameRenderer(media.NewSyntheticRenderer()); err != nil {
+				return nil, fmt.Errorf("node service: %w", err)
+			}
 			// Device registration: the use case lives in app, the Digest
 			// client behind it is an adapter, and the app sees only the
 			// domain port.

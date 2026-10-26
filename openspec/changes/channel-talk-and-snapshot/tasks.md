@@ -9,9 +9,9 @@
 
 ## 2. 快照抓图
 
-- [ ] 2.1 媒体管道暴露「最近关键帧」查询（按 node/channel）；验收：单测注入关键帧后可取到
-- [ ] 2.2 `Snapshot`：关键帧解码 → JPEG 编码 → 返回 bytes/media type；验收：单测断言 JPEG magic 与尺寸
-- [ ] 2.3 失败语义：无媒体源 503、非 device 501、取帧超时 504；验收：三条单测
+- [x] 2.1 定义 `port.FrameRenderer`（按 `model.MediaConfig` 产出一帧 JPEG）与两个哨兵（`ErrFrameRenderUnsupported`、`ErrSnapshotNoMedia`）；验收：接口与哨兵可被 app 与适配器各自引用，`go build ./...` 通过
+- [x] 2.2 适配器实现合成测试图渲染器（复用 `SyntheticSource.renderFrame` → `image/jpeg`）并在 main 注入；`Snapshot` 读取通道媒体配置后调用渲染器；验收：适配器单测断言 JPEG magic 与尺寸，app 单测用假渲染器断言透传
+- [x] 2.3 失败语义：无媒体源 503、非 device 501、需要解码的编码 501；HTTP 映射补齐；验收：三条单测
 - [ ] 2.4 e2e：对配置本地文件源的 device 抓拍并断言 JPEG；验收：`go test ./internal/test/e2e/...` 通过
 
 ## 3. 收尾

@@ -81,3 +81,28 @@ func TestChannelControl_UnreachableIs502(t *testing.T) {
 		t.Errorf("PTZ status = %d, want 502", resp.StatusCode)
 	}
 }
+
+// noMediaView reports a channel with no media source at all.
+type noMediaView struct{ *fakeChannelView }
+
+func (v noMediaView) Snapshot(_ context.Context, _ model.NodeID, _ string) ([]byte, string, error) {
+	return nil, "", port.ErrSnapshotNoMedia
+}
+
+// A channel without a media source is 503 — distinct from "this source cannot
+// be captured" (501).
+func TestChannelSnapshot_NoMediaIs503(t *testing.T) {
+	nodes := newFakeNodeView()
+	node := nodes.seed(t, "34020000001310000001", "127.0.0.1:15061", model.StatusOnline)
+	ts := newMediaFileServer(t, nodes, noMediaView{newFakeChannelView()})
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/v1/nodes/" + node.ID().String() + "/channels/ch-1/snapshot")
+	if err != nil {
+		t.Fatalf("GET snapshot: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("snapshot status = %d, want 503", resp.StatusCode)
+	}
+}

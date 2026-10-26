@@ -3,6 +3,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -59,6 +60,7 @@ type NodeService struct {
 	acceptor       *Acceptor
 	keepaliveCodec port.KeepaliveCodec
 	controlCodec   port.MANSCDPCodec
+	frameRenderer  port.FrameRenderer
 
 	// playback holds one session per node|channel. A second play tears the
 	// old session down first; an idle session tears itself down.
@@ -290,6 +292,16 @@ func (s *NodeService) WithAcceptor(a *Acceptor) (*NodeService, error) {
 // notify bodies (keepalive, alarm). Without one TriggerAlarm records the
 // snapshot but does not send upstream, which is what tests that do not
 // exercise the wire path want.
+// WithFrameRenderer attaches the still-frame renderer used by Snapshot. The
+// app must not import a media adapter, so the capability arrives as a port.
+func (s *NodeService) WithFrameRenderer(r port.FrameRenderer) (*NodeService, error) {
+	if r == nil {
+		return nil, fmt.Errorf("app: NodeService requires a non-nil FrameRenderer")
+	}
+	s.frameRenderer = r
+	return s, nil
+}
+
 // WithControlCodec attaches the MANSCDP codec used to render outbound
 // device-control bodies (PTZ, and later playback control and record queries).
 func (s *NodeService) WithControlCodec(c port.MANSCDPCodec) (*NodeService, error) {
@@ -1354,8 +1366,12 @@ func (s *NodeService) StopTalk(ctx context.Context, id model.NodeID, channelID s
 }
 
 // Snapshot captures the current frame from the device channel.
-// Returns ErrSnapshotUnsupported when the node is not a device or capture
-// fails.
+//
+// Only sources that already produce pixels can be captured: the synthetic test
+// pattern is drawn on demand, while a video source would need a decoder this
+// build does not carry and is reported as unsupported (501). A channel with no
+// media source is ErrSnapshotNoMedia (503), which is a different answer from
+// "this source cannot be captured".
 func (s *NodeService) Snapshot(ctx context.Context, id model.NodeID, channelID string) ([]byte, string, error) {
 	n, ok := s.registry.Get(ctx, id)
 	if !ok {
@@ -1364,10 +1380,24 @@ func (s *NodeService) Snapshot(ctx context.Context, id model.NodeID, channelID s
 	if n.Profile().ID().Kind() != model.NodeKindDevice {
 		return nil, "", port.SnapshotUnsupported(id, channelID, "not a device")
 	}
-	// TODO(#15-scenario-engine): implement snapshot via device catalog/screenshot
-	s.log.Warn("Snapshot: not yet implemented",
-		"node_id", id.String(), "channel_id", channelID)
-	return nil, "", port.SnapshotUnsupported(id, channelID, "not yet implemented")
+	cfg, has, err := s.GetChannelMedia(ctx, id, channelID)
+	if err != nil {
+		return nil, "", err
+	}
+	if !has {
+		return nil, "", fmt.Errorf("%w: node %s channel %s", port.ErrSnapshotNoMedia, id, channelID)
+	}
+	if s.frameRenderer == nil {
+		return nil, "", port.SnapshotUnsupported(id, channelID, "no frame renderer wired")
+	}
+	data, mediaType, rerr := s.frameRenderer.RenderFrame(cfg)
+	if rerr != nil {
+		if errors.Is(rerr, port.ErrFrameRenderUnsupported) {
+			return nil, "", port.SnapshotUnsupported(id, channelID, rerr.Error())
+		}
+		return nil, "", rerr
+	}
+	return data, mediaType, nil
 }
 
 func (s *NodeService) stamp(id model.NodeID) {
