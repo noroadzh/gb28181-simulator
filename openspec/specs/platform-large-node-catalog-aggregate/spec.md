@@ -1,7 +1,7 @@
 # platform-large-node-catalog-aggregate Specification
 
 ## Purpose
-TBD - created by archiving change fix-catalog-aggregate-and-channel-autogen. Update Purpose after archive.
+定义 platform-large 应答上级目录查询时如何把自身通道与下游设备上报的通道聚合成一份目录，并按稳定顺序返回，让上级看到完整的设备树。
 
 ## Requirements
 

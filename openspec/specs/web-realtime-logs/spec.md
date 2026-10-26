@@ -1,7 +1,7 @@
 # web-realtime-logs Specification
 
 ## Purpose
-TBD - created by archiving change fix-catalog-aggregate-and-channel-autogen. Update Purpose after archive.
+定义 Web 管理界面的实时日志页：通过 WebSocket 接收分级日志，并支持按级别、模块与关键字筛选，供现场联调时即时定位问题。
 
 ## Requirements
 

@@ -1,7 +1,7 @@
 # media-loop-validation Specification
 
 ## Purpose
-TBD - created by archiving change fix-catalog-aggregate-and-channel-autogen. Update Purpose after archive.
+规定媒体源的 `loop` 只对本地文件类源生效，流式源（RTSP / HLS）忽略该字段，避免把「无限循环」误加到直播流上。
 
 ## Requirements
 

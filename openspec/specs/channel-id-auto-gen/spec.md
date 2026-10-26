@@ -1,7 +1,7 @@
 # channel-id-auto-gen Specification
 
 ## Purpose
-TBD - created by archiving change fix-catalog-aggregate-and-channel-autogen. Update Purpose after archive.
+规定在 Web / API 新增通道时如何自动生成 20 位通道 ID（沿用节点的行政区划与行业码），并在响应里用 `auto_generated` 标记来源，使操作员不必手写编码也能建出合规通道。
 
 ## Requirements
 
