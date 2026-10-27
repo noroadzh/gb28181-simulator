@@ -18,7 +18,6 @@
 - [x] 3.2 `Records` 实现：发查询并等待应答（超时 504、不可达 502）；验收：app 单测覆盖成功/超时/不可达
 - [x] 3.3 PlaybackControl（play/pause/teardown/speed）编码与 `Playback` 实现；验收：golden test + 单测断言下发内容
 - [x] 3.4 回放会话表：重复 play 先拆旧会话、teardown 释放端口与 BYE、空闲超时回收；验收：单测覆盖三条
-- [ ] 3.5 FLV 历史流：复用 `internal/adapter/flv` 接回放源。**延后**：需要 INVITE/SDP 拉起历史流 + RTP 接收 + 转封装，工作量与控制面相当；本轮先交付 play/pause/teardown/speed 控制面，FLV 流作为后续 change 处理（对应 `/playback/flv` 端点仍返回未实现）。验收（后续）：e2e 或单测断言 FLV 头可解析
 
 ## 4. 收尾
 
@@ -28,3 +27,7 @@
 ## 归档补记
 
 - 2026-10-26：任务 4.2 记录的 `siptest` 数据竞争已由提交 `4198e9e` 修复——`siptransport.Close` 原先在转发 goroutine 可能仍在发送时直接关闭 `out`，现在 `out` 只由转发 goroutine 在退出时关闭，`Close` 先等 `done` 再释放 layer。修复后 `make test`（-race）全绿：`MAKE_EXIT=0`，33 个包，无 race 报告。
+
+## 核查记录（2026-10-27）
+
+任务 3.5（FLV 历史流）已由 change `playback-flv-stream`（#37，归档于 2026-10-26-playback-flv-stream）交付：回放 INVITE 按时间窗供流，`GET /v1/nodes/:id/channels/:ch/playback/flv?sn=` 出流，并有专用 e2e。原条目已移除。

@@ -3,7 +3,6 @@
 ## 1. 语音对讲
 
 - [x] 1.1 `TalkStart`：构造 INVITE（SDP PCMU sendrecv），等待 200 OK 并记录对话；验收：单测断言 INVITE body 的 SDP 与返回的 session id/WSS 地址
-- [ ] 1.2 音频桥：把入站 RTP 的 PCMU 载荷经 WebSocket 推给浏览器，并把浏览器上行帧打包成 RTP 发往设备。**延后**：需要同时做「解析 200 OK 的 SDP 应答」「RTP 接收/发送」「新的 WebSocket 路由」，且设备节点当前不接受 INVITE（门禁只放行 MESSAGE，会回 405），端到端在此之前不可能通过；设备身份是否接受 INVITE 是独立的设计决定。登记为路线图 #38 `talk-audio-bridge`。
 - [x] 1.3 `TalkStop`：发 BYE 并回收；重复 stop 幂等；对端 BYE 与空闲超时自动回收（acceptor 的 BYE 钩子 + talkIdle 定时器）；验收：四条单测通过
 - [x] 1.4 错误语义：非 device 501、对端不可达 502、无 200 OK 504；验收：单测覆盖
 
@@ -18,3 +17,7 @@
 
 - [x] 3.1 文档：`docs/web-ui-guide.md` 增补对讲/抓拍的使用前提与失败码；验收：人工审阅
 - [x] 3.2 `openspec validate channel-talk-and-snapshot --strict --type change`、`make lint`、`make test` 全部通过；验收：退出码 0
+
+## 核查记录（2026-10-27）
+
+任务 1.2（音频桥）已由 change `talk-audio-bridge`（#38，归档于 2026-10-26-talk-audio-bridge）交付：设备受理音频 INVITE 并用自己的 RTP 端口应答，平台解析 answer，`/talk/audio` WebSocket 与 RTP 双向 PCMU。原条目已移除。
