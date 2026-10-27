@@ -80,6 +80,10 @@ type NodeService struct {
 	liveIdle   time.Duration // default liveNoMediaTimeout
 	liveWatch  time.Duration // default liveWatchInterval
 
+	// recordings writes what the live pulls receive; nil means the
+	// recording library is switched off.
+	recordings port.RecordingStore
+
 	// playbackStreams holds the platform side of historical playback, keyed
 	// by sn: which channel, which window, and the dialog it opened.
 	streamsMu       sync.Mutex
@@ -309,6 +313,9 @@ func (s *NodeService) WithAcceptor(a *Acceptor) (*NodeService, error) {
 	// A device that hangs up ends its talk session immediately.
 	a.WithTalkHangup(s.onPeerTalkBye)
 	a.WithLiveHangup(s.onPeerLiveBye)
+	if s.recordings != nil {
+		a.WithRecordings(s.recordings)
+	}
 	return s, nil
 }
 

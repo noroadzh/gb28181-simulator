@@ -37,6 +37,12 @@ type LiveSourceProvider interface {
 	LivePS(ctx context.Context, nodeID model.NodeID, channelID string) (<-chan model.PSFrame, func(), bool)
 }
 
+// RecordingSource opens a window of a channel's recordings as a PS frame
+// stream. The gateway turns it into FLV the same way it turns a live pull.
+type RecordingSource interface {
+	OpenRecording(ctx context.Context, nodeID model.NodeID, channelID string, start, end time.Time) (<-chan model.PSFrame, func(), error)
+}
+
 type MediaSourceSupplier interface {
 	// SubscribePS starts an outbound PS pipeline for the given node+channel
 	// and returns a channel of model.PSFrame. The caller (gateway) is
@@ -56,12 +62,13 @@ type NodeSourceFunc func(ctx context.Context, nodeID model.NodeID, channelID str
 // HTTP request). For multi-subscriber scenarios we can later add a shared
 // pipeline + fan-out layer.
 type Gateway struct {
-	mu       sync.Mutex
-	media    MediaSourceSupplier
-	registry NodeRegistry
-	sessions *activeSessions
-	log      *slog.Logger
-	live     LiveSourceProvider
+	mu         sync.Mutex
+	media      MediaSourceSupplier
+	registry   NodeRegistry
+	sessions   *activeSessions
+	log        *slog.Logger
+	live       LiveSourceProvider
+	recordings RecordingSource
 }
 
 // NodeRegistry is the gateway's read-only view of the node catalogue.
@@ -78,6 +85,13 @@ type NodeRegistry interface {
 // gateway serves only local media sources.
 func (g *Gateway) WithLiveSource(p LiveSourceProvider) *Gateway {
 	g.live = p
+	return g
+}
+
+// WithRecordings attaches the platform's recording library for FLV
+// playback of recorded windows.
+func (g *Gateway) WithRecordings(src RecordingSource) *Gateway {
+	g.recordings = src
 	return g
 }
 
@@ -133,6 +147,28 @@ func (g *Gateway) SubscribeSource(ctx context.Context, nodeID model.NodeID, chan
 	default:
 		return nil, fmt.Errorf("streaming: unknown source %q", source)
 	}
+}
+
+// SubscribeRecording serves a recorded window as FLV. Unlike a live pull the
+// source is a file window, so it ends when the recording does.
+func (g *Gateway) SubscribeRecording(ctx context.Context, nodeID model.NodeID, channelID string, start, end time.Time) (<-chan []byte, error) {
+	if g.recordings == nil {
+		return nil, &ErrStreamingUnsupported{NodeID: nodeID, ChannelID: channelID, Reason: "recording library not wired"}
+	}
+	psCh, cleanup, err := g.recordings.OpenRecording(ctx, nodeID, channelID, start, end)
+	if err != nil {
+		return nil, err
+	}
+	out := make(chan []byte, 16)
+	key := sessionKey{nodeID: nodeID, channelID: channelID}
+	g.mu.Lock()
+	g.sessions.Add(key, out, nil, func() {})
+	g.mu.Unlock()
+	go g.runPipeline(ctx, key, psCh, out, cleanup)
+	g.log.Info("flv: recording playback started",
+		"node_id", nodeID.String(), "channel_id", channelID,
+		"start", start.Format(time.RFC3339), "end", end.Format(time.RFC3339))
+	return out, nil
 }
 
 // subscribeLive starts an FLV pipeline over an active live pull. The pull

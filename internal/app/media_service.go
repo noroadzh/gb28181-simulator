@@ -275,6 +275,23 @@ func (p *outboundPipeline) run(ctx context.Context, onRTP func(model.RTPPacket) 
 	}
 }
 
+// NewRTPizer builds a packetizer with the service's configured SSRC and
+// aggregation sink. Recording playback uses it to push stored PS frames as
+// RTP without opening a media source.
+func (m *MediaService) NewRTPizer(mtu int) (port.RTPizer, error) {
+	if m.rtpFty == nil {
+		return nil, fmt.Errorf("app: no RTP packetizer factory wired")
+	}
+	if mtu <= 0 {
+		mtu = 1400
+	}
+	r := m.rtpFty(mtu)
+	if r == nil {
+		return nil, fmt.Errorf("app: RTP packetizer factory returned nil")
+	}
+	return r, nil
+}
+
 // Close tears down the media service. It returns the first non-nil error
 // encountered while closing sources.
 func (m *MediaService) Close() error {

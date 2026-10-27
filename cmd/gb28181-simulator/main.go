@@ -28,6 +28,7 @@ import (
 	"github.com/your-org/gb28181-simulator/internal/adapter/nodereg"
 	"github.com/your-org/gb28181-simulator/internal/adapter/nodesql"
 	"github.com/your-org/gb28181-simulator/internal/adapter/playback"
+	"github.com/your-org/gb28181-simulator/internal/adapter/recording"
 	"github.com/your-org/gb28181-simulator/internal/adapter/scenario"
 	"github.com/your-org/gb28181-simulator/internal/adapter/siptransport"
 	"github.com/your-org/gb28181-simulator/internal/adapter/sm"
@@ -83,6 +84,7 @@ var (
 	loggerKey      = servicectx.NewKey[*logging.Hub]("logger")
 	tracingKey     = servicectx.NewKey[*tracing.Provider]("tracing")
 	nodeServiceKey = servicectx.NewKey[*app.NodeService]("node-service")
+	recordingKey   = servicectx.NewKey[*recording.Store]("recording-store")
 	scenarioKey    = servicectx.NewKey[port.ScenarioRunner]("scenario-runner")
 	serverKey      = servicectx.NewKey[*httpapi.Server]("server")
 )
@@ -437,6 +439,20 @@ func run() error {
 			}
 			return st, nil
 		}).
+		Provide(recordingKey, func() (any, error) {
+			if !cfg.Recording.Enabled {
+				logging.L().Info("recording library disabled")
+				return (*recording.Store)(nil), nil
+			}
+			dir := cfg.Recording.DirOrDefault(cfg.Storage.Path)
+			st, err := recording.New(dir, cfg.Recording.SegmentDuration())
+			if err != nil {
+				return nil, fmt.Errorf("recording store: %w", err)
+			}
+			logging.L().Info("recording library ready",
+				"dir", st.Dir(), "segment", cfg.Recording.SegmentDuration().String())
+			return st, nil
+		}).
 		Provide(nodeServiceKey, func() (any, error) {
 			// The registry doubles as the advancer: it owns the nodes and
 			// enforces the transition table when the status changes.
@@ -568,6 +584,15 @@ func run() error {
 			acceptor.WithCascadeHandler(cascadeHandler)
 			if _, err := svc.WithAcceptor(acceptor); err != nil {
 				return nil, fmt.Errorf("node service: %w", err)
+			}
+			// The recording library writes what live pulls receive and
+			// answers RecordInfo / playback INVITEs. It is optional: a
+			// disabled library is a nil store and the capability reports
+			// itself unsupported.
+			if st, ok := servicectx.GetTyped(c, recordingKey); ok && st != nil {
+				if _, err := svc.WithRecordings(st); err != nil {
+					return nil, fmt.Errorf("recording library: %w", err)
+				}
 			}
 			nodeAcceptor = acceptor
 			// channelStore persists channel and media definitions for device
@@ -853,7 +878,9 @@ func run() error {
 					return nil, err
 				}
 				bridge := streaming.NewMediaServiceBridge(mediaService, nodeSvc)
-				gw := streaming.NewGateway(bridge, nodeSvc, logging.L()).WithLiveSource(nodeSvc)
+				gw := streaming.NewGateway(bridge, nodeSvc, logging.L()).
+					WithLiveSource(nodeSvc).
+					WithRecordings(nodeSvc)
 				flvServer = httpapi.NewStreamingServer(gw, logging.L())
 				logging.L().Info("streaming gateway ready")
 			}

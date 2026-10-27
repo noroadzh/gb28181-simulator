@@ -692,3 +692,7 @@ func (a autoIDChannelView) StartLive(_ context.Context, _ model.NodeID, _, _ str
 func (a autoIDChannelView) StopLive(_ context.Context, _ model.NodeID, _ string) error {
 	return nil
 }
+
+func (a autoIDChannelView) Recordings(_ context.Context, _ model.NodeID, _ string, _, _ time.Time) ([]port.Recording, error) {
+	return nil, fmt.Errorf("recording unsupported")
+}

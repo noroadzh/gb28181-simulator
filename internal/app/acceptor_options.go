@@ -59,6 +59,9 @@ type Acceptor struct {
 	// liveHangup is told about every BYE too, so a platform's live pull
 	// ends when the device hangs up.
 	liveHangup func(model.NodeID, string)
+	// recordings is the platform's recording library: RecordInfo and
+	// playback INVITEs are answered from it.
+	recordings port.RecordingStore
 
 	// deviceTalks holds the audio port each talk dialog opened on this node,
 	// keyed by Call-ID. A device answers a talk INVITE with its own RTP port;
@@ -290,5 +293,12 @@ func (a *Acceptor) WithNodeRegistry(r port.NodeRegistry) *Acceptor {
 // is the default-off guarantee of the feature.
 func (a *Acceptor) WithFaults(fs port.FaultStore) *Acceptor {
 	a.faults = fs
+	return a
+}
+
+// WithRecordings attaches the platform's recording library. Without one the
+// platform keeps answering RecordInfo with the device-style fixed entry.
+func (a *Acceptor) WithRecordings(store port.RecordingStore) *Acceptor {
+	a.recordings = store
 	return a
 }

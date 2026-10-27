@@ -134,3 +134,7 @@ func TestPlaybackFLV_PlayWithWindowStartsStream(t *testing.T) {
 		t.Errorf("window = %s..%s, want %s..%s", view.startedStart, view.startedEnd, start, end)
 	}
 }
+
+func (f *fakeStreaming) SubscribeRecording(_ context.Context, _ model.NodeID, _ string, _, _ time.Time) (<-chan []byte, error) {
+	return nil, fmt.Errorf("recording playback unsupported")
+}

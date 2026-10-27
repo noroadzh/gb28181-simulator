@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
 	"github.com/your-org/gb28181-simulator/internal/domain/port"
@@ -265,4 +266,8 @@ func TestFLVSourceParameter(t *testing.T) {
 	if len(fs.seen) != before {
 		t.Error("a bad source still reached the gateway")
 	}
+}
+
+func (s *sourceStreaming) SubscribeRecording(_ context.Context, _ model.NodeID, _ string, _, _ time.Time) (<-chan []byte, error) {
+	return nil, fmt.Errorf("recording playback unsupported")
 }

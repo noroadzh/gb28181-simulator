@@ -40,6 +40,11 @@ func (a *Acceptor) handleInvite(
 		}
 		return a.answerDeviceTalkInvite(p, req)
 	}
+	// A platform serves recorded playback from its own library; anything
+	// else on the platform side keeps the generic dialog handling below.
+	if a.recordings != nil && strings.Contains(req.Body(), "s=Playback") {
+		return a.answerPlatformPlaybackInvite(p, req)
+	}
 	callID := headerValue(req, "Call-ID")
 	if callID == "" {
 		return buildResponse(400, "Bad Request", req, nil, "")

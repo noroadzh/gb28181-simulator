@@ -366,3 +366,7 @@ func (f *fakeChannelView) StartLive(_ context.Context, _ model.NodeID, _, _ stri
 func (f *fakeChannelView) StopLive(_ context.Context, _ model.NodeID, _ string) error {
 	return nil
 }
+
+func (f *fakeChannelView) Recordings(_ context.Context, _ model.NodeID, _ string, _, _ time.Time) ([]port.Recording, error) {
+	return nil, fmt.Errorf("recording unsupported")
+}

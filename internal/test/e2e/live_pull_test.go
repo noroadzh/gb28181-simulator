@@ -18,7 +18,13 @@ import (
 	"time"
 )
 
-func TestLivePull_PlatformPullsDeviceStream(t *testing.T) {
+const livePlatformID = "34020000002000000001"
+
+// startLivePlatform boots the simulator with a platform-large that has one
+// registered device exposing a synthetic channel, and waits until the
+// platform's device table shows it. It returns the process and the channel id.
+func startLivePlatform(t *testing.T) (*simulatorProcess, string) {
+	t.Helper()
 	bin := buildSimulator(t)
 	dir := t.TempDir()
 	httpPort := freeTCPPort(t)
@@ -27,7 +33,7 @@ func TestLivePull_PlatformPullsDeviceStream(t *testing.T) {
 
 	platformAddr := fmt.Sprintf("127.0.0.1:%d", freeUDPPort(t))
 	deviceAddr := fmt.Sprintf("127.0.0.1:%d", freeUDPPort(t))
-	const platformID = "34020000002000000001"
+	const platformID = livePlatformID
 	const username = e2eDeviceID
 
 	// The platform serves downstreams; one account is enough for the device.
@@ -99,8 +105,14 @@ func TestLivePull_PlatformPullsDeviceStream(t *testing.T) {
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
+	return proc, channelID
+}
 
-	status, body = proc.call(t, http.MethodPost,
+func TestLivePull_PlatformPullsDeviceStream(t *testing.T) {
+	proc, channelID := startLivePlatform(t)
+	const platformID = livePlatformID
+
+	status, body := proc.call(t, http.MethodPost,
 		"/v1/nodes/"+platformID+"/channels/"+channelID+"/live", nil)
 	if status != http.StatusOK {
 		t.Fatalf("live start = %d, want 200 (body %v)", status, body)

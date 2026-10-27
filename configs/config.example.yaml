@@ -46,6 +46,15 @@ tracing:
   otlp_endpoint: ""       # host:port for OTLP gRPC; empty = stdout only
   service_name: ""        # defaults to "gb28181-simulator"
 
+# 平台侧录像（Change 42）。平台拉流时自动把 PS 流按时间段写成
+# <node>_<channel>_<start>.ps 分段，供 HTTP 查询/回放与上级平台的
+# RecordInfo / 回放 INVITE 使用。默认开启；dir 为空时取存储目录下的
+# recordings/。关闭后既不写盘，相关端点返回 501。
+# recording:
+#   enabled: true
+#   dir: ""                  # 默认 <storage 目录>/recordings
+#   segment_seconds: 300     # 单个分段时长
+
 # GB 35114 安全扩展（Change 40）。进程级身份：本进程内所有节点共享
 # 同一对 SM2 密钥，节点级配置不再携带凭据。启用后：
 #   * 挑战使用 algorithm=SM3；note_integrity 为 true 时 Note 字段受

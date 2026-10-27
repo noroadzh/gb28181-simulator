@@ -15,6 +15,7 @@ import (
 
 	"github.com/your-org/gb28181-simulator/internal/adapter/media"
 	"github.com/your-org/gb28181-simulator/internal/adapter/nodereg"
+	"github.com/your-org/gb28181-simulator/internal/adapter/recording"
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
 	"github.com/your-org/gb28181-simulator/internal/domain/port"
 )
@@ -464,4 +465,70 @@ func TestLiveSession_MediaKeepsSessionAlive(t *testing.T) {
 	if _, _, ok := l.svc.LivePS(context.Background(), l.h.nodeID, "ch-1"); !ok {
 		t.Fatal("a session with media was reaped")
 	}
+}
+
+// Task 1.3: a pull is recorded as it runs, and the segment is queryable.
+func TestLivePullIsRecorded(t *testing.T) {
+	l := newLiveHarness(t)
+	store, err := recording.New(t.TempDir(), time.Minute)
+	if err != nil {
+		t.Fatalf("recording.New: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	if _, err := l.svc.WithRecordings(store); err != nil {
+		t.Fatalf("WithRecordings: %v", err)
+	}
+	l.registerDevice(t, liveTestDevice, "127.0.0.1:15060")
+
+	info, _, err := l.startLive(t, "ch-1", "udp", udpAnswer(12345))
+	if err != nil {
+		t.Fatalf("StartLive: %v", err)
+	}
+	frames, cleanup, ok := l.svc.LivePS(context.Background(), l.h.nodeID, "ch-1")
+	if !ok {
+		t.Fatal("no live session")
+	}
+	defer cleanup()
+
+	conn, err := net.Dial("udp", fmt.Sprintf("127.0.0.1:%d", info.LocalPort))
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+	payload := []byte{0x00, 0x00, 0x01, 0xBA, 0x55, 0x66}
+	if _, err := conn.Write(rtpDatagram(12345, payload)); err != nil {
+		t.Fatalf("write RTP: %v", err)
+	}
+	waitForFrame(t, frames)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		recs := store.List(context.Background(), l.h.nodeID, "ch-1", time.Time{}, time.Time{})
+		if len(recs) == 1 && recs[0].Size > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the pull produced %d recordings", len(recs))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if err := l.svc.StopLive(context.Background(), l.h.nodeID, "ch-1"); err != nil {
+		t.Fatalf("StopLive: %v", err)
+	}
+	recs := store.List(context.Background(), l.h.nodeID, "ch-1", time.Time{}, time.Time{})
+	replayed, cancel, err := store.Stream(context.Background(), l.h.nodeID, "ch-1",
+		time.Time{}, time.Time{})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	defer cancel()
+	var got []byte
+	for fr := range replayed {
+		got = append(got, fr.Payload...)
+	}
+	if !bytes.Contains(got, payload) {
+		t.Errorf("the recording does not contain the pulled frame: % X", got)
+	}
+	_ = recs
 }

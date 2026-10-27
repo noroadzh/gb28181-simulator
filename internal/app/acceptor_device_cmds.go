@@ -149,6 +149,13 @@ func (a *Acceptor) handleRecordInfo(
 			"node_id", p.id.String(), "error", qErr.Error())
 		return model.Message{}, false
 	}
+	// A platform answers from its own recording library; a device keeps
+	// its fixed catalogue. The distinction is the node's role, not whether
+	// the library happens to be empty: an empty library answers SumNum=0.
+	if !p.isDevice && a.recordings != nil {
+		return a.answerRecordInfo(p, req, notify, a.libraryRecordItems(query, p, notify))
+	}
+
 	all := []model.RecordInfoItem{model.NewRecordInfoItem(model.RecordInfoItemParams{
 		Name:      "recording-1",
 		DeviceID:  notify.DeviceID(),
@@ -175,6 +182,18 @@ func (a *Acceptor) handleRecordInfo(
 		}
 		items = filtered
 	}
+	return a.answerRecordInfo(p, req, notify, items)
+}
+
+// answerRecordInfo renders and sends the RecordInfo answer for a set of
+// items. Both the device's fixed catalogue and the platform's library end up
+// here so the wire shape cannot drift between them.
+func (a *Acceptor) answerRecordInfo(
+	p *platform,
+	req model.Message,
+	notify model.Notify,
+	items []model.RecordInfoItem,
+) (model.Message, bool) {
 	respBody := model.RecordInfoResponse{
 		DeviceID: notify.DeviceID(),
 		SN:       notify.SN(),

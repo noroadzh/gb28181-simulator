@@ -58,9 +58,10 @@ type liveSession struct {
 	nextSub int
 	lastAt  time.Time
 
-	done      chan struct{}
-	cancel    context.CancelFunc
-	closeOnce sync.Once
+	done       chan struct{}
+	cancel     context.CancelFunc
+	closeOnce  sync.Once
+	recordDone chan struct{} // nil when recording is off
 }
 
 func newLiveSession(key liveKey, info port.LiveSessionInfo, node model.NodeID, callID, target, addr string, deizer port.RTPDeizer) *liveSession {
@@ -142,6 +143,20 @@ func (s *NodeService) WithLiveDeizer(f RTPDeizerFactory) (*NodeService, error) {
 		return nil, fmt.Errorf("app: NodeService requires a non-nil deizer factory")
 	}
 	s.liveDeizer = f
+	return s, nil
+}
+
+// WithRecordings attaches the platform's recording library. A start that
+// happens after this call records from the first frame; a store attached
+// later still applies to pulls started afterwards.
+func (s *NodeService) WithRecordings(store port.RecordingStore) (*NodeService, error) {
+	if store == nil {
+		return nil, fmt.Errorf("app: NodeService requires a non-nil recording store")
+	}
+	s.recordings = store
+	if s.acceptor != nil {
+		s.acceptor.WithRecordings(store)
+	}
 	return s, nil
 }
 
@@ -241,6 +256,13 @@ func (s *NodeService) StartLive(ctx context.Context, id model.NodeID, channelID,
 		go s.receiveLiveUDP(sess)
 	}
 	go s.watchLive(sess)
+	if s.recordings != nil {
+		sess.recordDone = make(chan struct{})
+		go func() {
+			defer close(sess.recordDone)
+			s.recordLive(sess)
+		}()
+	}
 
 	s.log.Info("live pull started",
 		"node_id", id.String(), "channel", channelID, "target", target,
@@ -388,6 +410,15 @@ func (s *NodeService) endLive(sess *liveSession, sendBye bool) {
 	}
 	s.liveMu.Unlock()
 	sess.close()
+	// Wait for the recorder to close its segment, so a stop returns with
+	// the recording complete rather than racing the last frame.
+	if sess.recordDone != nil {
+		select {
+		case <-sess.recordDone:
+		case <-time.After(2 * time.Second):
+			s.log.Warn("recorder did not stop in time", "channel", sess.key.channel)
+		}
+	}
 	if sendBye && s.acceptor != nil && sess.callID != "" {
 		byeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -478,4 +509,60 @@ func (s *NodeService) liveWatchPeriod() time.Duration {
 		return s.liveWatch
 	}
 	return liveWatchInterval
+}
+
+// recordLive writes the session's PS frames to the recording library. A
+// write failure is logged once and does not stop the pull: losing the
+// recording is bad, losing the live picture because of it is worse.
+func (s *NodeService) recordLive(sess *liveSession) {
+	frames, cleanup := sess.subscribe()
+	defer cleanup()
+	defer func() {
+		if err := s.recordings.Finish(context.Background(), sess.node, sess.key.channel); err != nil {
+			s.log.Warn("cannot close the recording segment", "error", err.Error())
+		}
+	}()
+	warned := false
+	for {
+		select {
+		case <-sess.done:
+			return
+		case ps, ok := <-frames:
+			if !ok {
+				return
+			}
+			if err := s.recordings.Append(context.Background(), sess.node, sess.key.channel, ps); err != nil {
+				if !warned {
+					s.log.Warn("recording failed; the live stream continues",
+						"node_id", sess.node.String(), "channel", sess.key.channel,
+						"error", err.Error())
+					warned = true
+				} else {
+					s.log.Debug("recording still failing", "error", err.Error())
+				}
+			}
+		}
+	}
+}
+
+// Recordings lists the platform's recordings for one channel. A process
+// without a recording library reports the capability as unsupported rather
+// than as an empty library.
+func (s *NodeService) Recordings(ctx context.Context, id model.NodeID, channelID string, start, end time.Time) ([]port.Recording, error) {
+	if s.recordings == nil {
+		return nil, fmt.Errorf("%w: recording library is not wired", port.ErrRecordingUnsupported)
+	}
+	if _, ok := s.registry.Get(ctx, id); !ok {
+		return nil, model.ErrUnknownNode
+	}
+	return s.recordings.List(ctx, id, channelID, start, end), nil
+}
+
+// OpenRecording hands a consumer the PS frames of a window of recordings.
+// It is the streaming gateway's source for recording playback.
+func (s *NodeService) OpenRecording(ctx context.Context, id model.NodeID, channelID string, start, end time.Time) (<-chan model.PSFrame, func(), error) {
+	if s.recordings == nil {
+		return nil, nil, fmt.Errorf("%w: recording library is not wired", port.ErrRecordingUnsupported)
+	}
+	return s.recordings.Stream(ctx, id, channelID, start, end)
 }

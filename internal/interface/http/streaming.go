@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
@@ -21,6 +22,8 @@ type StreamingService interface {
 	// "live" = an active platform pull only, "local" = the node's local
 	// media source only.
 	SubscribeSource(ctx context.Context, nodeID model.NodeID, channelID, source string) (<-chan []byte, error)
+	// SubscribeRecording serves a recorded window as FLV.
+	SubscribeRecording(ctx context.Context, nodeID model.NodeID, channelID string, start, end time.Time) (<-chan []byte, error)
 	Subscribers(nodeID model.NodeID, channelID string) int
 	Close() error
 }

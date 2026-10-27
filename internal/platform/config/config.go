@@ -38,6 +38,11 @@ type Config struct {
 	AutoStart bool `mapstructure:"auto_start"`
 
 	Security SecurityConfig `mapstructure:"security"`
+
+	// Recording controls the platform-side recording library: whether a
+	// pulled stream is written to disk, where, and how long one segment
+	// runs before the next file starts.
+	Recording RecordingConfig `mapstructure:"recording"`
 }
 
 // SecurityConfig groups the optional hardening switches.
@@ -56,6 +61,31 @@ type GB35114Config struct {
 	NoteIntegrity     bool   `mapstructure:"note_integrity"`
 	SM2PrivateKeyFile string `mapstructure:"sm2_private_key_file"`
 	SM2PublicKeyFile  string `mapstructure:"sm2_public_key_file"`
+}
+
+// RecordingConfig is the platform recording library's configuration. Enabled
+// defaults to true: a pull is an explicit action, and recording it is what a
+// platform is for. An empty Dir means <storage directory>/recordings.
+type RecordingConfig struct {
+	Enabled        bool   `mapstructure:"enabled"`
+	Dir            string `mapstructure:"dir"`
+	SegmentSeconds int    `mapstructure:"segment_seconds"`
+}
+
+// DirOrDefault resolves the directory segments are written to.
+func (r RecordingConfig) DirOrDefault(storagePath string) string {
+	if d := strings.TrimSpace(r.Dir); d != "" {
+		return d
+	}
+	return filepath.Join(filepath.Dir(storagePath), "recordings")
+}
+
+// SegmentDuration returns the segment length, falling back to five minutes.
+func (r RecordingConfig) SegmentDuration() time.Duration {
+	if r.SegmentSeconds > 0 {
+		return time.Duration(r.SegmentSeconds) * time.Second
+	}
+	return 5 * time.Minute
 }
 
 // Identity reads the raw SM2 key files when GB 35114 is enabled. A disabled
@@ -417,6 +447,8 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("tracing.enabled", dflt.Tracing.Enabled)
 	v.SetDefault("tracing.sample_ratio", dflt.Tracing.SampleRatio)
 	v.SetDefault("tracing.service_name", dflt.Tracing.ServiceName)
+	v.SetDefault("recording.enabled", true)
+	v.SetDefault("recording.segment_seconds", 300)
 
 	cfg := &Config{}
 	if err := v.Unmarshal(cfg); err != nil {

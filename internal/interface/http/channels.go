@@ -86,6 +86,10 @@ type ChannelView interface {
 	// PlaybackWindow returns the window of an active playback session.
 	PlaybackWindow(sn string) (start, end time.Time, ok bool)
 
+	// Recordings lists the platform's recordings for the channel in
+	// [start, end]; a zero bound means unbounded.
+	Recordings(ctx context.Context, id model.NodeID, channelID string, start, end time.Time) ([]port.Recording, error)
+
 	// StartLive pulls the channel's real-time stream from the downstream
 	// device. transport is "udp" or "tcp" (附录 D).
 	StartLive(ctx context.Context, id model.NodeID, channelID, transport string) (port.LiveSessionInfo, error)
