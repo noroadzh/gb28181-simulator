@@ -42,6 +42,12 @@ func (a *Acceptor) handle(ctx context.Context, p *platform, req model.Message, p
 			"node_id", p.id.String(), "username", username)
 		return buildResponse(403, "Forbidden", req, nil, "")
 	}
+	// A process-wide GB 35114 identity (when configured) rides on every
+	// credential, so verification can check the peer's SM2 signature and the
+	// 200 OK can sign ours.
+	if len(a.gb35114Priv) > 0 || len(a.gb35114Pub) > 0 {
+		cred = cred.WithSM2KeyPair(a.gb35114Priv, a.gb35114Pub)
+	}
 	if err := a.authenticator.Verify(req, cred); err != nil {
 		// A header we cannot read may be a transient botch, so it is
 		// worth another challenge; one that reads and does not match

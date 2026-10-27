@@ -62,8 +62,18 @@ type Acceptor struct {
 	// the port lives until the dialog ends.
 	deviceTalksMu   sync.Mutex
 	deviceTalks     map[string]net.PacketConn
-	devicePlaybacks map[string]net.PacketConn
-	deviceVideos    map[string]net.PacketConn
+	devicePlaybacks map[string]mediaSink
+	deviceVideos    map[string]mediaSink
+
+	// pendingInvites holds INVITE transactions whose final response has
+	// not been sent yet, keyed by node and Call-ID. A CANCEL uses it to
+	// decide between 487 and 481.
+	pendingInvites map[string]pendingInvite
+
+	// gb35114 is the process-wide SM2 identity (GB 35114 A-grade). Empty
+	// means the platform keeps plain MD5 Digest behaviour.
+	gb35114Priv []byte
+	gb35114Pub  []byte
 
 	// relay carries the cascade hand-offs this node is waiting on: which
 	// requester is waiting for which downstream answer. relayWait bounds the
@@ -186,8 +196,9 @@ func NewAcceptor(
 		relayWait:       relayTimeout,
 		responses:       newResponseTable(),
 		deviceTalks:     make(map[string]net.PacketConn),
-		devicePlaybacks: make(map[string]net.PacketConn),
-		deviceVideos:    make(map[string]net.PacketConn),
+		devicePlaybacks: make(map[string]mediaSink),
+		deviceVideos:    make(map[string]mediaSink),
+		pendingInvites:  make(map[string]pendingInvite),
 		controlWait:     5 * time.Second,
 	}, nil
 }
@@ -233,6 +244,15 @@ func (a *Acceptor) WithMediaService(svc *MediaService) *Acceptor {
 // asks for.
 func (a *Acceptor) WithCascadeHandler(h port.CascadeHandler) *Acceptor {
 	a.cascade = h
+	return a
+}
+
+// WithGB35114 attaches the process-wide SM2 identity. Every credential the
+// platform verifies or signs is decorated with it, so a GB 35114 peer sees a
+// SecurityInfo response without any per-node configuration.
+func (a *Acceptor) WithGB35114(priv, pub []byte) *Acceptor {
+	a.gb35114Priv = append([]byte(nil), priv...)
+	a.gb35114Pub = append([]byte(nil), pub...)
 	return a
 }
 

@@ -19,6 +19,11 @@ import (
 var (
 	ErrMalformedCredentials = errors.New("port: malformed credentials")
 	ErrInvalidCredentials   = errors.New("port: invalid credentials")
+
+	// ErrSecurityInfoMismatch — the platform's SecurityInfo could not be
+	// verified with this node's SM2 identity. Registration must fail: the
+	// peer proved it does not hold the key it claimed.
+	ErrSecurityInfoMismatch = errors.New("port: security-info mismatch")
 )
 
 // Authenticator verifies an inbound Authorization header against a
@@ -72,4 +77,18 @@ type SecurityInfoSigner interface {
 	// Returns ("", false) when the request does not carry a security-info
 	// directive or the server credential lacks an SM2 identity.
 	SignSecurityInfo(req model.Message, cred model.Credentials) (model.Header, bool)
+}
+
+// SecurityInfoVerifier checks the server half of GB 35114 mutual
+// authentication: the SecurityInfo header a platform attaches to a REGISTER
+// 200 OK. It is the counterpart of SecurityInfoSigner, which this process
+// uses when it acts as the platform.
+type SecurityInfoVerifier interface {
+	// VerifySecurityInfo returns nil when resp carries no SecurityInfo —
+	// there is nothing to check, so MD5-only peers pass through
+	// unchanged. When the header is present it must be an SM2 signature
+	// over the digest response this node put in authz, verified with
+	// cred's SM2 public key; otherwise the error wraps
+	// ErrSecurityInfoMismatch.
+	VerifySecurityInfo(resp model.Message, authz model.Header, cred model.Credentials) error
 }

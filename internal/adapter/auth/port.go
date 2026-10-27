@@ -162,7 +162,10 @@ type AuthorizerAdapter struct {
 	authorizer *Authorizer
 }
 
-var _ port.Authorizer = (*AuthorizerAdapter)(nil)
+var (
+	_ port.Authorizer           = (*AuthorizerAdapter)(nil)
+	_ port.SecurityInfoVerifier = (*AuthorizerAdapter)(nil)
+)
 
 // NewAuthorizerAdapter returns a port.Authorizer backed by a. A nil
 // Authorizer is rejected so a mis-wired composition root fails fast
@@ -191,6 +194,40 @@ func (a *AuthorizerAdapter) Authorize(challenge string, cred model.Credentials, 
 		return model.Header{}, fmt.Errorf("%w: rendered Authorization contains CR/LF", ErrMalformedAuthorization)
 	}
 	return model.NewHeader("Authorization", value), nil
+}
+
+// VerifySecurityInfo implements port.SecurityInfoVerifier. The platform signs
+// the digest response this node sent, so the device can check that the party
+// answering the REGISTER really holds the SM2 private key it advertises.
+//
+// A response without SecurityInfo passes through: MD5-only platforms keep
+// working exactly as before. So does a node with no SM2 public key — it never
+// asked for mutual authentication, so it cannot demand a signature.
+func (a *AuthorizerAdapter) VerifySecurityInfo(resp model.Message, authz model.Header, cred model.Credentials) error {
+	h, ok := resp.Header("SecurityInfo")
+	if !ok {
+		return nil
+	}
+	pub := cred.SM2PublicKey()
+	if pub == nil {
+		return nil
+	}
+	rest, ok := strings.CutPrefix(h.Value(), "SM2,")
+	if !ok {
+		return fmt.Errorf("%w: unsupported scheme %q", port.ErrSecurityInfoMismatch, h.Value())
+	}
+	sig, err := hex.DecodeString(rest)
+	if err != nil {
+		return fmt.Errorf("%w: bad signature encoding", port.ErrSecurityInfoMismatch)
+	}
+	fields, err := ParseAuthorization(authz.Value())
+	if err != nil {
+		return fmt.Errorf("%w: our own Authorization is unreadable", port.ErrSecurityInfoMismatch)
+	}
+	if !sm.VerifySM2(pub, []byte(fields.Response), sig) {
+		return fmt.Errorf("%w: signature does not cover our digest response", port.ErrSecurityInfoMismatch)
+	}
+	return nil
 }
 
 // reqStub is the minimum contract the legacy Responder.Verify needs from a

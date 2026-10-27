@@ -123,6 +123,10 @@ func (a *Acceptor) createInboundPipeline(
 	if media == nil {
 		return
 	}
+	// An in-dialog INVITE (re-INVITE) replaces the dialog's media: stop the
+	// pipeline the first INVITE started before building the new one, or the
+	// old goroutine keeps sending to the old endpoint forever.
+	a.closePipeline(callID)
 	address := extractMediaAddress(sdpBody)
 	if address == "" || portStr == "" {
 		a.log.Debug("INVITE without usable media section; skipping pipeline",

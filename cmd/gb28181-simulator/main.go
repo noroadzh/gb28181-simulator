@@ -30,6 +30,7 @@ import (
 	"github.com/your-org/gb28181-simulator/internal/adapter/playback"
 	"github.com/your-org/gb28181-simulator/internal/adapter/scenario"
 	"github.com/your-org/gb28181-simulator/internal/adapter/siptransport"
+	"github.com/your-org/gb28181-simulator/internal/adapter/sm"
 	"github.com/your-org/gb28181-simulator/internal/adapter/subscribe"
 	"github.com/your-org/gb28181-simulator/internal/app"
 	"github.com/your-org/gb28181-simulator/internal/app/streaming"
@@ -480,6 +481,12 @@ func run() error {
 			// Device registration: the use case lives in app, the Digest
 			// client behind it is an adapter, and the app sees only the
 			// domain port.
+			// GB 35114: one process-wide SM2 identity, loaded once and
+			// attached to every digest exchange on both sides.
+			gb35114Priv, gb35114Pub, err := loadGB35114Identity(cfg)
+			if err != nil {
+				return nil, err
+			}
 			authorizer, err := sipauth.NewAuthorizerAdapter(sipauth.NewAuthorizer(nil))
 			if err != nil {
 				return nil, fmt.Errorf("authorizer: %w", err)
@@ -487,6 +494,9 @@ func run() error {
 			registrar, err := app.NewRegistrar(authorizer, clock.Real(), logging.L())
 			if err != nil {
 				return nil, fmt.Errorf("registrar: %w", err)
+			}
+			if len(gb35114Priv) > 0 {
+				registrar.WithGB35114(gb35114Priv, gb35114Pub)
 			}
 			if _, err := svc.WithRegistrar(registrar); err != nil {
 				return nil, fmt.Errorf("node service: %w", err)
@@ -524,7 +534,14 @@ func run() error {
 			if err != nil {
 				return nil, fmt.Errorf("authenticator: %w", err)
 			}
-			challenger, err := sipauth.NewChallengerAdapter(sipauth.NewChallenger(nil))
+			challengerOpts := make([]sipauth.ChallengerOption, 0, 2)
+			if cfg.Security.GB35114.Enabled {
+				challengerOpts = append(challengerOpts, sipauth.WithHashName("SM3"))
+				if cfg.Security.GB35114.NoteIntegrity {
+					challengerOpts = append(challengerOpts, sipauth.WithNoteHash())
+				}
+			}
+			challenger, err := sipauth.NewChallengerAdapter(sipauth.NewChallenger(nil, challengerOpts...))
 			if err != nil {
 				return nil, fmt.Errorf("challenger: %w", err)
 			}
@@ -536,6 +553,9 @@ func run() error {
 				accountSQL, devices, manscdp.NewMANSCDPCodec(), clock.RealTicker(), logging.L())
 			if err != nil {
 				return nil, fmt.Errorf("acceptor: %w", err)
+			}
+			if len(gb35114Priv) > 0 {
+				acceptor.WithGB35114(gb35114Priv, gb35114Pub)
 			}
 			// The acceptor is shared across every node in this process, so
 			// it takes one catalog-poll interval for them all. Operators
@@ -956,4 +976,21 @@ func pickCatalogPollInterval(nodes []platformconfig.NodeConfig) time.Duration {
 		}
 	}
 	return 0
+}
+
+// loadGB35114Identity reads the process-wide SM2 key pair when GB 35114 is
+// enabled, and validates it here so a bad key fails the boot instead of every
+// later registration.
+func loadGB35114Identity(cfg *platformconfig.Config) ([]byte, []byte, error) {
+	priv, pub, err := cfg.Security.GB35114.Identity()
+	if err != nil || priv == nil {
+		return priv, pub, err
+	}
+	if _, err := sm.ParsePrivateKey(priv); err != nil {
+		return nil, nil, fmt.Errorf("security.gb35114: private key: %w", err)
+	}
+	if _, err := sm.ParsePublicKey(pub); err != nil {
+		return nil, nil, fmt.Errorf("security.gb35114: public key: %w", err)
+	}
+	return priv, pub, nil
 }

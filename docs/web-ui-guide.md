@@ -304,6 +304,20 @@ device 节点可展开查看所有通道。该页面从 `GET /v1/nodes/:id/chann
 | 回放 FLV 历史流 | 已实现：`POST /playback` 带 `sn`+`start`+`end` 发起回放 INVITE，`GET …/playback/flv?sn=` 出流；未知或已过期会话 404 |
 | 语音对讲 | 已实现：INVITE/BYE 控制面 + `/talk/audio` WebSocket 音频桥（PCMU）；非 device 501、对端不可达 502、无应答 504、未知 session 404 |
 | 真实平台向设备拉实时流 | 已实现：device 受理 `m=video` INVITE，回 `a=sendonly` SDP 并按通道媒体源发 PS/RTP；通道无源 404、BYE 停流 |
+| TCP 媒体（附录 D） | 已实现（设备侧 video/playback）：offer 的 m-line 为 `TCP/RTP/AVP` 时按 `a=setup` 主动连接或被动监听，RTP 包带 2 字节长度前缀；无法承载回 488 |
+| CANCEL / re-INVITE | 已实现：CANCEL 在 INVITE 事务挂起时回 200 + 487，否则 481；re-INVITE 关闭旧媒体后重新协商；device 节点正常应答 BYE/CANCEL |
+| GB 35114 | 配置 `security.gb35114` 后启用进程级 SM2 身份：SM3 Digest、可选 SM3 Note、双向 `SecurityInfo` 签名（设备侧验证平台签名，失败即注册失败）；默认关闭 |
+
+开启 GB 35114 的配置片段（密钥文件缺失或不可解析会让进程启动失败）：
+
+```yaml
+security:
+  gb35114:
+    enabled: true
+    note_integrity: true
+    sm2_private_key_file: /etc/gb28181/sm2_private.pem
+    sm2_public_key_file: /etc/gb28181/sm2_public.pem
+```
 
 ### 5.5 拉流地址复制
 

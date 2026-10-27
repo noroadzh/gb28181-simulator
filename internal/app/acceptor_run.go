@@ -149,7 +149,7 @@ func (a *Acceptor) run(ctx context.Context, p *platform) {
 		switch {
 		case handled:
 			// The fault gate returned a canned response; nothing else runs.
-		case p.isDevice && msg.Method() != "MESSAGE" && msg.Method() != "INVITE":
+		case p.isDevice && !deviceAccepts(msg.Method()):
 			// A device is a UAS that answers one thing: the catalog query
 			// MESSAGE an upstream sends to learn its channels and their
 			// MediaSource extension. Everything else is refused loudly
@@ -192,9 +192,19 @@ func (a *Acceptor) run(ctx context.Context, p *platform) {
 					continue
 				}
 			case "INVITE":
+				callID := headerValue(msg, "Call-ID")
+				a.markPendingInvite(p.id, callID, msg, peer)
 				resp, err = a.handleInvite(ctx, p, msg, peer)
+				a.clearPendingInvite(p.id, callID)
 				if err != nil {
 					a.log.Warn("cannot answer an INVITE",
+						"node_id", p.id.String(), "peer", peer, "error", err.Error())
+					continue
+				}
+			case "CANCEL":
+				resp, err = a.handleCancel(ctx, p, msg, peer)
+				if err != nil {
+					a.log.Warn("cannot answer a CANCEL",
 						"node_id", p.id.String(), "peer", peer, "error", err.Error())
 					continue
 				}

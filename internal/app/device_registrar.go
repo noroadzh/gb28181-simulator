@@ -73,10 +73,23 @@ var _ port.StagedFailure = (*RegistrationError)(nil)
 // adapter: message construction uses model.NewRequest and the digest is
 // produced by port.Authorizer.
 type Registrar struct {
+	// gb35114Priv/Pub are the process-wide GB 35114 identity, attached to
+	// every credential this registrar answers a challenge with.
+	gb35114Priv []byte
+	gb35114Pub  []byte
+
 	authorizer port.Authorizer
 	clock      port.Clock
 	log        *slog.Logger
 	newCallID  func() string
+}
+
+// WithGB35114 attaches the process-wide SM2 identity used when answering a
+// platform challenge.
+func (r *Registrar) WithGB35114(priv, pub []byte) *Registrar {
+	r.gb35114Priv = append([]byte(nil), priv...)
+	r.gb35114Pub = append([]byte(nil), pub...)
+	return r
 }
 
 // NewRegistrar builds a Registrar. authorizer is required; clock and log
@@ -167,6 +180,13 @@ func (r *Registrar) transaction(
 
 	authenticated := false
 	seqNo := uint32(1)
+	// Kept past the 401 branch: the 200 OK may carry a SecurityInfo signed
+	// over the digest response in authHeader, and verifying it needs the
+	// same credential that produced it.
+	var (
+		cred       model.Credentials
+		authHeader model.Header
+	)
 	for {
 		msg, peer, err := tr.Receive(ctx)
 		if err != nil {
@@ -206,9 +226,12 @@ func (r *Registrar) transaction(
 					Stage: StageChallenge, StatusCode: status, Err: ErrNoChallenge,
 				}
 			}
-			cred, err := reg.CredentialsFor(profile.Domain(), id)
+			cred, err = reg.CredentialsFor(profile.Domain(), id)
 			if err != nil {
 				return model.RegistrationResult{}, &RegistrationError{Stage: StageChallenge, Err: err}
+			}
+			if len(r.gb35114Priv) > 0 || len(r.gb35114Pub) > 0 {
+				cred = cred.WithSM2KeyPair(r.gb35114Priv, r.gb35114Pub)
 			}
 			auth, err := r.authorizer.Authorize(challenge.Value(), cred, "REGISTER", requestURI)
 			if err != nil {
@@ -234,11 +257,26 @@ func (r *Registrar) transaction(
 			if err := tr.Send(ctx, retry, reg.Server()); err != nil {
 				return model.RegistrationResult{}, &RegistrationError{Stage: StageChallenge, Err: err}
 			}
+			authHeader = auth
 			authenticated = true
 			r.log.Debug("registration resent with credentials",
 				"node_id", id.String(), "cseq", seqNo)
 
 		case status >= 200 && status < 300:
+			// GB 35114 mutual authentication: when this node holds an SM2
+			// identity the platform is expected to prove its own by
+			// signing the digest response we sent. A signature that does
+			// not verify fails the registration; a response without one
+			// is a plain Digest platform and passes through.
+			if authenticated {
+				if verifier, ok := r.authorizer.(port.SecurityInfoVerifier); ok {
+					if err := verifier.VerifySecurityInfo(msg, authHeader, cred); err != nil {
+						return model.RegistrationResult{}, &RegistrationError{
+							Stage: StageResponse, StatusCode: status, Err: err,
+						}
+					}
+				}
+			}
 			granted := expires
 			if h, ok := msg.Header("Expires"); ok {
 				if n, cerr := strconv.ParseUint(strings.TrimSpace(h.Value()), 10, 32); cerr == nil {

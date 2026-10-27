@@ -2,6 +2,8 @@ package app
 
 import (
 	"bytes"
+	"encoding/binary"
+	"io"
 	"net"
 	"strings"
 	"testing"
@@ -153,5 +155,68 @@ func TestDevice_PlaybackStreamsRTP(t *testing.T) {
 	}
 	if !bytes.HasPrefix(buf[12:n], []byte{0x00, 0x00, 0x01, 0xBA}) {
 		t.Errorf("payload does not start with a PS pack header: % X", buf[12:min(20, n)])
+	}
+}
+
+// Task 3.2: a playback offer over TCP is served over TCP — the answer
+// mirrors the transport and the device connects to the listening platform.
+func TestDevice_AnswersTCPPlaybackInvite(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+	port := ln.Addr().(*net.TCPAddr).Port
+
+	// A live window: the stream stops when the offer's end passes.
+	start := time.Now()
+	body, err := model.PlaybackSDPBytes(model.PlaybackSDP{
+		DeviceID: "34020000001310000001001", SN: "40001", ConnIP: "127.0.0.1",
+		RTPPort: port, Start: start, End: start.Add(time.Minute),
+		Proto: "TCP/RTP/AVP", Setup: "passive",
+	})
+	if err != nil {
+		t.Fatalf("PlaybackSDPBytes: %v", err)
+	}
+	deviceID := mustDeviceNodeID(t, "34020000001310000012")
+	mediaCfg := model.MediaConfig{Kind: model.SourceKindSynthetic, FPS: 25}
+	h := newDeviceHarness(t, deviceID, nil, &mediaCfg)
+	h.acceptor.WithMediaService(syntheticMediaService(t))
+
+	req, err := model.NewRequest("INVITE", "sip:"+deviceID.String()+"@3402000000", []model.Header{
+		model.NewHeader("From", "<sip:platform@3402000000>;tag=p-play-tcp"),
+		model.NewHeader("To", "<sip:"+deviceID.String()+"@3402000000>"),
+		model.NewHeader("Call-ID", "play-tcp-1"),
+		model.NewHeader("CSeq", "1 INVITE"),
+		model.NewHeader("Via", "SIP/2.0/UDP 127.0.0.1:15060;branch=z9hG4bK-play-tcp"),
+		model.NewHeader("Contact", "<sip:platform@127.0.0.1:15060>"),
+		model.NewHeader("Content-Type", "application/sdp"),
+	}, body)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	resp := h.tr.deliver(t, req)
+	if resp.StatusCode() != 200 {
+		t.Fatalf("status = %d, want 200 (body %q)", resp.StatusCode(), resp.Body())
+	}
+	for _, want := range []string{"s=Playback", "TCP/RTP/AVP", "a=setup:active", "a=sendonly"} {
+		if !strings.Contains(resp.Body(), want) {
+			t.Errorf("answer is missing %q:\n%s", want, resp.Body())
+		}
+	}
+
+	_ = ln.(*net.TCPListener).SetDeadline(time.Now().Add(3 * time.Second))
+	conn, err := ln.Accept()
+	if err != nil {
+		t.Fatalf("the device never connected: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	var prefix [2]byte
+	if _, err := io.ReadFull(conn, prefix[:]); err != nil {
+		t.Fatalf("read length prefix: %v", err)
+	}
+	if n := binary.BigEndian.Uint16(prefix[:]); n < 12 {
+		t.Fatalf("length prefix = %d, not a plausible RTP packet", n)
 	}
 }

@@ -82,6 +82,9 @@ func (a *Acceptor) handleInvite(
 // node stopping. That third arm is the one the previous implementation
 // missed, and is the reason this used to leak a goroutine per cancel.
 func (a *Acceptor) watchInviteExpiry(p *platform, callID string) {
+	// A re-INVITE refreshes the wait for its own ACK; the previous watcher
+	// must not fire on the new dialog.
+	a.cancelInviteExpiry(callID)
 	timer := time.NewTimer(30 * time.Second)
 	done := make(chan struct{})
 
@@ -282,41 +285,45 @@ func (a *Acceptor) answerDevicePlaybackInvite(p *platform, req model.Message) (m
 			[]model.Header{allowHeader()}, "")
 	}
 
-	conn, lerr := net.ListenPacket("udp4", "0.0.0.0:0")
-	if lerr != nil {
-		a.log.Warn("device cannot open a playback port",
-			"node_id", p.id.String(), "error", lerr.Error())
-		return buildResponse(500, "Server Internal Error", req, nil, "")
+	sink, serr := openMediaSink(offerTransport{Proto: offer.Proto, Setup: offer.Setup},
+		offer.ConnIP, offer.RTPPort)
+	if serr != nil {
+		a.log.Warn("device cannot open the playback transport",
+			"node_id", p.id.String(), "error", serr.Error())
+		return buildResponse(488, "Not Acceptable Here", req, nil, "")
 	}
 	host := "127.0.0.1"
 	if h, _, splitErr := net.SplitHostPort(p.tr.LocalAddr()); splitErr == nil {
 		host = h
 	}
+	port, proto, setup := sink.Answer()
 	answer := model.PlaybackSDP{
 		DeviceID: offer.DeviceID,
 		SN:       offer.SN,
 		ConnIP:   host,
-		RTPPort:  conn.LocalAddr().(*net.UDPAddr).Port,
+		RTPPort:  port,
 		Start:    offer.Start,
 		End:      offer.End,
 		Mode:     "sendonly",
+		Proto:    proto,
+		Setup:    setup,
 	}
 	body, berr := model.PlaybackSDPBytes(answer)
 	if berr != nil {
-		_ = conn.Close()
+		_ = sink.Close()
 		return buildResponse(500, "Server Internal Error", req, nil, "")
 	}
 
 	a.deviceTalksMu.Lock()
 	if a.devicePlaybacks == nil {
-		a.devicePlaybacks = map[string]net.PacketConn{}
+		a.devicePlaybacks = map[string]mediaSink{}
 	}
 	if old := a.devicePlaybacks[callID]; old != nil {
 		_ = old.Close()
 	}
-	a.devicePlaybacks[callID] = conn
+	a.devicePlaybacks[callID] = sink
 	a.deviceTalksMu.Unlock()
-	go a.streamPlayback(callID, p, conn, offer)
+	go a.streamPlayback(callID, p, sink, offer)
 
 	hdrs := []model.Header{
 		model.NewHeader("Contact", "<sip:"+p.id.String()+"@"+p.realm+">"),
@@ -350,15 +357,29 @@ func (a *Acceptor) deviceHasMediaSource(p *platform, channelID string) bool {
 	return ok
 }
 
+// closeDevicePlaybackIf is the re-INVITE-safe counterpart of
+// closeDevicePlayback: it leaves a newer sink installed by a renegotiation
+// alone.
+func (a *Acceptor) closeDevicePlaybackIf(callID string, sink mediaSink) {
+	a.deviceTalksMu.Lock()
+	if a.devicePlaybacks[callID] != sink {
+		a.deviceTalksMu.Unlock()
+		return
+	}
+	delete(a.devicePlaybacks, callID)
+	a.deviceTalksMu.Unlock()
+	_ = sink.Close()
+}
+
 // closeDevicePlayback releases the playback port of a finished dialog. The
 // port is keyed by Call-ID, the only dialog identity a BYE carries.
 func (a *Acceptor) closeDevicePlayback(callID string) {
 	a.deviceTalksMu.Lock()
-	conn := a.devicePlaybacks[callID]
+	sink := a.devicePlaybacks[callID]
 	delete(a.devicePlaybacks, callID)
 	a.deviceTalksMu.Unlock()
-	if conn != nil {
-		_ = conn.Close()
+	if sink != nil {
+		_ = sink.Close()
 	}
 }
 
@@ -367,7 +388,7 @@ func (a *Acceptor) closeDevicePlayback(callID string) {
 // source is read from its beginning: the file demuxer has no time seek, so a
 // window that starts later is served from the first frame rather than not at
 // all — the log says so at debug level.
-func (a *Acceptor) streamPlayback(callID string, p *platform, conn net.PacketConn, offer model.PlaybackSDP) {
+func (a *Acceptor) streamPlayback(callID string, p *platform, sink mediaSink, offer model.PlaybackSDP) {
 	if a.mediaService == nil {
 		a.log.Debug("playback stream skipped: no media service wired",
 			"node_id", p.id.String(), "sn", offer.SN)
@@ -375,12 +396,6 @@ func (a *Acceptor) streamPlayback(callID string, p *platform, conn net.PacketCon
 	}
 	cfg, ok := a.deviceMediaConfig(p, offer.DeviceID)
 	if !ok {
-		return
-	}
-	dst, err := net.ResolveUDPAddr("udp", net.JoinHostPort(offer.ConnIP, strconv.Itoa(offer.RTPPort)))
-	if err != nil {
-		a.log.Warn("playback destination is unusable",
-			"node_id", p.id.String(), "dst", offer.ConnIP, "error", err.Error())
 		return
 	}
 	window := time.Until(offer.End)
@@ -391,17 +406,19 @@ func (a *Acceptor) streamPlayback(callID string, p *platform, conn net.PacketCon
 	ctx, cancel := context.WithTimeout(context.Background(), window)
 	defer cancel()
 
+	_, proto, _ := sink.Answer()
 	a.log.Debug("playback stream starting",
-		"node_id", p.id.String(), "sn", offer.SN, "dst", dst.String(), "window", window.String())
-	err = a.mediaService.PacketizeOutbound(ctx, cfg, func(pkt model.RTPPacket) error {
-		_, werr := conn.WriteTo(pkt.Bytes(), dst)
-		return werr
+		"node_id", p.id.String(), "sn", offer.SN,
+		"dst", net.JoinHostPort(offer.ConnIP, strconv.Itoa(offer.RTPPort)),
+		"transport", proto, "window", window.String())
+	err := a.mediaService.PacketizeOutbound(ctx, cfg, func(pkt model.RTPPacket) error {
+		return sink.Write(pkt.Bytes())
 	})
 	if err != nil && ctx.Err() == nil {
 		a.log.Debug("playback stream ended early",
 			"node_id", p.id.String(), "sn", offer.SN, "error", err.Error())
 	}
-	a.closeDevicePlayback(callID)
+	a.closeDevicePlaybackIf(callID, sink)
 }
 
 // answerDeviceVideoInvite answers a live-viewing INVITE. The device opens its
@@ -417,7 +434,7 @@ func (a *Acceptor) answerDeviceVideoInvite(p *platform, req model.Message) (mode
 			"node_id", p.id.String(), "call_id", callID, "channel", channelID)
 		return buildResponse(400, "Bad Request", req, nil, "")
 	}
-	dstHost, dstPort, derr := parseVideoOffer(req.Body())
+	offer, derr := parseVideoOffer(req.Body())
 	if derr != nil {
 		a.log.Warn("device cannot read a video offer",
 			"node_id", p.id.String(), "error", derr.Error())
@@ -430,37 +447,38 @@ func (a *Acceptor) answerDeviceVideoInvite(p *platform, req model.Message) (mode
 		return buildResponse(404, "Not Found", req, []model.Header{allowHeader()}, "")
 	}
 
-	conn, lerr := net.ListenPacket("udp4", "0.0.0.0:0")
-	if lerr != nil {
-		a.log.Warn("device cannot open a video port",
-			"node_id", p.id.String(), "error", lerr.Error())
-		return buildResponse(500, "Server Internal Error", req, nil, "")
+	// GB/T 28181 附录 D: the offer decides between UDP and TCP media, and
+	// who opens the connection. A transport we cannot serve is a 488,
+	// not a silent fallback to UDP.
+	sink, serr := openMediaSink(offer.offerTransport, offer.Host, offer.Port)
+	if serr != nil {
+		a.log.Warn("device cannot open the video transport",
+			"node_id", p.id.String(), "error", serr.Error())
+		return buildResponse(488, "Not Acceptable Here", req, nil, "")
 	}
 	localHost := "127.0.0.1"
 	if h, _, splitErr := net.SplitHostPort(p.tr.LocalAddr()); splitErr == nil {
 		localHost = h
 	}
-	localPort := conn.LocalAddr().(*net.UDPAddr).Port
+	localPort, proto, setup := sink.Answer()
 	answer := fmt.Sprintf("v=0\r\no=%s 0 0 IN IP4 %s\r\ns=Play\r\nc=IN IP4 %s\r\nt=0 0\r\n"+
-		"m=video %d RTP/AVP 96\r\na=sendonly\r\na=rtpmap:96 PS/90000\r\n",
-		p.id.String(), localHost, localHost, localPort)
+		"m=video %d %s 96\r\na=sendonly\r\n", p.id.String(), localHost, localHost, localPort, proto)
+	if setup != "" {
+		answer += "a=setup:" + setup + "\r\n"
+	}
+	answer += "a=rtpmap:96 PS/90000\r\n"
 
 	a.deviceTalksMu.Lock()
 	if a.deviceVideos == nil {
-		a.deviceVideos = map[string]net.PacketConn{}
+		a.deviceVideos = map[string]mediaSink{}
 	}
 	if old := a.deviceVideos[callID]; old != nil {
 		_ = old.Close()
 	}
-	a.deviceVideos[callID] = conn
+	a.deviceVideos[callID] = sink
 	a.deviceTalksMu.Unlock()
 
-	dst, rerr := net.ResolveUDPAddr("udp", net.JoinHostPort(dstHost, strconv.Itoa(dstPort)))
-	if rerr != nil {
-		a.closeDeviceVideo(callID)
-		return buildResponse(500, "Server Internal Error", req, nil, "")
-	}
-	go a.streamLiveVideo(callID, p, conn, cfg, dst)
+	go a.streamLiveVideo(callID, p, sink, cfg)
 
 	hdrs := []model.Header{
 		model.NewHeader("Contact", "<sip:"+p.id.String()+"@"+p.realm+">"),
@@ -472,60 +490,88 @@ func (a *Acceptor) answerDeviceVideoInvite(p *platform, req model.Message) (mode
 	return buildResponse(200, "OK", req, hdrs, answer)
 }
 
+// closeDeviceVideoIf releases the dialog's sending transport only while sink
+// is still the current one. A re-INVITE replaces the entry; the old stream
+// ending afterwards must not close its successor.
+func (a *Acceptor) closeDeviceVideoIf(callID string, sink mediaSink) {
+	a.deviceTalksMu.Lock()
+	if a.deviceVideos[callID] != sink {
+		a.deviceTalksMu.Unlock()
+		return
+	}
+	delete(a.deviceVideos, callID)
+	a.deviceTalksMu.Unlock()
+	_ = sink.Close()
+}
+
 // streamLiveVideo sends the channel source to the platform until the port is
 // closed (BYE) or the source ends.
-func (a *Acceptor) streamLiveVideo(callID string, p *platform, conn net.PacketConn, cfg model.MediaConfig, dst *net.UDPAddr) {
+func (a *Acceptor) streamLiveVideo(callID string, p *platform, sink mediaSink, cfg model.MediaConfig) {
 	if a.mediaService == nil {
 		a.log.Debug("live video stream skipped: no media service wired",
 			"node_id", p.id.String(), "call_id", callID)
 		return
 	}
+	_, proto, _ := sink.Answer()
 	a.log.Debug("live video stream starting",
-		"node_id", p.id.String(), "call_id", callID, "dst", dst.String())
+		"node_id", p.id.String(), "call_id", callID, "transport", proto)
 	err := a.mediaService.PacketizeOutbound(context.Background(), cfg, func(pkt model.RTPPacket) error {
-		_, werr := conn.WriteTo(pkt.Bytes(), dst)
-		return werr
+		return sink.Write(pkt.Bytes())
 	})
 	if err != nil {
 		a.log.Debug("live video stream ended",
 			"node_id", p.id.String(), "call_id", callID, "error", err.Error())
 	}
-	a.closeDeviceVideo(callID)
+	a.closeDeviceVideoIf(callID, sink)
 }
 
 // closeDeviceVideo releases the sending port of a finished live dialog.
 func (a *Acceptor) closeDeviceVideo(callID string) {
 	a.deviceTalksMu.Lock()
-	conn := a.deviceVideos[callID]
+	sink := a.deviceVideos[callID]
 	delete(a.deviceVideos, callID)
 	a.deviceTalksMu.Unlock()
-	if conn != nil {
-		_ = conn.Close()
+	if sink != nil {
+		_ = sink.Close()
 	}
 }
 
-// parseVideoOffer reads the platform's endpoint out of a live video offer.
-func parseVideoOffer(body string) (string, int, error) {
-	host := ""
-	port := 0
+// liveVideoOffer is the endpoint and transport of a live video INVITE.
+type liveVideoOffer struct {
+	Host string
+	Port int
+	offerTransport
+}
+
+// parseVideoOffer reads the platform's endpoint and transport out of a live
+// video offer. The transport is optional: an m-line without a proto is UDP,
+// the pre-附录 D shape every platform speaks.
+func parseVideoOffer(body string) (liveVideoOffer, error) {
+	var out liveVideoOffer
 	for _, raw := range strings.Split(body, "\n") {
 		line := strings.TrimSpace(strings.TrimSuffix(raw, "\r"))
 		switch {
 		case strings.HasPrefix(line, "c=IN IP4 "):
-			host = strings.TrimSpace(strings.TrimPrefix(line, "c=IN IP4 "))
+			out.Host = strings.TrimSpace(strings.TrimPrefix(line, "c=IN IP4 "))
+		case strings.HasPrefix(line, "a=setup:"):
+			out.Setup = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(line, "a=setup:")))
 		case strings.HasPrefix(line, "m=video "):
 			fields := strings.Fields(strings.TrimPrefix(line, "m=video "))
 			if len(fields) > 0 {
 				if n, err := strconv.Atoi(fields[0]); err == nil {
-					port = n
+					out.Port = n
 				}
+			}
+			// m= fields after the port: transport, then formats.
+			if len(fields) > 1 {
+				out.Proto = fields[1]
 			}
 		}
 	}
-	if host == "" || port <= 0 || port > 65535 {
-		return "", 0, fmt.Errorf("video offer lacks c= or a usable m=video port")
+	if out.Host == "" || out.Port <= 0 || out.Port > 65535 {
+		return liveVideoOffer{}, fmt.Errorf("video offer lacks c= or a usable m=video port")
 	}
-	return host, port, nil
+	return out, nil
 }
 
 // toUser returns the user part of the To header, which names the channel a

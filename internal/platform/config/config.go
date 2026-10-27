@@ -36,6 +36,51 @@ type Config struct {
 	// the moment the process is up. A node that fails to start is logged
 	// and skipped — auto-start never aborts the process over one node.
 	AutoStart bool `mapstructure:"auto_start"`
+
+	Security SecurityConfig `mapstructure:"security"`
+}
+
+// SecurityConfig groups the optional hardening switches.
+type SecurityConfig struct {
+	GB35114 GB35114Config `mapstructure:"gb35114"`
+}
+
+// GB35114Config carries the process-wide GB 35114 identity. One process plays
+// one gateway, so the SM2 key pair belongs to the process rather than to each
+// simulated node; per-node keys would need schema and API changes the
+// simulator does not need yet.
+type GB35114Config struct {
+	Enabled bool `mapstructure:"enabled"`
+	// NoteIntegrity turns the SM3-integrity Note on the WWW-Authenticate
+	// header on. Only meaningful when Enabled is true.
+	NoteIntegrity     bool   `mapstructure:"note_integrity"`
+	SM2PrivateKeyFile string `mapstructure:"sm2_private_key_file"`
+	SM2PublicKeyFile  string `mapstructure:"sm2_public_key_file"`
+}
+
+// Identity reads the raw SM2 key files when GB 35114 is enabled. A disabled
+// block returns (nil, nil, nil) so callers can treat "no identity" and "off"
+// the same way. Enabling without both paths is a configuration error: booting
+// with half an identity would only fail later, once per registration.
+//
+// Parsing is left to the caller: the config package must not depend on a
+// protocol adapter.
+func (g GB35114Config) Identity() ([]byte, []byte, error) {
+	if !g.Enabled {
+		return nil, nil, nil
+	}
+	if strings.TrimSpace(g.SM2PrivateKeyFile) == "" || strings.TrimSpace(g.SM2PublicKeyFile) == "" {
+		return nil, nil, fmt.Errorf("security.gb35114: enabled but sm2_private_key_file/sm2_public_key_file is empty")
+	}
+	priv, err := os.ReadFile(g.SM2PrivateKeyFile)
+	if err != nil {
+		return nil, nil, fmt.Errorf("security.gb35114: read private key: %w", err)
+	}
+	pub, err := os.ReadFile(g.SM2PublicKeyFile)
+	if err != nil {
+		return nil, nil, fmt.Errorf("security.gb35114: read public key: %w", err)
+	}
+	return priv, pub, nil
 }
 
 // NodeConfig is one entry of the optional `nodes:` list. Every field except

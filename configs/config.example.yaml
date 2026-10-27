@@ -46,6 +46,21 @@ tracing:
   otlp_endpoint: ""       # host:port for OTLP gRPC; empty = stdout only
   service_name: ""        # defaults to "gb28181-simulator"
 
+# GB 35114 安全扩展（Change 40）。进程级身份：本进程内所有节点共享
+# 同一对 SM2 密钥，节点级配置不再携带凭据。启用后：
+#   * 挑战使用 algorithm=SM3；note_integrity 为 true 时 Note 字段受
+#     SM3 完整性保护（SM3(nonce + realm + timestamp)）。
+#   * REGISTER 的 Authorization 追加 security-info 签名，平台 200 OK 的
+#     SecurityInfo 也会被验证——验证失败则注册失败。
+# 启用时必须同时提供私钥与公钥文件，任一缺失或无法解析都会让启动失败。
+# 默认关闭：保持与 Change 12 之前完全一致的 MD5 Digest 行为。
+# security:
+#   gb35114:
+#     enabled: false
+#     note_integrity: false
+#     sm2_private_key_file: ""   # PEM/DER 原始 32 字节私钥标量均可
+#     sm2_public_key_file: ""    # 65 字节未压缩公钥或 PEM
+
 # ── 已废弃：节点库存由数据库持有 ────────────────────────────────
 # 本段（连同每个节点下的 `registration:` / `platform:` 子块）在升级后
 # 不再是节点定义的真源。行为如下：

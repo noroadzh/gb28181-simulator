@@ -110,3 +110,41 @@ func TestPlaybackSDPBytes_Mode(t *testing.T) {
 		t.Errorf("answer still carries recvonly:\n%q", body)
 	}
 }
+
+// GB/T 28181 附录 D: the transport and setup attribute survive a round trip,
+// and an m-line without a proto stays UDP.
+func TestPlaybackSDP_TransportRoundTrip(t *testing.T) {
+	start := time.Date(2026, 10, 1, 0, 0, 0, 0, time.Local)
+	body, err := PlaybackSDPBytes(PlaybackSDP{
+		DeviceID: "ch-1", SN: "9", ConnIP: "127.0.0.1", RTPPort: 41000,
+		Start: start, End: start.Add(time.Minute),
+		Proto: "TCP/RTP/AVP", Setup: "passive",
+	})
+	if err != nil {
+		t.Fatalf("PlaybackSDPBytes: %v", err)
+	}
+	for _, want := range []string{"m=video 41000 TCP/RTP/AVP 96", "a=setup:passive"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("answer is missing %q:\n%s", want, body)
+		}
+	}
+
+	parsed, err := ParsePlaybackSDP(body)
+	if err != nil {
+		t.Fatalf("ParsePlaybackSDP: %v", err)
+	}
+	if parsed.Proto != "TCP/RTP/AVP" || parsed.Setup != "passive" {
+		t.Errorf("parsed proto=%q setup=%q", parsed.Proto, parsed.Setup)
+	}
+
+	udp, err := PlaybackSDPBytes(PlaybackSDP{
+		DeviceID: "ch-1", SN: "9", ConnIP: "127.0.0.1", RTPPort: 41000,
+		Start: start, End: start.Add(time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("PlaybackSDPBytes: %v", err)
+	}
+	if !strings.Contains(udp, "m=video 41000 RTP/AVP 96") || strings.Contains(udp, "a=setup:") {
+		t.Errorf("default transport is not plain UDP:\n%s", udp)
+	}
+}

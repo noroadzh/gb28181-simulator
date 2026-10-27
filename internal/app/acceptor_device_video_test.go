@@ -2,7 +2,9 @@ package app
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
+	"io"
 	"net"
 	"strings"
 	"testing"
@@ -57,16 +59,19 @@ func syntheticMediaService(t *testing.T) *MediaService {
 // Task 1.1: the offer parser reads the platform's endpoint and refuses
 // anything that does not name one.
 func TestParseVideoOffer(t *testing.T) {
-	host, port, err := parseVideoOffer(videoOffer(t, 40002))
-	if err != nil || host != "127.0.0.1" || port != 40002 {
-		t.Fatalf("got (%q,%d,%v), want (127.0.0.1,40002,nil)", host, port, err)
+	offer, err := parseVideoOffer(videoOffer(t, 40002))
+	if err != nil || offer.Host != "127.0.0.1" || offer.Port != 40002 {
+		t.Fatalf("got (%q,%d,%v), want (127.0.0.1,40002,nil)", offer.Host, offer.Port, err)
+	}
+	if offer.Proto != "RTP/AVP" {
+		t.Errorf("proto = %q, want the UDP default", offer.Proto)
 	}
 	for name, body := range map[string]string{
 		"no c=":      "v=0\r\nm=video 40002 RTP/AVP 96\r\n",
 		"no m=video": "v=0\r\nc=IN IP4 127.0.0.1\r\nm=audio 40002 RTP/AVP 0\r\n",
 		"port zero":  "v=0\r\nc=IN IP4 127.0.0.1\r\nm=video 0 RTP/AVP 96\r\n",
 	} {
-		if _, _, err := parseVideoOffer(body); err == nil {
+		if _, err := parseVideoOffer(body); err == nil {
 			t.Errorf("%s: accepted without an endpoint", name)
 		}
 	}
@@ -144,4 +149,84 @@ func TestDevice_VideoInviteWithoutSourceIs404(t *testing.T) {
 	if resp.StatusCode() != 404 {
 		t.Fatalf("status = %d, want 404", resp.StatusCode())
 	}
+}
+
+// Task 3.2: a TCP/RTP/AVP offer is served over TCP (附录 D). The device
+// connects to the listening platform, the answer mirrors the transport, and
+// every RTP packet is length-prefixed.
+func TestDevice_AnswersTCPVideoInvite(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+	port := ln.Addr().(*net.TCPAddr).Port
+
+	deviceID := mustDeviceNodeID(t, "34020000001310000011")
+	mediaCfg := model.MediaConfig{Kind: model.SourceKindSynthetic, FPS: 25}
+	h := newDeviceHarness(t, deviceID, nil, &mediaCfg)
+	h.acceptor.WithMediaService(syntheticMediaService(t))
+
+	body := fmt.Sprintf("v=0\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n"+
+		"m=video %d TCP/RTP/AVP 96\r\na=recvonly\r\na=setup:passive\r\na=rtpmap:96 PS/90000\r\n", port)
+	resp := h.tr.deliver(t, videoInvite(t, deviceID, "tcp-video-1", body))
+	if resp.StatusCode() != 200 {
+		t.Fatalf("status = %d, want 200 (body %q)", resp.StatusCode(), resp.Body())
+	}
+	for _, want := range []string{"TCP/RTP/AVP", "a=setup:active", "a=sendonly"} {
+		if !strings.Contains(resp.Body(), want) {
+			t.Errorf("answer is missing %q:\n%s", want, resp.Body())
+		}
+	}
+
+	_ = ln.(*net.TCPListener).SetDeadline(time.Now().Add(3 * time.Second))
+	conn, err := ln.Accept()
+	if err != nil {
+		t.Fatalf("the device never connected: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+
+	var prefix [2]byte
+	if _, err := io.ReadFull(conn, prefix[:]); err != nil {
+		t.Fatalf("read length prefix: %v", err)
+	}
+	n := int(binary.BigEndian.Uint16(prefix[:]))
+	if n < 12 || n > 65535 {
+		t.Fatalf("length prefix = %d, not a plausible RTP packet", n)
+	}
+	buf := make([]byte, n)
+	if _, err := io.ReadFull(conn, buf); err != nil {
+		t.Fatalf("read RTP packet: %v", err)
+	}
+	if buf[0] != 0x80 {
+		t.Fatalf("not an RTP v2 packet: % X", buf[:min(12, n)])
+	}
+	if !bytes.HasPrefix(buf[12:], []byte{0x00, 0x00, 0x01, 0xBA}) {
+		t.Errorf("payload is not PS: % X", buf[12:min(20, n)])
+	}
+
+	// BYE releases the TCP dial as well.
+	bye, err := model.NewRequest("BYE", "sip:"+videoChannelID+"@3402000000", []model.Header{
+		model.NewHeader("From", "<sip:34020000002000000001@3402000000>;tag=platform"),
+		model.NewHeader("To", "<sip:"+videoChannelID+"@3402000000>"),
+		model.NewHeader("Call-ID", "tcp-video-1"),
+		model.NewHeader("CSeq", "2 BYE"),
+		model.NewHeader("Via", "SIP/2.0/UDP 127.0.0.1:15060;branch=z9hG4bK-bye-tcp"),
+	}, "")
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	h.tr.inbound <- bye
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		h.acceptor.deviceTalksMu.Lock()
+		_, still := h.acceptor.deviceVideos["tcp-video-1"]
+		h.acceptor.deviceTalksMu.Unlock()
+		if !still {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("the BYE left the TCP video sink open")
 }

@@ -229,7 +229,6 @@ func TestAcceptor_DeviceReturns405ForNonMessage(t *testing.T) {
 		body   string
 	}{
 		{"OPTIONS", ""},
-		{"BYE", ""},
 		{"SUBSCRIBE", ""},
 		{"INFO", ""},
 	}
@@ -257,8 +256,8 @@ func TestAcceptor_DeviceReturns405ForNonMessage(t *testing.T) {
 			if resp.StatusCode() != 405 {
 				t.Errorf("status = %d, want 405 for %s", resp.StatusCode(), tc.method)
 			}
-			if got := responseHeader(t, resp, "Allow"); got != "MESSAGE" {
-				t.Errorf("Allow = %q, want MESSAGE", got)
+			if got := responseHeader(t, resp, "Allow"); got != deviceAllowHeader().Value() {
+				t.Errorf("Allow = %q, want %q", got, deviceAllowHeader().Value())
 			}
 		})
 	}

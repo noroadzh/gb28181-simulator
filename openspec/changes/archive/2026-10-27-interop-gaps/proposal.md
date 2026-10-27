@@ -18,6 +18,7 @@
 ### Modified Capabilities
 
 - `device-node`：新增「device 受理实时视频 INVITE」。
+- `gb35114-security`：SM2 身份改为进程级（`security.gb35114`），acceptor 与 registrar 双向接线（任务 3.1）。
 
 对应路线图编号：#40 `interop-gaps`（首项：设备视频 INVITE；GB35114 接线、TCP 媒体、CANCEL 为同 change 的后续任务）。
 
@@ -29,6 +30,6 @@
 
 ## Non-goals
 
-- 不在本项内做 GB35114、TCP 媒体、CANCEL（同 change 后续任务）。
+- 不在本项内做 TCP 媒体与 CANCEL（同 change 后续任务）；GB35114 接线见任务 3.1。
 - 不做按需转码：设备发送的是通道媒体源的原编码（PS/96）。
 - 不支持视频 INVITE 的时间窗（那是历史回放，已有独立路径）。

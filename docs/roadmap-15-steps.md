@@ -44,6 +44,7 @@
 | 37 | `playback-flv-stream` | 回放 FLV 历史流 | ✅ 已归档 | 回放 SDP（s=Playback/u=/t=）、设备按时间窗供流、`/playback/flv?sn=` 出流；FLV 由本地源按会话窗口产生（2026-10-26） |
 | 38 | `talk-audio-bridge` | 对讲音频桥 | ✅ 已归档 | 设备受理音频 INVITE 并用自己的 RTP 端口应答；平台解析 answer；WebSocket ↔ RTP 双向 PCMU（2026-10-26） |
 | 39 | `webui-talk-and-playback` | 前端对讲音频与回放播放 | ✅ 已归档 | 对讲：麦克风 → μ-law → /talk/audio；回放：play(sn,start,end) → /playback/flv?sn=；修掉 RecordView 依赖 playback_url 的缺口（2026-10-26） |
+| 40 | `interop-gaps` | 真实平台互通缺口 | ✅ 已归档 | device 受理实时视频 INVITE（1.1–1.4）；GB35114 进程级 SM2 身份与双向验签；附录 D TCP 媒体（active/passive）；CANCEL / re-INVITE / 487；device 正常应答 BYE/CANCEL（2026-10-27） |
 
 ## 补充归档索引
 
@@ -102,6 +103,6 @@
 - 原始路线图中 #3 为 `core-manscdp-and-ps`，后被 `enterprise-skeleton` 占位，本文件保留原始编号顺序。
 - 部分 change 内部拆分为多个子 change 归档；它们与无编号跟进统一登记在「补充归档索引」。
 - #10 原名 `dynamic-catalog-and-query`，实际由 `dynamic-sim-features` change 实现（动态目录/报警、录像与回放、移动位置、运行时触发 API）。
-- 已完成 39 个编号（#1–#39），对应 55 个归档 change 目录（2026-10-26 同步）。
-- 当前无待实施条目：全部登记阶段已归档。下一阶段候选待规划，新增时从 #40 起。
+- 已完成 40 个编号（#1–#40），对应 56 个归档 change 目录（2026-10-27 同步）。
+- 当前无待实施条目：全部登记阶段已归档。下一阶段候选待规划，新增时从 #41 起。
 - 路线图同步契约见 capability `docs-roadmap-sync`；每次归档必须在同提交更新本文件。

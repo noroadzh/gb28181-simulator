@@ -18,7 +18,7 @@ import (
 // allowedMethods is the Allow header value this platform emits. RFC 3261 §8.2.2
 // requires a 405 response to carry one so the client knows what to retry.
 var allowedMethods = []string{
-	"REGISTER", "MESSAGE", "INVITE", "ACK", "BYE", "OPTIONS", "SUBSCRIBE", "INFO",
+	"REGISTER", "MESSAGE", "INVITE", "ACK", "BYE", "CANCEL", "OPTIONS", "SUBSCRIBE", "INFO",
 }
 
 // httpDate renders a Date header the way SIP expects it: GMT, in the
@@ -37,7 +37,7 @@ func allowHeader() model.Header {
 // deviceAllowHeader returns the Allow header for a device node, which only
 // accepts MESSAGE.
 func deviceAllowHeader() model.Header {
-	return model.NewHeader("Allow", "MESSAGE")
+	return model.NewHeader("Allow", "MESSAGE, INVITE, ACK, BYE, CANCEL")
 }
 
 // buildResponse echoes the transaction headers a response must carry and
@@ -118,4 +118,17 @@ func requestUser(req model.Message) string {
 		}
 	}
 	return ""
+}
+
+// deviceAccepts reports whether a device node answers a method itself. A
+// device is a UAS for the catalog query (MESSAGE) and for the media dialogs
+// a platform opens: INVITE, ACK, BYE and CANCEL. Everything else is refused
+// with 405 so a probing peer learns what the node actually takes.
+func deviceAccepts(method string) bool {
+	switch method {
+	case "MESSAGE", "INVITE", "ACK", "BYE", "CANCEL":
+		return true
+	default:
+		return false
+	}
 }
