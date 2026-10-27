@@ -42,7 +42,9 @@ func (s *Server) handlePlaybackFLV(c echo.Context) error {
 
 	ctx, cancel := context.WithTimeout(c.Request().Context(), window)
 	defer cancel()
-	ch, err := s.streaming.streaming.Subscribe(ctx, id, channelID)
+	// A recording preview is the local source by definition: preferring a
+	// live pull here would show the live picture under a playback URL.
+	ch, err := s.streaming.streaming.SubscribeSource(ctx, id, channelID, "local")
 	if err != nil {
 		return c.JSON(http.StatusNotFound, errorBody{Error: err.Error()})
 	}

@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 
@@ -16,6 +17,10 @@ import (
 // StreamingService is the HTTP-layer interface to the streaming gateway.
 type StreamingService interface {
 	Subscribe(ctx context.Context, nodeID model.NodeID, channelID string) (<-chan []byte, error)
+	// SubscribeSource selects the data source explicitly: "" = live-first,
+	// "live" = an active platform pull only, "local" = the node's local
+	// media source only.
+	SubscribeSource(ctx context.Context, nodeID model.NodeID, channelID, source string) (<-chan []byte, error)
 	Subscribers(nodeID model.NodeID, channelID string) int
 	Close() error
 }
@@ -54,8 +59,15 @@ func (s *StreamingServer) HandleFLV(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
+	source := strings.ToLower(strings.TrimSpace(c.QueryParam("source")))
+	switch source {
+	case "", "auto", "live", "local":
+	default:
+		return echo.NewHTTPError(http.StatusBadRequest, "source must be live or local")
+	}
+
 	ctx := c.Request().Context()
-	ch, err := s.streaming.Subscribe(ctx, nodeID, channelID)
+	ch, err := s.streaming.SubscribeSource(ctx, nodeID, channelID, source)
 	if err != nil {
 		// All Subscribe errors translate to 404 (unsupported, not found, no source).
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())

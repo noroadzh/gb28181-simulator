@@ -72,6 +72,14 @@ type NodeService struct {
 	// talkIdle reclaims a talk session nobody closed.
 	talkIdle time.Duration
 
+	// live holds the platform's live pulls, keyed by node|channel. One
+	// pull per channel: a second start replaces the first.
+	liveMu     sync.Mutex
+	live       map[liveKey]*liveSession
+	liveDeizer RTPDeizerFactory
+	liveIdle   time.Duration // default liveNoMediaTimeout
+	liveWatch  time.Duration // default liveWatchInterval
+
 	// playbackStreams holds the platform side of historical playback, keyed
 	// by sn: which channel, which window, and the dialog it opened.
 	streamsMu       sync.Mutex
@@ -130,6 +138,7 @@ func NewNodeService(
 		playbackIdle:    time.Minute,
 		talkIdle:        time.Minute,
 		playbackStreams: make(map[string]*playbackStream),
+		live:            make(map[liveKey]*liveSession),
 	}, nil
 }
 
@@ -299,6 +308,7 @@ func (s *NodeService) WithAcceptor(a *Acceptor) (*NodeService, error) {
 	s.acceptor = a
 	// A device that hangs up ends its talk session immediately.
 	a.WithTalkHangup(s.onPeerTalkBye)
+	a.WithLiveHangup(s.onPeerLiveBye)
 	return s, nil
 }
 
@@ -663,6 +673,7 @@ func (s *NodeService) fault(ctx context.Context, id model.NodeID, cause error) e
 // to end both halves. A goodbye that does not get through does not keep the
 // node running — it is logged, and the stop goes on.
 func (s *NodeService) Stop(ctx context.Context, id model.NodeID) error {
+	s.stopLiveOfNode(id)
 	s.unregisterUpstream(ctx, id)
 	s.stopKeeping(id)
 	if err := s.lifecycle.Stop(ctx, id); err != nil {

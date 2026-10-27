@@ -29,6 +29,14 @@ func (e *ErrStreamingUnsupported) Error() string {
 // PS frames, parses them, and emits FLV tags.
 //
 // A nil MediaSourceSupplier causes Subscribe to return ErrStreamingUnsupported.
+// LiveSourceProvider reports whether a platform node has an active live pull
+// for a channel and, if so, hands out its PS frames. The third return value
+// is false when there is no session, which is how Subscribe falls back to the
+// local media source.
+type LiveSourceProvider interface {
+	LivePS(ctx context.Context, nodeID model.NodeID, channelID string) (<-chan model.PSFrame, func(), bool)
+}
+
 type MediaSourceSupplier interface {
 	// SubscribePS starts an outbound PS pipeline for the given node+channel
 	// and returns a channel of model.PSFrame. The caller (gateway) is
@@ -53,6 +61,7 @@ type Gateway struct {
 	registry NodeRegistry
 	sessions *activeSessions
 	log      *slog.Logger
+	live     LiveSourceProvider
 }
 
 // NodeRegistry is the gateway's read-only view of the node catalogue.
@@ -65,6 +74,13 @@ type NodeRegistry interface {
 
 // NewGateway builds a Gateway. All fields are required except log (defaults
 // to slog.Default()).
+// WithLiveSource attaches the platform's live-pull sessions. Without one the
+// gateway serves only local media sources.
+func (g *Gateway) WithLiveSource(p LiveSourceProvider) *Gateway {
+	g.live = p
+	return g
+}
+
 func NewGateway(media MediaSourceSupplier, registry NodeRegistry, log *slog.Logger) *Gateway {
 	if log == nil {
 		log = slog.Default()
@@ -90,7 +106,57 @@ func NewGateway(media MediaSourceSupplier, registry NodeRegistry, log *slog.Logg
 //     media source for the channel, or the channelID is not in the device's
 //     channel list.
 //   - other errors when the underlying source cannot be opened.
+//
+// Subscribe streams the channel using the default source order: an active
+// live pull if there is one, otherwise the node's local media source.
 func (g *Gateway) Subscribe(ctx context.Context, nodeID model.NodeID, channelID string) (<-chan []byte, error) {
+	return g.SubscribeSource(ctx, nodeID, channelID, "")
+}
+
+// SubscribeSource is Subscribe with an explicit source: "" or "auto" picks
+// live-first, "live" insists on an active pull (no fallback), and "local"
+// insists on the local media source.
+func (g *Gateway) SubscribeSource(ctx context.Context, nodeID model.NodeID, channelID, source string) (<-chan []byte, error) {
+	switch source {
+	case "", "auto":
+		if ch, ok := g.subscribeLive(ctx, nodeID, channelID); ok {
+			return ch, nil
+		}
+		return g.subscribeLocal(ctx, nodeID, channelID)
+	case "live":
+		if ch, ok := g.subscribeLive(ctx, nodeID, channelID); ok {
+			return ch, nil
+		}
+		return nil, &ErrStreamingUnsupported{NodeID: nodeID, ChannelID: channelID, Reason: "no live session"}
+	case "local":
+		return g.subscribeLocal(ctx, nodeID, channelID)
+	default:
+		return nil, fmt.Errorf("streaming: unknown source %q", source)
+	}
+}
+
+// subscribeLive starts an FLV pipeline over an active live pull. The pull
+// itself is not ours to stop: unsubscribing only detaches this viewer.
+func (g *Gateway) subscribeLive(ctx context.Context, nodeID model.NodeID, channelID string) (<-chan []byte, bool) {
+	if g.live == nil {
+		return nil, false
+	}
+	psCh, cleanup, ok := g.live.LivePS(ctx, nodeID, channelID)
+	if !ok {
+		return nil, false
+	}
+	out := make(chan []byte, 16)
+	key := sessionKey{nodeID: nodeID, channelID: channelID}
+	g.mu.Lock()
+	g.sessions.Add(key, out, nil, func() {})
+	g.mu.Unlock()
+	go g.runPipeline(ctx, key, psCh, out, cleanup)
+	g.log.Info("flv: live session opened",
+		"node_id", nodeID.String(), "channel_id", channelID)
+	return out, true
+}
+
+func (g *Gateway) subscribeLocal(ctx context.Context, nodeID model.NodeID, channelID string) (<-chan []byte, error) {
 	if g.media == nil {
 		return nil, &ErrStreamingUnsupported{NodeID: nodeID, ChannelID: channelID, Reason: "no media service"}
 	}
@@ -122,7 +188,7 @@ func (g *Gateway) Subscribe(ctx context.Context, nodeID model.NodeID, channelID 
 	g.mu.Unlock()
 
 	// Start the pipeline.
-	go g.runPipeline(ctx, key, psCh, out)
+	go g.runPipeline(ctx, key, psCh, out, nil)
 
 	g.log.Info("flv: new stream session started",
 		"node_id", nodeID.String(), "channel_id", channelID)
@@ -132,16 +198,23 @@ func (g *Gateway) Subscribe(ctx context.Context, nodeID model.NodeID, channelID 
 // runPipeline consumes PS frames, parses them into NALUs, and emits FLV
 // tags to the subscriber channel. The pipeline is shared across multiple
 // HTTP response channels: each subscribes by calling Subscribe.
+// runPipeline consumes PS frames and emits FLV tags. release, when non-nil,
+// runs before the subscriber channel is closed: whoever saw the stream end
+// must also see the source subscription gone.
 func (g *Gateway) runPipeline(
 	ctx context.Context,
 	key sessionKey,
 	psCh <-chan model.PSFrame,
 	out chan<- []byte,
+	release func(),
 ) {
 	framesParsed := 0
 	framesSkipped := 0
 	tagCount := 0
 	defer func() {
+		if release != nil {
+			release()
+		}
 		close(out)
 		g.log.Info("flv: pipeline exiting",
 			"node_id", key.nodeID.String(), "channel_id", key.channelID,

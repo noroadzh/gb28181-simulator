@@ -140,6 +140,39 @@ func (p RTPPacket) Bytes() []byte {
 	return b
 }
 
+// ParseRTPPacket decodes one RTP datagram (RFC 3550). Only what this
+// simulator consumes is decoded: version, CSRC count, marker, payload type,
+// sequence, timestamp, SSRC and the payload. Padding and header extensions
+// are rejected rather than silently mis-parsed — GB/T 28181 PS streams do not
+// use them, and a sender that does is a bug worth seeing.
+func ParseRTPPacket(b []byte) (RTPPacket, error) {
+	if len(b) < 12 {
+		return RTPPacket{}, fmt.Errorf("model: RTP datagram of %d bytes is shorter than the header", len(b))
+	}
+	if b[0]>>6 != 2 {
+		return RTPPacket{}, fmt.Errorf("model: RTP version %d, want 2", b[0]>>6)
+	}
+	if b[0]&0x20 != 0 {
+		return RTPPacket{}, fmt.Errorf("model: RTP padding is not supported")
+	}
+	if b[0]&0x10 != 0 {
+		return RTPPacket{}, fmt.Errorf("model: RTP header extensions are not supported")
+	}
+	cc := int(b[0] & 0x0F)
+	offset := 12 + 4*cc
+	if len(b) <= offset {
+		return RTPPacket{}, fmt.Errorf("model: RTP datagram carries no payload")
+	}
+	return RTPPacket{
+		Marker:      b[1]&0x80 != 0,
+		PayloadType: b[1] & 0x7F,
+		Sequence:    binary.BigEndian.Uint16(b[2:4]),
+		Timestamp:   binary.BigEndian.Uint32(b[4:8]),
+		SSRC:        binary.BigEndian.Uint32(b[8:12]),
+		Payload:     b[offset:],
+	}, nil
+}
+
 // MediaSourceKind names one of the four built-in sources. The value doubles
 // as a configuration discriminator.
 type MediaSourceKind string

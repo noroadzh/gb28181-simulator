@@ -27,6 +27,14 @@ func (f *fakeStreaming) Subscribe(_ context.Context, _ model.NodeID, _ string) (
 	return f.ch, nil
 }
 
+func (f *fakeStreaming) SubscribeSource(_ context.Context, _ model.NodeID, _, source string) (<-chan []byte, error) {
+	if source != "local" {
+		return nil, fmt.Errorf("playback preview asked for %q", source)
+	}
+	f.calls++
+	return f.ch, nil
+}
+
 func (f *fakeStreaming) Subscribers(model.NodeID, string) int { return 0 }
 func (f *fakeStreaming) Close() error                         { return nil }
 

@@ -86,6 +86,14 @@ type ChannelView interface {
 	// PlaybackWindow returns the window of an active playback session.
 	PlaybackWindow(sn string) (start, end time.Time, ok bool)
 
+	// StartLive pulls the channel's real-time stream from the downstream
+	// device. transport is "udp" or "tcp" (附录 D).
+	StartLive(ctx context.Context, id model.NodeID, channelID, transport string) (port.LiveSessionInfo, error)
+
+	// StopLive ends the pull. Stopping a channel without a session is a
+	// no-op, so callers can retry safely.
+	StopLive(ctx context.Context, id model.NodeID, channelID string) error
+
 	// Snapshot triggers a SnapShot NOTIFY; returns the snapshot bytes
 	// (PNG/JPEG), the media type, and an error. The first return is empty
 	// when the platform does not have a snapshot subsystem and the request

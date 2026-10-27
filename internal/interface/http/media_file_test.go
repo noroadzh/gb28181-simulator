@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/your-org/gb28181-simulator/internal/domain/port"
 	httpapi "github.com/your-org/gb28181-simulator/internal/interface/http"
 	platformconfig "github.com/your-org/gb28181-simulator/internal/platform/config"
 	"github.com/your-org/gb28181-simulator/internal/platform/observability/logging"
@@ -356,4 +357,12 @@ func (f *fakeChannelView) StartPlaybackStream(_ context.Context, _ model.NodeID,
 
 func (f *fakeChannelView) PlaybackWindow(_ string) (time.Time, time.Time, bool) {
 	return time.Time{}, time.Time{}, false
+}
+
+func (f *fakeChannelView) StartLive(_ context.Context, _ model.NodeID, _, _ string) (port.LiveSessionInfo, error) {
+	return port.LiveSessionInfo{}, fmt.Errorf("live pull unsupported")
+}
+
+func (f *fakeChannelView) StopLive(_ context.Context, _ model.NodeID, _ string) error {
+	return nil
 }

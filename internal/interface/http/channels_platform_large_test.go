@@ -684,3 +684,11 @@ func (a autoIDChannelView) StartPlaybackStream(_ context.Context, _ model.NodeID
 func (a autoIDChannelView) PlaybackWindow(_ string) (time.Time, time.Time, bool) {
 	return time.Time{}, time.Time{}, false
 }
+
+func (a autoIDChannelView) StartLive(_ context.Context, _ model.NodeID, _, _ string) (port.LiveSessionInfo, error) {
+	return port.LiveSessionInfo{}, fmt.Errorf("live pull unsupported")
+}
+
+func (a autoIDChannelView) StopLive(_ context.Context, _ model.NodeID, _ string) error {
+	return nil
+}

@@ -113,6 +113,9 @@ func (a *Acceptor) run(ctx context.Context, p *platform) {
 				if a.talkHangup != nil {
 					a.talkHangup(p.id, callID)
 				}
+				if a.liveHangup != nil {
+					a.liveHangup(p.id, callID)
+				}
 			}
 		}
 		// Fault gate (Change 13, design D6): consult the node's armed

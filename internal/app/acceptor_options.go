@@ -56,6 +56,9 @@ type Acceptor struct {
 	// talkHangup is told about every BYE the node receives, so a talk
 	// dialog the device ends is reclaimed without waiting for the browser.
 	talkHangup func(model.NodeID, string)
+	// liveHangup is told about every BYE too, so a platform's live pull
+	// ends when the device hangs up.
+	liveHangup func(model.NodeID, string)
 
 	// deviceTalks holds the audio port each talk dialog opened on this node,
 	// keyed by Call-ID. A device answers a talk INVITE with its own RTP port;
@@ -260,6 +263,14 @@ func (a *Acceptor) WithGB35114(priv, pub []byte) *Acceptor {
 // callback decides whether the Call-ID belongs to one of its sessions.
 func (a *Acceptor) WithTalkHangup(fn func(model.NodeID, string)) *Acceptor {
 	a.talkHangup = fn
+	return a
+}
+
+// WithLiveHangup registers the callback that ends a live pull when the device
+// sends BYE. It is separate from the talk callback so one cannot silently
+// stand in for the other.
+func (a *Acceptor) WithLiveHangup(fn func(model.NodeID, string)) *Acceptor {
+	a.liveHangup = fn
 	return a
 }
 

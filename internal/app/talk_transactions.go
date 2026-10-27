@@ -40,17 +40,41 @@ func (a *Acceptor) InvitePlayback(ctx context.Context, id model.NodeID, target, 
 	return callID, nil
 }
 
+// InviteVideo opens a live-view dialog and returns the device's final answer
+// so the caller can read where the stream comes from (c=, m=, y=). A device
+// that understands the INVITE and says no is reported as a refusal rather
+// than as "unsupported": the capability exists, the answer is the problem.
+//
+// target is the device the request goes to; channelID is what the Request-URI
+// and To name. They differ because a live INVITE addresses a channel, and the
+// device answers 404 when the To user is not one of its own channels.
+func (a *Acceptor) InviteVideo(ctx context.Context, id model.NodeID, target, addr, channelID, body string) (string, model.Message, error) {
+	callID, resp, err := a.inviteUser(ctx, id, target, channelID, addr, body,
+		port.ErrLiveUnsupported, port.ErrLiveRefused)
+	if err != nil {
+		return "", model.Message{}, err
+	}
+	return callID, resp, nil
+}
+
 // invite is the shared INVITE transaction: build, send, wait for the 2xx, and
 // report a refusal with the capability's own sentinel.
 func (a *Acceptor) invite(ctx context.Context, id model.NodeID, target, addr, body string, unsupported error) (string, model.Message, error) {
+	return a.inviteUser(ctx, id, target, target, addr, body, unsupported, unsupported)
+}
+
+// inviteUser is invite with distinct sentinels for "cannot do this here" and
+// "the device said no", and with the SIP user named in the Request-URI and To
+// separate from the device the request is sent to.
+func (a *Acceptor) inviteUser(ctx context.Context, id model.NodeID, target, uriUser, addr, body string, unsupported, refused error) (string, model.Message, error) {
 	p, ok := a.platformByID(id)
 	if !ok || p.tr == nil {
 		return "", model.Message{}, fmt.Errorf("%w: node %s is not serving", port.ErrControlTargetUnreachable, id)
 	}
 	callID := randomCallID()
-	req, err := model.NewRequest("INVITE", fmt.Sprintf("sip:%s@%s", target, addr), []model.Header{
+	req, err := model.NewRequest("INVITE", fmt.Sprintf("sip:%s@%s", uriUser, addr), []model.Header{
 		model.NewHeader("From", fmt.Sprintf("<sip:%s@%s>;tag=%s", id.String(), p.realm, randomTag())),
-		model.NewHeader("To", fmt.Sprintf("<sip:%s@%s>", target, addr)),
+		model.NewHeader("To", fmt.Sprintf("<sip:%s@%s>", uriUser, addr)),
 		model.NewHeader("Call-ID", callID),
 		model.NewHeader("CSeq", "1 INVITE"),
 		model.NewHeader("Contact", fmt.Sprintf("<sip:%s@%s>", id.String(), p.tr.LocalAddr())),
@@ -81,7 +105,7 @@ func (a *Acceptor) invite(ctx context.Context, id model.NodeID, target, addr, bo
 	case resp := <-answer:
 		if resp.StatusCode() < 200 || resp.StatusCode() >= 300 {
 			return "", model.Message{}, fmt.Errorf("%w: device answered %d %s",
-				unsupported, resp.StatusCode(), resp.StatusText())
+				refused, resp.StatusCode(), resp.StatusText())
 		}
 		return callID, resp, nil
 	case <-ctx.Done():
