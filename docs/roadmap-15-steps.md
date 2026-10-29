@@ -47,6 +47,7 @@
 | 40 | `interop-gaps` | 真实平台互通缺口 | ✅ 已归档 | device 受理实时视频 INVITE（1.1–1.4）；GB35114 进程级 SM2 身份与双向验签；附录 D TCP 媒体（active/passive）；CANCEL / re-INVITE / 487；device 正常应答 BYE/CANCEL（2026-10-27） |
 | 41 | `platform-live-pull` | 平台侧实时拉流 | ✅ 已归档 | 平台向在线下级发视频 INVITE，UDP/附录 D TCP 收流 → PS 总线；`/v1/flv` 实时优先 + `?source=live|local`；live start/stop 端点；BYE/超时/节点停止回收（2026-10-27） |
 | 42 | `platform-recording` | 平台侧录像 | ✅ 已归档 | 拉流即分段录制（文件系统索引、重启可查）；HTTP 录像列表与 FLV 回放；平台对上级的 RecordInfo 与回放 INVITE 从录像库作答（2026-10-27） |
+| 43 | `cascade-media-relay` | 级联媒体中继 | ✅ 已归档 | 平台作为 B2BUA：上级拉下级通道时双对话桥接 PS/RTP（两侧传输独立）；BYE 成对传播；中继流可预览/录像（2026-10-29） |
 
 ## 补充归档索引
 
@@ -105,6 +106,6 @@
 - 原始路线图中 #3 为 `core-manscdp-and-ps`，后被 `enterprise-skeleton` 占位，本文件保留原始编号顺序。
 - 部分 change 内部拆分为多个子 change 归档；它们与无编号跟进统一登记在「补充归档索引」。
 - #10 原名 `dynamic-catalog-and-query`，实际由 `dynamic-sim-features` change 实现（动态目录/报警、录像与回放、移动位置、运行时触发 API）。
-- 已完成 42 个编号（#1–#42），对应 58 个归档 change 目录（2026-10-27 同步）。
-- 当前无待实施条目：全部登记阶段已归档。下一阶段候选（from 探索）：#43 `cascade-media-relay`、#44 `device-control-coverage`。
+- 已完成 43 个编号（#1–#43），对应 59 个归档 change 目录（2026-10-29 同步）。
+- 当前无待实施条目：全部登记阶段已归档。下一阶段候选（from 探索）：#44 `device-control-coverage`。
 - 路线图同步契约见 capability `docs-roadmap-sync`；每次归档必须在同提交更新本文件。
