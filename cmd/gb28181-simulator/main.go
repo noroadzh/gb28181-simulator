@@ -594,6 +594,16 @@ func run() error {
 					return nil, fmt.Errorf("recording library: %w", err)
 				}
 			}
+			// Cascade media relay: an upstream INVITE for a downstream's
+			// channel is answered by pulling that channel and forwarding it.
+			// The deizer is what turns the device's RTP back into PS frames,
+			// so the relay needs it too.
+			if _, err := svc.WithLiveDeizer(func(ssrc uint32) port.RTPDeizer {
+				return media.NewRTPDeizer(ssrc)
+			}); err != nil {
+				return nil, fmt.Errorf("live deizer: %w", err)
+			}
+			acceptor.WithMediaRelay(svc)
 			nodeAcceptor = acceptor
 			// channelStore persists channel and media definitions for device
 			// nodes; svc.WithChannelStore wires it into the node service so
@@ -868,15 +878,8 @@ func run() error {
 			// *app.MediaService + NodeService to the gateway's supplier interface.
 			var flvServer *httpapi.StreamingServer
 			if mediaService != nil && nodeSvc != nil {
-				// Live pulls turn RTP back into PS frames through the same
-				// deizer the inbound pipelines use. Wiring it here, where
-				// both the media service and the node service exist, keeps
-				// the NodeService free of an adapter import.
-				if _, err := nodeSvc.WithLiveDeizer(func(ssrc uint32) port.RTPDeizer {
-					return media.NewRTPDeizer(ssrc)
-				}); err != nil {
-					return nil, err
-				}
+				// The live deizer is wired where the node service is built,
+				// together with the relay that shares it.
 				bridge := streaming.NewMediaServiceBridge(mediaService, nodeSvc)
 				gw := streaming.NewGateway(bridge, nodeSvc, logging.L()).
 					WithLiveSource(nodeSvc).

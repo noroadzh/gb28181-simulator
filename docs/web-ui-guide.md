@@ -305,6 +305,7 @@ device 节点可展开查看所有通道。该页面从 `GET /v1/nodes/:id/chann
 | 语音对讲 | 已实现：INVITE/BYE 控制面 + `/talk/audio` WebSocket 音频桥（PCMU）；非 device 501、对端不可达 502、无应答 504、未知 session 404 |
 | 真实平台向设备拉实时流 | 已实现：device 受理 `m=video` INVITE，回 `a=sendonly` SDP 并按通道媒体源发 PS/RTP；通道无源 404、BYE 停流 |
 | TCP 媒体（附录 D） | 已实现（设备侧 video/playback）：offer 的 m-line 为 `TCP/RTP/AVP` 时按 `a=setup` 主动连接或被动监听，RTP 包带 2 字节长度前缀；无法承载回 488 |
+| 级联媒体中继 | 已实现：上级对属于在线下级的通道发实时视频 INVITE 时，平台作为 B2BUA 双对话桥接（PS 原样转发，两侧传输独立 UDP/TCP）；上级 BYE/下级 BYE 成对传播；中继流同样可预览与录像 |
 | 平台录像 | 已实现：拉流即自动分段录制（`recording.enabled` 默认开，`dir` 默认存储目录下 `recordings/`）；`GET …/recordings` 查询、`GET …/recordings/:id/flv` 回放；平台对上级的 RecordInfo 与回放 INVITE 从录像库作答 |
 | 平台拉流（实时） | 已实现：`POST /v1/nodes/:id/channels/:ch/live`（body 可带 `transport: udp|tcp`）向在线下级发视频 INVITE，返回 `local_port`；`GET /v1/flv/:id/:ch` 优先输出实时会话，`?source=live|local` 显式选择；`POST …/live/stop` 幂等停止 |
 | CANCEL / re-INVITE | 已实现：CANCEL 在 INVITE 事务挂起时回 200 + 487，否则 481；re-INVITE 关闭旧媒体后重新协商；device 节点正常应答 BYE/CANCEL |

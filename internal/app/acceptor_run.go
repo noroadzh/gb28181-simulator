@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
 )
@@ -105,6 +106,8 @@ func (a *Acceptor) run(ctx context.Context, p *platform) {
 		// by Call-ID, so non-talk dialogs are unaffected.
 		if msg.Method() == "BYE" {
 			if callID := headerValue(msg, "Call-ID"); callID != "" {
+				// An upstream hanging up ends both legs of a relay.
+				a.relayBye(callID)
 				// A device's own talk audio or playback port belongs to
 				// this dialog.
 				a.closeDeviceTalk(callID)
@@ -199,6 +202,11 @@ func (a *Acceptor) run(ctx context.Context, p *platform) {
 				a.markPendingInvite(p.id, callID, msg, peer)
 				resp, err = a.handleInvite(ctx, p, msg, peer)
 				a.clearPendingInvite(p.id, callID)
+				if errors.Is(err, errResponseDeferred) {
+					// A relay answers once its own downstream INVITE has
+					// an outcome; the loop must stay free to read it.
+					continue
+				}
 				if err != nil {
 					a.log.Warn("cannot answer an INVITE",
 						"node_id", p.id.String(), "peer", peer, "error", err.Error())

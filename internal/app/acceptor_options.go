@@ -63,6 +63,11 @@ type Acceptor struct {
 	// playback INVITEs are answered from it.
 	recordings port.RecordingStore
 
+	// relayMedia pulls a channel on a peer's behalf; mediaRelays indexes
+	// the calls currently bridged by upstream Call-ID.
+	relayMedia  mediaRelayService
+	mediaRelays *mediaRelayTable
+
 	// deviceTalks holds the audio port each talk dialog opened on this node,
 	// keyed by Call-ID. A device answers a talk INVITE with its own RTP port;
 	// the port lives until the dialog ends.

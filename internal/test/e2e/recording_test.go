@@ -17,7 +17,7 @@ import (
 )
 
 func TestPlatformRecording_QueryAndPlayback(t *testing.T) {
-	proc, channelID := startLivePlatform(t)
+	proc, channelID, _ := startLivePlatform(t)
 	const platformID = livePlatformID
 
 	status, body := proc.call(t, http.MethodPost,

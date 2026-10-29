@@ -49,6 +49,8 @@ func newLiveHarness(t *testing.T) *liveHarness {
 		t.Fatalf("WithLiveDeizer: %v", err)
 	}
 	h.acceptor.controlWait = 200 * time.Millisecond
+	h.acceptor.WithMediaRelay(svc)
+	h.acceptor.WithMediaService(syntheticMediaService(t))
 	return &liveHarness{svc: svc, h: h, reg: reg}
 }
 

@@ -24,7 +24,7 @@ func (a *Acceptor) handleInvite(
 	ctx context.Context,
 	p *platform,
 	req model.Message,
-	_ string,
+	peer string,
 ) (model.Message, error) {
 	a.log.Debug("INVITE received",
 		"node_id", p.id.String(), "call_id", headerValue(req, "Call-ID"))
@@ -44,6 +44,14 @@ func (a *Acceptor) handleInvite(
 	// else on the platform side keeps the generic dialog handling below.
 	if a.recordings != nil && strings.Contains(req.Body(), "s=Playback") {
 		return a.answerPlatformPlaybackInvite(p, req)
+	}
+	// Live video for a channel that belongs to a downstream is relayed
+	// (cascade-media-relay). A channel this platform cannot route keeps the
+	// generic answer below, byte for byte.
+	if mediaType, _, _, mErr := parseSDPMetadata(req.Body()); mErr == nil && mediaType == "video" {
+		if a.answerRelayedVideoInvite(p, req, peer) {
+			return model.Message{}, errResponseDeferred
+		}
 	}
 	callID := headerValue(req, "Call-ID")
 	if callID == "" {

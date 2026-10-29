@@ -58,6 +58,10 @@ type liveSession struct {
 	nextSub int
 	lastAt  time.Time
 
+	// relayQuiet suppresses the "tell the upstream" step when the upstream
+	// itself is what ended this session.
+	relayQuiet bool
+
 	done       chan struct{}
 	cancel     context.CancelFunc
 	closeOnce  sync.Once
@@ -164,6 +168,46 @@ func (s *NodeService) WithRecordings(store port.RecordingStore) (*NodeService, e
 // owns it. It returns once the device has answered (or refused): the caller
 // learns the port and transport it can watch on.
 func (s *NodeService) StartLive(ctx context.Context, id model.NodeID, channelID, transport string) (port.LiveSessionInfo, error) {
+	return s.startLiveWithKey(ctx, liveKey{id.String(), channelID}, id, channelID, transport)
+}
+
+// relayChannelKey is the session key a relay uses: the channel plus the
+// peer's Call-ID, so two upstreams pulling the same channel do not share (and
+// therefore cannot kill) each other's session.
+const relayChannelSep = "|"
+
+func relayChannelKey(channelID, relayID string) string { return channelID + relayChannelSep + relayID }
+
+// StartLiveRelay pulls one channel on behalf of a cascade peer. Each peer gets
+// its own session: a second relay must not tear down the first peer's stream,
+// so the key carries the peer's Call-ID instead of the channel alone.
+func (s *NodeService) StartLiveRelay(ctx context.Context, id model.NodeID, channelID, relayID, transport string) (port.LiveSessionInfo, error) {
+	return s.startLiveWithKey(ctx, liveKey{id.String(), relayChannelKey(channelID, relayID)}, id, channelID, transport)
+}
+
+// RelayPS hands a relay the frames of its own downstream session.
+func (s *NodeService) RelayPS(_ context.Context, id model.NodeID, channelID, relayID string) (<-chan model.PSFrame, func(), bool) {
+	sess := s.liveSession(liveKey{id.String(), relayChannelKey(channelID, relayID)})
+	if sess == nil {
+		return nil, nil, false
+	}
+	ch, cleanup := sess.subscribe()
+	return ch, cleanup, true
+}
+
+// StopLiveRelay ends one relay's downstream session and says goodbye to the
+// device. It leaves other peers of the same channel alone.
+func (s *NodeService) StopLiveRelay(_ context.Context, id model.NodeID, channelID, relayID string) error {
+	sess := s.takeLive(liveKey{id.String(), relayChannelKey(channelID, relayID)})
+	if sess == nil {
+		return nil
+	}
+	sess.setQuiet()
+	s.endLive(sess, true)
+	return nil
+}
+
+func (s *NodeService) startLiveWithKey(ctx context.Context, key liveKey, id model.NodeID, channelID, transport string) (port.LiveSessionInfo, error) {
 	if transport == "" {
 		transport = "udp"
 	}
@@ -186,15 +230,15 @@ func (s *NodeService) StartLive(ctx context.Context, id model.NodeID, channelID,
 		return port.LiveSessionInfo{}, err
 	}
 
-	// A second start replaces the first: the old dialog goes away before the
-	// new port is advertised, so the device is never told two destinations.
-	if old := s.takeLive(liveKey{id.String(), channelID}); old != nil {
+	// A second start on the same key replaces the first: the old dialog goes
+	// away before the new port is advertised, so the device is never told two
+	// destinations. A relay's key includes the peer, so peers coexist.
+	if old := s.takeLive(key); old != nil {
 		s.endLive(old, true)
 	}
 
-	sess := newLiveSession(liveKey{id.String(), channelID}, port.LiveSessionInfo{Transport: transport},
+	sess := newLiveSession(key, port.LiveSessionInfo{Transport: transport},
 		id, "", target, addr, s.liveDeizer(0))
-	key := sess.key
 	fail := func(err error) (port.LiveSessionInfo, error) {
 		sess.close()
 		return port.LiveSessionInfo{}, err
@@ -410,6 +454,11 @@ func (s *NodeService) endLive(sess *liveSession, sendBye bool) {
 	}
 	s.liveMu.Unlock()
 	sess.close()
+	// A relay session ending on its own (device BYE, media timeout) has to
+	// tell the upstream too; a stop we initiated already did.
+	if relayID, ok := relayIDOf(sess.key); ok && s.acceptor != nil && !sess.quiet() {
+		s.acceptor.relayEndedByDownstream(sess.node, relayID)
+	}
 	// Wait for the recorder to close its segment, so a stop returns with
 	// the recording complete rather than racing the last frame.
 	if sess.recordDone != nil {
@@ -565,4 +614,27 @@ func (s *NodeService) OpenRecording(ctx context.Context, id model.NodeID, channe
 		return nil, nil, fmt.Errorf("%w: recording library is not wired", port.ErrRecordingUnsupported)
 	}
 	return s.recordings.Stream(ctx, id, channelID, start, end)
+}
+
+// relayIDOf reports the peer Call-ID of a relay session key.
+func relayIDOf(key liveKey) (string, bool) {
+	i := strings.LastIndex(key.channel, relayChannelSep)
+	if i <= 0 || i == len(key.channel)-1 {
+		return "", false
+	}
+	return key.channel[i+1:], true
+}
+
+// quiet reports whether this session was ended by the upstream, in which case
+// the upstream needs no further news.
+func (l *liveSession) quiet() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.relayQuiet
+}
+
+func (l *liveSession) setQuiet() {
+	l.mu.Lock()
+	l.relayQuiet = true
+	l.mu.Unlock()
 }

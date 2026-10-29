@@ -22,8 +22,9 @@ const livePlatformID = "34020000002000000001"
 
 // startLivePlatform boots the simulator with a platform-large that has one
 // registered device exposing a synthetic channel, and waits until the
-// platform's device table shows it. It returns the process and the channel id.
-func startLivePlatform(t *testing.T) (*simulatorProcess, string) {
+// platform's device table shows it. It returns the process, the channel id and
+// the platform's SIP address.
+func startLivePlatform(t *testing.T) (*simulatorProcess, string, string) {
 	t.Helper()
 	bin := buildSimulator(t)
 	dir := t.TempDir()
@@ -105,11 +106,11 @@ func startLivePlatform(t *testing.T) (*simulatorProcess, string) {
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	return proc, channelID
+	return proc, channelID, platformAddr
 }
 
 func TestLivePull_PlatformPullsDeviceStream(t *testing.T) {
-	proc, channelID := startLivePlatform(t)
+	proc, channelID, _ := startLivePlatform(t)
 	const platformID = livePlatformID
 
 	status, body := proc.call(t, http.MethodPost,
