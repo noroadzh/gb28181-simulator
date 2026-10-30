@@ -25,6 +25,11 @@ type notifyEnvelope struct {
 	CmdType  string `xml:"CmdType"`
 	SN       string `xml:"SN"`
 	DeviceID string `xml:"DeviceID"`
+	// Broadcast addresses a TargetID and names a SourceID instead of a
+	// DeviceID; upgrade commands likewise name the target. Accepting both
+	// keeps the dispatcher's one-command-one-row rule intact.
+	TargetID string `xml:"TargetID"`
+	SourceID string `xml:"SourceID"`
 	Status   string `xml:"Status"`
 }
 
@@ -52,8 +57,16 @@ func (c *MANSCDPCodecAdapter) DecodeNotify(body string) (model.Notify, error) {
 	if err != nil {
 		return model.Notify{}, err
 	}
-	return model.NewNotify(strings.TrimSpace(env.CmdType), strings.TrimSpace(env.DeviceID), sn,
+	deviceID := strings.TrimSpace(env.DeviceID)
+	if deviceID == "" {
+		deviceID = strings.TrimSpace(env.TargetID)
+	}
+	n, err := model.NewNotify(strings.TrimSpace(env.CmdType), deviceID, sn,
 		strings.TrimSpace(env.Status))
+	if err != nil {
+		return model.Notify{}, err
+	}
+	return n.WithEnvelope(env.XMLName.Local), nil
 }
 
 // parseSN reads the sequence number. An absent or unparseable SN is not a

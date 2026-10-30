@@ -22,15 +22,16 @@ import (
 // is what the assertions read. The body it renders is a readable stand-in —
 // the real bytes are the codec's own golden tests' business.
 type fakeMANSCDP struct {
-	mu              sync.Mutex
-	notify          model.Notify
-	decodeErr       error
-	bodies          []string
-	catalogs        []model.Catalog
-	mobilePositions []model.MobilePositionNotify
-	marshalErr      error
-	recordQuery     model.RecordInfoQuery
-	presetLists     []model.PresetListResponse
+	mu                sync.Mutex
+	notify            model.Notify
+	decodeErr         error
+	bodies            []string
+	catalogs          []model.Catalog
+	mobilePositions   []model.MobilePositionNotify
+	marshalErr        error
+	recordQuery       model.RecordInfoQuery
+	deviceStatusQuery model.DeviceStatusQuery
+	presetLists       []model.PresetListResponse
 }
 
 func newFakeMANSCDP() *fakeMANSCDP { return &fakeMANSCDP{} }
@@ -1522,3 +1523,76 @@ type stubPSDePacketizer struct{}
 
 func (s *stubPSDePacketizer) Write([]byte) ([]model.ESFrame, error) { return nil, nil }
 func (s *stubPSDePacketizer) Close() error                          { return nil }
+
+// --- device-control-coverage: the codec's operations surface --------------
+
+func (f *fakeMANSCDP) DecodeDeviceStatusQuery(body string) (model.DeviceStatusQuery, error) {
+	f.mu.Lock()
+	f.bodies = append(f.bodies, body)
+	q := f.deviceStatusQuery
+	f.mu.Unlock()
+	return q, f.decodeErr
+}
+
+// setDeviceStatusQuery scripts the next DeviceStatus query the fake returns.
+func (f *fakeMANSCDP) setDeviceStatusQuery(q model.DeviceStatusQuery) {
+	f.mu.Lock()
+	f.deviceStatusQuery = q
+	f.mu.Unlock()
+}
+
+func (f *fakeMANSCDP) MarshalDeviceStatusResponse(resp model.DeviceStatusResponse) (string, error) {
+	return fmt.Sprintf("device-status-%s-%s", resp.DeviceID, resp.Result), nil
+}
+
+func (f *fakeMANSCDP) DecodeBroadcast(body string) (model.BroadcastCommand, error) {
+	f.mu.Lock()
+	f.bodies = append(f.bodies, body)
+	f.mu.Unlock()
+	return model.BroadcastCommand{SN: 1, SourceID: "34020000002000000001", TargetID: "34020000011310000001"}, f.decodeErr
+}
+
+func (f *fakeMANSCDP) MarshalBroadcastAck(ack model.BroadcastAck) (string, error) {
+	return fmt.Sprintf("broadcast-ack-%s-%s", ack.TargetID, ack.Result), nil
+}
+
+func (f *fakeMANSCDP) DecodeAlarmQuery(body string) (model.AlarmQuery, error) {
+	f.mu.Lock()
+	f.bodies = append(f.bodies, body)
+	f.mu.Unlock()
+	return model.AlarmQuery{SN: 1, DeviceID: "34020000011310000001"}, f.decodeErr
+}
+
+func (f *fakeMANSCDP) MarshalAlarmQueryResponse(resp model.AlarmQueryResponse) (string, error) {
+	return fmt.Sprintf("alarm-query-response-SumNum=%d", resp.SumNum), nil
+}
+
+func (f *fakeMANSCDP) DecodeConfigQuery(body string) (model.ConfigQuery, error) {
+	f.mu.Lock()
+	f.bodies = append(f.bodies, body)
+	f.mu.Unlock()
+	return model.ConfigQuery{SN: 1, DeviceID: "34020000011310000001", ConfigType: "BasicParam"}, f.decodeErr
+}
+
+func (f *fakeMANSCDP) DecodeConfigSet(body string) (model.ConfigSet, error) {
+	f.mu.Lock()
+	f.bodies = append(f.bodies, body)
+	f.mu.Unlock()
+	return model.ConfigSet{SN: 1, DeviceID: "34020000011310000001", ConfigType: "BasicParam",
+		Basic: model.BasicConfig{HeartbeatInterval: 30}}, f.decodeErr
+}
+
+func (f *fakeMANSCDP) MarshalConfigResponse(resp model.ConfigResponse) (string, error) {
+	return fmt.Sprintf("config-response-%s-%d", resp.Result, resp.Basic.HeartbeatInterval), nil
+}
+
+func (f *fakeMANSCDP) DecodeUpgrade(body string) (model.UpgradeCommand, error) {
+	f.mu.Lock()
+	f.bodies = append(f.bodies, body)
+	f.mu.Unlock()
+	return model.UpgradeCommand{SN: 1, DeviceID: "34020000011310000001", Firmware: "2.0.0"}, f.decodeErr
+}
+
+func (f *fakeMANSCDP) MarshalOpsAck(ack model.OpsAck, cmdType string) (string, error) {
+	return fmt.Sprintf("%s-ack-%s", cmdType, ack.Result), nil
+}

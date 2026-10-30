@@ -102,6 +102,40 @@ type MANSCDPCodec interface {
 	// MarshalPTZControl renders a PTZ command acknowledgement.
 	MarshalPTZControl(control model.PTZControl) (string, error)
 
+	// DecodeDeviceStatusQuery parses a DeviceStatus query.
+	DecodeDeviceStatusQuery(body string) (model.DeviceStatusQuery, error)
+
+	// MarshalDeviceStatusResponse renders a DeviceStatus answer.
+	MarshalDeviceStatusResponse(resp model.DeviceStatusResponse) (string, error)
+
+	// DecodeBroadcast parses a Broadcast command.
+	DecodeBroadcast(body string) (model.BroadcastCommand, error)
+
+	// MarshalBroadcastAck renders a Broadcast acknowledgement.
+	MarshalBroadcastAck(ack model.BroadcastAck) (string, error)
+
+	// DecodeAlarmQuery parses an alarm query (an Alarm command in a Query
+	// envelope).
+	DecodeAlarmQuery(body string) (model.AlarmQuery, error)
+
+	// MarshalAlarmQueryResponse renders an alarm query answer.
+	MarshalAlarmQueryResponse(resp model.AlarmQueryResponse) (string, error)
+
+	// DecodeConfigQuery parses a ConfigDownload query.
+	DecodeConfigQuery(body string) (model.ConfigQuery, error)
+
+	// DecodeConfigSet parses a ConfigDownload write (a Control envelope).
+	DecodeConfigSet(body string) (model.ConfigSet, error)
+
+	// MarshalConfigResponse renders a config answer or acknowledgement.
+	MarshalConfigResponse(resp model.ConfigResponse) (string, error)
+
+	// DecodeUpgrade parses a DeviceUpgrade command.
+	DecodeUpgrade(body string) (model.UpgradeCommand, error)
+
+	// MarshalOpsAck renders a generic Result acknowledgement for cmdType.
+	MarshalOpsAck(ack model.OpsAck, cmdType string) (string, error)
+
 	// DecodePresetQuery parses a PresetQuery command.
 	DecodePresetQuery(body string) (model.PresetQuery, error)
 

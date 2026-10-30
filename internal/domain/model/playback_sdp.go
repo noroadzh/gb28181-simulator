@@ -31,6 +31,9 @@ type PlaybackSDP struct {
 	// "active", "passive" or "actpass". Empty means the attribute is
 	// absent, which the receiver reads as "passive" per 附录 D.
 	Setup string
+	// Session is the s= line: "Playback" (default) or "Download" for
+	// GB/T 28181 file download, which uses the same SDP shape.
+	Session string
 }
 
 // PlaybackSDPBytes renders the body that goes into the INVITE (or its 200 OK).
@@ -72,7 +75,11 @@ func PlaybackSDPBytes(p PlaybackSDP) (string, error) {
 	}
 	line("v=0")
 	line("o=%s 0 0 IN IP4 %s", p.DeviceID, p.ConnIP)
-	line("s=Playback")
+	session := p.Session
+	if session == "" {
+		session = "Playback"
+	}
+	line("s=%s", session)
 	line("u=%s:%s", p.DeviceID, p.SN)
 	line("c=IN IP4 %s", p.ConnIP)
 	line("t=%s %s", p.Start.Format(playbackTimeFormat), p.End.Format(playbackTimeFormat))

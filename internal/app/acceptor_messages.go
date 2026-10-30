@@ -50,6 +50,16 @@ func (a *Acceptor) handleMessage(
 		return a.handleDeviceInfo(ctx, p, req, notify)
 	case notify.IsRecordInfo():
 		return a.handleRecordInfo(ctx, p, req, notify)
+	case notify.IsDeviceStatus():
+		return a.handleDeviceStatus(ctx, p, req, notify, peer)
+	case notify.IsBroadcast():
+		return a.handleBroadcast(ctx, p, req, notify, peer)
+	case notify.IsDeviceUpgrade():
+		return a.handleUpgrade(ctx, p, req, notify, peer)
+	case notify.IsConfigDownload():
+		return a.handleConfigDownload(ctx, p, req, notify, peer)
+	case notify.IsAlarm() && notify.IsQuery():
+		return a.handleAlarmQuery(ctx, p, req, notify, peer)
 	case notify.IsAlarm():
 		return a.handleAlarm(ctx, p, req, notify)
 	case notify.IsDeviceControl():

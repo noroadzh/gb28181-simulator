@@ -10,9 +10,9 @@
 
 - **DeviceStatus**：`CmdType=DeviceStatus` 查询与应答（设备在线状态、是否正常工作），设备节点作答、平台节点可向下级转发并回传。
 - **Broadcast（语音广播）**：`CmdType=Broadcast` 下发与 200 应答；设备随后按国标向平台发起音频 INVITE，平台以 200 + SDP 应答并把音频接入既有对讲音频桥（`/talk/audio` 同一条 PCMU 通道）。
-- **报警查询与布防撤防**：`CmdType=AlarmQuery` 查询历史报警（来自节点的报警快照）、`DeviceControl` 的布防/撤防（`AlarmCmd`）与 `CmdType=Alarm` 订阅通知保持一致。
-- **设备配置**：`CmdType=ConfigDownload` 查询设备配置并应答（基础配置项来自节点 profile），平台可下发配置并收到 ack。
-- **升级与重启**：`CmdType=DeviceUpgrade` / `CmdType=DeviceReboot` 下发与 200 应答；升级只做状态与应答，不真的替换二进制。
+- **报警查询与布防撤防**：`Alarm` + `Query` 信封查询历史报警（来自节点的报警快照）、`DeviceControl` 的 `GuardCmd`（SetGuard/ResetGuard）布防撤防，与 `CmdType=Alarm` 通知保持一致。
+- **设备配置**：`CmdType=ConfigDownload` 查询设备配置并应答（基础配置项来自节点 profile），平台可下发配置并收到 ack（心跳间隔在节点下次启动时生效）。
+- **升级与重启**：`CmdType=DeviceUpgrade` 与 `DeviceControl/TeleBoot` 下发与 200 应答；升级只做状态与应答，不真的替换二进制。
 - **文件下载**：`s=Download` 的 INVITE——设备按录像时间窗以 PS/RTP 发送文件流；平台节点可作为请求方发起下载并把流写入录像库目录。
 
 ## Capabilities

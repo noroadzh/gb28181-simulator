@@ -34,10 +34,11 @@
 - **WHEN** 平台向设备下发 `Broadcast`
 - **THEN** 设备回 200 + `Result=OK`，并向平台发起音频 INVITE
 
-#### Scenario: 广播音频可收听
+#### Scenario: 广播音频到达平台
 
 - **WHEN** 广播 INVITE 建立后设备发送 PCMU 音频
-- **THEN** 平台侧与对讲相同的音频通道能收到该音频
+- **THEN** 平台在广播对话的接收端口上收到该音频
+- **AND** 接收的音频不进入对讲的 WebSocket 桥（该桥只服务平台发起的对讲会话）
 
 #### Scenario: 目标不可用
 
@@ -75,7 +76,8 @@
 #### Scenario: 下发心跳间隔
 
 - **WHEN** 平台下发新的心跳间隔
-- **THEN** 设备应答 `Result=OK`，且后续心跳按新间隔发送
+- **THEN** 设备应答 `Result=OK`，新值记录在节点上
+- **AND** 新间隔在节点下一次启动（重新注册）后生效——运行中的保活循环不被热替换
 
 #### Scenario: 不支持的配置类型
 
@@ -84,17 +86,17 @@
 
 ### Requirement: 升级与重启
 
-系统 MUST 支持 `CmdType=DeviceUpgrade` 与 `CmdType=DeviceReboot` 的下发。两者 MUST 以 200 OK + 对应 ack（`Result=OK`）应答，并 MUST NOT 中断节点的信令与媒体：升级只记录目标版本，重启只记录发生时间。对不在线的目标 MUST 以 `Result=ERROR` 应答。
+系统 MUST 支持升级与重启的下发，命令形态按 GB/T 28181：升级为 `CmdType=DeviceUpgrade`（携带 `Firmware`），重启为 `DeviceControl` 中的 `TeleBoot` 元素。两者 MUST 以 200 OK 应答（升级带 `Result=OK` 的应答体），并 MUST NOT 中断节点的信令与媒体：升级只记录目标版本，重启只记录发生时间。对不在线的目标 MUST 以可辨识失败应答。
 
 #### Scenario: 下发升级
 
-- **WHEN** 平台下发升级到某版本
+- **WHEN** 平台下发 `DeviceUpgrade` 到某版本
 - **THEN** 设备回 `Result=OK`，节点保持 online 并记录目标版本
 
 #### Scenario: 下发重启
 
-- **WHEN** 平台下发重启
-- **THEN** 设备回 `Result=OK`，节点保持 online
+- **WHEN** 平台下发 `DeviceControl/TeleBoot`
+- **THEN** 设备回 200 OK，节点保持 online 并记录重启时间
 
 ### Requirement: 文件下载
 

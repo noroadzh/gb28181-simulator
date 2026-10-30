@@ -4,6 +4,7 @@ package model
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // NodeIDLen is the fixed length of a GB/T 28181 identifier: 8-digit centre
@@ -198,6 +199,14 @@ type NodeProfile struct {
 	// it covers. An entry with zero Kind means "this channel has no
 	// source". This field is the multi-channel extension (Change 14).
 	mediaConfigByChannel map[string]*MediaConfig
+
+	// Operations state (device-control-coverage). In-memory only: a
+	// restart returns the node to its configured defaults.
+	alarmArmed        bool
+	alarmArmedSet     bool
+	heartbeatOverride *time.Duration
+	upgradeTarget     string
+	lastReboot        *time.Time
 }
 
 // NewNodeProfile validates id with ParseNodeID and requires a non-empty

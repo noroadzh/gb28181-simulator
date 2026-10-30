@@ -52,6 +52,11 @@ type Notify struct {
 	sn       uint32
 	deviceID string
 	status   string
+	// envelope is the XML root the command arrived in: "Query", "Control"
+	// or "Notify". Several command types share one CmdType and differ only
+	// by envelope (an Alarm Query is not an Alarm notify; ConfigDownload
+	// is a Query when read and a Control when written).
+	envelope string
 }
 
 // NewNotify builds a received notify. CmdType and DeviceID are mandatory:
@@ -74,6 +79,20 @@ func NewNotify(cmdType, deviceID string, sn uint32, status string) (Notify, erro
 		status:   strings.TrimSpace(status),
 	}, nil
 }
+
+// WithEnvelope records the XML root the command arrived in and returns the
+// copy. The codec calls it; a caller that built a Notify by hand keeps an
+// empty envelope and must not assume either direction.
+func (n Notify) WithEnvelope(envelope string) Notify {
+	n.envelope = strings.ToLower(strings.TrimSpace(envelope))
+	return n
+}
+
+// IsQuery reports whether the command arrived in a <Query> envelope.
+func (n Notify) IsQuery() bool { return n.envelope == "query" }
+
+// IsControl reports whether the command arrived in a <Control> envelope.
+func (n Notify) IsControl() bool { return n.envelope == "control" }
 
 // CmdType returns the MANSCDP command the notify carries.
 func (n Notify) CmdType() string { return n.cmdType }
@@ -142,3 +161,17 @@ func (n Notify) String() string {
 	return fmt.Sprintf("Notify<cmd=%s device_id=%s sn=%d status=%s>",
 		n.cmdType, n.deviceID, n.sn, n.status)
 }
+
+// IsDeviceStatus reports whether the notify carries a DeviceStatus query.
+func (n Notify) IsDeviceStatus() bool { return n.cmdType == CmdTypeDeviceStatus }
+
+// IsBroadcast reports whether the notify carries a Broadcast command.
+func (n Notify) IsBroadcast() bool { return n.cmdType == CmdTypeBroadcast }
+
+// IsDeviceUpgrade reports whether the notify carries an upgrade command.
+func (n Notify) IsDeviceUpgrade() bool { return n.cmdType == CmdTypeDeviceUpgrade }
+
+// IsConfigDownload reports whether the notify carries a ConfigDownload
+// command; the envelope says whether it is a read (Query) or a write
+// (Control).
+func (n Notify) IsConfigDownload() bool { return n.cmdType == CmdTypeConfigDownload }

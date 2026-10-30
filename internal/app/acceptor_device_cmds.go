@@ -544,22 +544,19 @@ func (a *Acceptor) handlePresetQuery(
 // A 2022 TeleBoot element inside the control body is treated as a reboot
 // request and logged accordingly.
 func (a *Acceptor) handleDeviceControl(
-	_ context.Context,
+	ctx context.Context,
 	p *platform,
 	req model.Message,
 	_ model.Notify,
 ) (model.Message, bool) {
 	// TeleBoot is a 2022 control element with its own XML tag. Detect it
-	// before the generic PTZ decoder so we can log the reboot separately.
+	// before the generic PTZ decoder so the reboot is recorded.
 	if strings.Contains(req.Body(), "<TeleBoot>") {
-		a.log.Debug("TeleBoot reboot requested", "node_id", p.id.String())
-		resp, err := buildResponse(200, "OK", req, nil, "")
-		if err != nil {
-			a.log.Warn("cannot answer a TeleBoot",
-				"node_id", p.id.String(), "error", err.Error())
-			return model.Message{}, false
-		}
-		return resp, true
+		return a.handleTeleBoot(ctx, p, req)
+	}
+	// GuardCmd (SetGuard / ResetGuard) is the arming control.
+	if strings.Contains(req.Body(), "<GuardCmd>") {
+		return a.handleGuardCmd(ctx, p, req)
 	}
 	control, err := a.manscdp.DecodePTZControl(req.Body())
 	if err != nil {

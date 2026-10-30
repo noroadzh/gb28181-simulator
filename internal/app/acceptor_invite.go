@@ -32,7 +32,7 @@ func (a *Acceptor) handleInvite(
 	// (video with a time window) and live viewing (plain video) itself, each
 	// with its own RTP port. Anything else keeps the device's usual behaviour.
 	if p.isDevice {
-		if strings.Contains(req.Body(), "s=Playback") {
+		if strings.Contains(req.Body(), "s=Playback") || strings.Contains(req.Body(), "s=Download") {
 			return a.answerDevicePlaybackInvite(p, req)
 		}
 		if mediaType, _, _, mErr := parseSDPMetadata(req.Body()); mErr == nil && mediaType == "video" {

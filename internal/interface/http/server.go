@@ -165,6 +165,14 @@ func (s *Server) registerRoutes(e *echo.Echo) {
 	// Capture endpoints (Change 13): per-node wire capture as JSON and as
 	// a downloadable pcap document. Queries never evict the buffer.
 	e.GET("/v1/nodes/:id/capture", s.handleQueryCapture)
+	e.GET("/v1/nodes/:id/status", s.handleNodeStatus)
+	e.GET("/v1/nodes/:id/config", s.handleNodeConfigGet)
+	e.PUT("/v1/nodes/:id/config", s.handleNodeConfigPut)
+	e.POST("/v1/nodes/:id/upgrade", s.handleNodeUpgrade)
+	e.POST("/v1/nodes/:id/reboot", s.handleNodeReboot)
+	e.GET("/v1/nodes/:id/channels/:ch/alarms", s.handleChannelAlarms)
+	e.POST("/v1/nodes/:id/channels/:ch/alarm-mode", s.handleAlarmMode)
+	e.POST("/v1/nodes/:id/channels/:ch/download", s.handleChannelDownload)
 	e.GET("/v1/nodes/:id/channels/:ch/recordings", s.handleRecordingList)
 	e.GET("/v1/nodes/:id/channels/:ch/recordings/:recording/flv", s.handleRecordingFLV)
 	e.POST("/v1/nodes/:id/channels/:ch/live", s.handleLiveStart)

@@ -57,6 +57,17 @@ func (a *Acceptor) InviteVideo(ctx context.Context, id model.NodeID, target, add
 	return callID, resp, nil
 }
 
+// InviteDownload opens a file-download dialog (s=Download). The answer only
+// has to be 2xx; the media arrives on the port the caller advertised.
+func (a *Acceptor) InviteDownload(ctx context.Context, id model.NodeID, target, addr, channelID, body string) (string, error) {
+	callID, _, err := a.inviteUser(ctx, id, target, channelID, addr, body,
+		port.ErrPlaybackUnsupported, port.ErrPlaybackUnsupported)
+	if err != nil {
+		return "", err
+	}
+	return callID, nil
+}
+
 // invite is the shared INVITE transaction: build, send, wait for the 2xx, and
 // report a refusal with the capability's own sentinel.
 func (a *Acceptor) invite(ctx context.Context, id model.NodeID, target, addr, body string, unsupported error) (string, model.Message, error) {
