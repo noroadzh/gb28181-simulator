@@ -35,6 +35,9 @@ type relayCall struct {
 	upstreamPeer     string
 	channelID        string
 	nodeID           model.NodeID
+	transport        string
+	localPort        int
+	startedAt        time.Time
 	sink             mediaSink
 	stopCh           chan struct{}
 	closeOnce        sync.Once
@@ -71,6 +74,21 @@ func (t *mediaRelayTable) size() int {
 	return len(t.calls)
 }
 
+// snapshot copies active calls for one node (or all nodes when id is empty).
+func (t *mediaRelayTable) snapshot(id model.NodeID) []*relayCall {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := make([]*relayCall, 0, len(t.calls))
+	for _, call := range t.calls {
+		if id.String() != "" && call.nodeID != id {
+			continue
+		}
+		cp := *call
+		out = append(out, &cp)
+	}
+	return out
+}
+
 // WithMediaRelay attaches the service that can pull a channel on the
 // platform's behalf. Without it the platform cannot relay media and keeps the
 // generic INVITE answer.
@@ -80,6 +98,75 @@ func (a *Acceptor) WithMediaRelay(r mediaRelayService) *Acceptor {
 		a.mediaRelays = newMediaRelayTable()
 	}
 	return a
+}
+
+// ObserveNetworkDate learns the platform clock from a SIP Date header
+// (typically REGISTER 200). Subsequent DeviceTime answers follow that skew.
+func (a *Acceptor) ObserveNetworkDate(id model.NodeID, msg model.Message) {
+	if a == nil || id.String() == "" {
+		return
+	}
+	h, ok := msg.Header("Date")
+	if !ok {
+		return
+	}
+	platformTime, err := parseSIPDate(h.Value())
+	if err != nil {
+		return
+	}
+	local := time.Now()
+	if a.clock != nil {
+		local = a.clock.Now()
+	}
+	skew := platformTime.Sub(local)
+	a.networkSkewMu.Lock()
+	if a.networkSkew == nil {
+		a.networkSkew = map[string]time.Duration{}
+	}
+	a.networkSkew[id.String()] = skew
+	a.networkSkewMu.Unlock()
+	a.log.Info("network timing learned from Date",
+		"node_id", id.String(), "skew", skew.String(), "platform_date", h.Value())
+}
+
+// networkNow returns the wall clock aligned to the last learned Date skew.
+func (a *Acceptor) networkNow(id model.NodeID) time.Time {
+	now := time.Now()
+	if a != nil && a.clock != nil {
+		now = a.clock.Now()
+	}
+	if a == nil {
+		return now
+	}
+	a.networkSkewMu.Lock()
+	skew := a.networkSkew[id.String()]
+	a.networkSkewMu.Unlock()
+	return now.Add(skew)
+}
+
+// ListCascadeSessions returns active media-relay calls for the node. It is a
+// read-only ops view: ending a relay still goes through BYE / StopLiveRelay.
+func (a *Acceptor) ListCascadeSessions(id model.NodeID) []port.CascadeSession {
+	if a == nil || a.mediaRelays == nil {
+		return nil
+	}
+	calls := a.mediaRelays.snapshot(id)
+	out := make([]port.CascadeSession, 0, len(calls))
+	for _, call := range calls {
+		transport := call.transport
+		if transport == "" {
+			transport = "udp"
+		}
+		out = append(out, port.CascadeSession{
+			UpstreamCallID: call.upstreamCallID,
+			ChannelID:      call.channelID,
+			Peer:           call.upstreamPeer,
+			Transport:      transport,
+			LocalPort:      call.localPort,
+			StartedAt:      call.startedAt,
+		})
+	}
+	return out
 }
 
 // answerRelayedVideoInvite handles an upstream live-view INVITE by relaying.
@@ -172,6 +259,7 @@ func (a *Acceptor) runRelay(p *platform, req model.Message, peer, channelID, cal
 
 	call := &relayCall{
 		upstreamCallID: callID, upstreamPeer: peer, channelID: channelID, nodeID: p.id,
+		transport: info.Transport, localPort: info.LocalPort, startedAt: time.Now(),
 		sink: upstreamSink, stopCh: make(chan struct{}),
 	}
 	a.mediaRelays.put(call)

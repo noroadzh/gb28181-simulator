@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
 	"github.com/your-org/gb28181-simulator/internal/domain/port"
@@ -82,6 +83,10 @@ type Registrar struct {
 	clock      port.Clock
 	log        *slog.Logger
 	newCallID  func() string
+
+	// afterOK is notified with the final 2xx so the process can learn the
+	// platform's Date (network timing / 校时).
+	afterOK func(model.NodeID, model.Message)
 }
 
 // WithGB35114 attaches the process-wide SM2 identity used when answering a
@@ -90,6 +95,27 @@ func (r *Registrar) WithGB35114(priv, pub []byte) *Registrar {
 	r.gb35114Priv = append([]byte(nil), priv...)
 	r.gb35114Pub = append([]byte(nil), pub...)
 	return r
+}
+
+// AfterOK registers a hook invoked on every successful REGISTER 2xx.
+func (r *Registrar) AfterOK(fn func(model.NodeID, model.Message)) *Registrar {
+	r.afterOK = fn
+	return r
+}
+
+// parseSIPDate accepts the IMF-fixdate form SIP borrows for Date.
+func parseSIPDate(v string) (time.Time, error) {
+	v = strings.TrimSpace(v)
+	for _, layout := range []string{
+		time.RFC1123,
+		"Mon, 02 Jan 2006 15:04:05 GMT",
+		"Mon, 2 Jan 2006 15:04:05 GMT",
+	} {
+		if t, err := time.Parse(layout, v); err == nil {
+			return t.UTC(), nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unrecognised Date %q", v)
 }
 
 // NewRegistrar builds a Registrar. authorizer is required; clock and log
@@ -287,6 +313,9 @@ func (r *Registrar) transaction(
 			result, err := model.NewRegistrationResult(reg.Server(), granted, r.clock.Now())
 			if err != nil {
 				return model.RegistrationResult{}, &RegistrationError{Stage: StageResponse, Err: err}
+			}
+			if r.afterOK != nil {
+				r.afterOK(id, msg)
 			}
 			r.log.Info("registration succeeded", "node_id", id.String(),
 				"server", reg.Server(), "expires", granted)

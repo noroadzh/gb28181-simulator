@@ -131,6 +131,7 @@ func (s *Server) registerRoutes(e *echo.Echo) {
 	e.PUT("/v1/nodes/:id", s.handleNodeUpdate)
 	e.DELETE("/v1/nodes/:id", s.handleNodeDelete)
 	e.PUT("/v1/nodes/:id/cascade", s.handleNodeCascade)
+	e.GET("/v1/nodes/:id/cascade/sessions", s.handleCascadeSessions)
 	e.POST("/v1/nodes/:id/start", s.handleNodeStart)
 	e.POST("/v1/nodes/:id/stop", s.handleNodeStop)
 	e.POST("/v1/nodes/:id/unregister", s.handleNodeUnregister)

@@ -72,6 +72,18 @@ func buildResponse(
 		hdrs = append(hdrs, h)
 	}
 	hdrs = append(hdrs, extra...)
+	// Network timing (GB/T 28181 §7.10 / 9.10): stamp Date unless the caller
+	// already supplied one (REGISTER answers pass an explicit clock value).
+	hasDate := false
+	for _, h := range hdrs {
+		if strings.EqualFold(h.Name(), "Date") {
+			hasDate = true
+			break
+		}
+	}
+	if !hasDate {
+		hdrs = append(hdrs, model.NewHeader("Date", httpDate(time.Now())))
+	}
 	return model.NewResponse(status, reason, hdrs, body)
 }
 

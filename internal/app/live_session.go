@@ -341,6 +341,14 @@ func (s *NodeService) GetLive(_ context.Context, id model.NodeID, channelID stri
 	return info, true
 }
 
+// ListCascadeSessions reports active media relays on the node (read-only).
+func (s *NodeService) ListCascadeSessions(_ context.Context, id model.NodeID) []port.CascadeSession {
+	if s == nil || s.acceptor == nil {
+		return nil
+	}
+	return s.acceptor.ListCascadeSessions(id)
+}
+
 // LivePS hands a consumer the PS frames of an active pull. The third return
 // is false when no session exists for the channel, which is how the FLV
 // gateway decides to fall back to the local media source.

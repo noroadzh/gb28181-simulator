@@ -68,6 +68,11 @@ type Acceptor struct {
 	relayMedia  mediaRelayService
 	mediaRelays *mediaRelayTable
 
+	// networkSkew is platform_time − local_clock learned from REGISTER Date
+	// (GB/T 28181 §7.10 network timing). Keyed by node id string.
+	networkSkewMu sync.Mutex
+	networkSkew   map[string]time.Duration
+
 	// deviceTalks holds the audio port each talk dialog opened on this node,
 	// keyed by Call-ID. A device answers a talk INVITE with its own RTP port;
 	// the port lives until the dialog ends.

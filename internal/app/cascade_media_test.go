@@ -432,3 +432,44 @@ func TestRelay_StreamFeedsBus(t *testing.T) {
 		t.Fatal("no PS frame reached the relay's consumer")
 	}
 }
+
+func TestListCascadeSessions_ShowsActiveRelay(t *testing.T) {
+	h := newMediaRelayHarness(t)
+	_, port := upstreamListener(t)
+	if resp := h.relayedInvite(t, "relay-observe", port, 1234); resp.StatusCode() != 200 {
+		t.Fatalf("relay = %d", resp.StatusCode())
+	}
+	sessions := h.svc.ListCascadeSessions(context.Background(), h.h.nodeID)
+	if len(sessions) != 1 {
+		t.Fatalf("sessions = %d, want 1 (%+v)", len(sessions), sessions)
+	}
+	got := sessions[0]
+	if got.UpstreamCallID != "relay-observe" || got.ChannelID != mediaRelayChannel {
+		t.Errorf("session = %+v", got)
+	}
+	if got.LocalPort <= 0 || got.Transport == "" {
+		t.Errorf("missing transport/port: %+v", got)
+	}
+
+	bye, err := model.NewRequest("BYE", "sip:"+h.h.nodeID.String()+"@3402000000", []model.Header{
+		model.NewHeader("From", "<sip:34020000002000000009@3402000000>;tag=up"),
+		model.NewHeader("To", "<sip:"+h.h.nodeID.String()+"@3402000000>"),
+		model.NewHeader("Call-ID", "relay-observe"),
+		model.NewHeader("CSeq", "2 BYE"),
+		model.NewHeader("Via", "SIP/2.0/UDP 127.0.0.1:15070;branch=z9hG4bK-bye-obs"),
+	}, "")
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	if resp := h.h.tr.deliver(t, bye); resp.StatusCode() != 200 {
+		t.Fatalf("BYE status = %d", resp.StatusCode())
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(h.svc.ListCascadeSessions(context.Background(), h.h.nodeID)) == 0 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("sessions still present after BYE: %+v", h.svc.ListCascadeSessions(context.Background(), h.h.nodeID))
+}

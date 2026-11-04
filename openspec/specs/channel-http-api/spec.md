@@ -352,6 +352,15 @@
 - **WHEN** 该通道没有活动拉流会话
 - **THEN** GET live 返回 404
 
+### Requirement: 级联媒体会话列表端点
+
+系统 MUST 提供 `GET /v1/nodes/:id/cascade/sessions`，返回 `200 {sessions:[...]}`；未知节点返回 `404`。无活动中继时 `sessions` MUST 为空数组。
+
+#### Scenario: 列出中继
+
+- **WHEN** 对平台节点 GET cascade/sessions
+- **THEN** 返回当前媒体中继会话列表
+
 ### Requirement: 平台录像 HTTP 端点
 
 系统 MUST 提供平台录像的查询与回放端点：

@@ -3,10 +3,12 @@ import { ref, reactive, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useNodeStore } from '../stores/nodes'
+import { useRoleStore } from '../stores/role'
 import { api } from '../api'
 
 const router = useRouter()
 const store = useNodeStore()
+const roleStore = useRoleStore()
 const filterKind = ref('')
 
 // 节点控制操作的 loading 状态：每节点一项，按 node.id 索引，
@@ -291,7 +293,10 @@ async function submitCascade () {
 }
 
 const filteredList = computed(() =>
-  store.list.filter(n => !filterKind.value || n.kind === filterKind.value)
+  store.list.filter(n => {
+    if (!roleStore.nodeMatches(n.kind)) return false
+    return !filterKind.value || n.kind === filterKind.value
+  })
 )
 
 onMounted(refresh)

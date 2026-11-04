@@ -11,17 +11,19 @@ import RecordView from '../views/RecordView.vue'
 import AccountsView from '../views/AccountsView.vue'
 import HelpView from '../views/HelpView.vue'
 import LogView from '../views/LogView.vue'
+import CascadeView from '../views/CascadeView.vue'
 
 const routes = [
   { path: '/', redirect: '/dashboard' },
   { path: '/nodes', name: 'nodes', component: NodesView, meta: { title: '节点概览' } },
-  { path: '/accounts/:id?', name: 'accounts', component: AccountsView, meta: { title: '账号管理' } },
+  { path: '/accounts/:id?', name: 'accounts', component: AccountsView, meta: { title: '账号管理', roles: ['platform'] } },
+  { path: '/cascade', name: 'cascade', component: CascadeView, meta: { title: '级联中继', roles: ['platform'] } },
   { path: '/help', name: 'help', component: HelpView, meta: { title: '帮助' } },
   { path: '/capture/:id?', name: 'capture', component: CaptureView, meta: { title: '抓包面板' } },
   { path: '/fault/:id?', name: 'fault', component: FaultView, meta: { title: '故障注入' } },
   { path: '/scenarios', name: 'scenarios', component: ScenarioView, meta: { title: '场景管理' } },
   { path: '/dashboard', name: 'dashboard', component: DashboardView, meta: { title: '仪表盘' } },
-  { path: '/media/:id?', name: 'media', component: MediaView, meta: { title: '媒体源配置' } },
+  { path: '/media/:id?', name: 'media', component: MediaView, meta: { title: '媒体源配置', roles: ['device'] } },
   { path: '/channels/:id', name: 'channels', component: ChannelListView, meta: { title: '通道列表' } },
   { path: '/channel/:id/:ch', name: 'channel', component: ChannelDetailView, meta: { title: '通道详情' } },
   { path: '/record/:id/:ch', name: 'record', component: RecordView, meta: { title: '录像回放' } },

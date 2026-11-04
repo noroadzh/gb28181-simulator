@@ -101,6 +101,9 @@ type ChannelView interface {
 	// GetLive returns the active live-pull session for the channel, if any.
 	GetLive(ctx context.Context, id model.NodeID, channelID string) (port.LiveSessionInfo, bool)
 
+	// ListCascadeSessions returns active cascade media relays for the node.
+	ListCascadeSessions(ctx context.Context, id model.NodeID) []port.CascadeSession
+
 	// Snapshot triggers a SnapShot NOTIFY; returns the snapshot bytes
 	// (PNG/JPEG), the media type, and an error. The first return is empty
 	// when the platform does not have a snapshot subsystem and the request

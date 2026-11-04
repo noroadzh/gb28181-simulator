@@ -169,6 +169,13 @@ func (s *NodeService) WithRegistrar(r *Registrar) (*NodeService, error) {
 		return nil, fmt.Errorf("app: NodeService requires a non-nil Registrar")
 	}
 	s.registrar = r
+	// Network timing: remember platform Date from REGISTER 200 so DeviceTime
+	// answers follow the platform clock (模拟级校时).
+	r.AfterOK(func(id model.NodeID, msg model.Message) {
+		if s.acceptor != nil {
+			s.acceptor.ObserveNetworkDate(id, msg)
+		}
+	})
 	return s, nil
 }
 

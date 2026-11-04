@@ -697,6 +697,10 @@ func (a autoIDChannelView) GetLive(_ context.Context, _ model.NodeID, _ string) 
 	return port.LiveSessionInfo{}, false
 }
 
+func (a autoIDChannelView) ListCascadeSessions(_ context.Context, _ model.NodeID) []port.CascadeSession {
+	return nil
+}
+
 func (a autoIDChannelView) Recordings(_ context.Context, _ model.NodeID, _ string, _, _ time.Time) ([]port.Recording, error) {
 	return nil, fmt.Errorf("recording unsupported")
 }

@@ -93,6 +93,10 @@ export const api = {
     return fetch(`${BASE}/v1/nodes/${encodeURIComponent(nodeId)}/channels/${encodeURIComponent(ch)}/live`).then(ok)
   },
 
+  listCascadeSessions (nodeId) {
+    return fetch(`${BASE}/v1/nodes/${encodeURIComponent(nodeId)}/cascade/sessions`).then(ok)
+  },
+
   // ─── Talk ───────────────────────────────────────────────────────────────────
 
   startTalk (nodeId, ch) {

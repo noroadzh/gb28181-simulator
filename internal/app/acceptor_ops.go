@@ -52,9 +52,16 @@ func (a *Acceptor) handleDeviceStatus(ctx context.Context, p *platform, req mode
 		})
 	}
 	result, online, status := model.DeviceStatusResult(true)
+	// Prefer an inbound Date (active 校时) then the REGISTER-learned skew.
+	deviceTime := a.networkNow(p.id)
+	if h, ok := req.Header("Date"); ok {
+		if t, err := parseSIPDate(h.Value()); err == nil {
+			deviceTime = t
+		}
+	}
 	body, err := a.manscdp.MarshalDeviceStatusResponse(model.DeviceStatusResponse{
 		SN: query.SN, DeviceID: p.id.String(), Result: result, Online: online, Status: status,
-		DeviceTime: time.Now().Format("2006-01-02T15:04:05"),
+		DeviceTime: deviceTime.Format("2006-01-02T15:04:05"),
 	})
 	if err != nil {
 		return model.Message{}, false
