@@ -51,6 +51,7 @@
 | 44 | `device-control-coverage` | 六类运维命令 | ✅ 已归档 | DeviceStatus、Broadcast（ack + 设备主动音频 INVITE）、报警查询与布防撤防、ConfigDownload、DeviceUpgrade/TeleBoot、文件下载；HTTP 七个入口；平台异步转发下级（2026-10-30） |
 | 45 | `docs-sync-gb28181-coverage` | 国标覆盖文档同步 | ✅ 已归档 | 修正架构/规格漂移、GuardCmd 用词、新增 `docs/gb28181-coverage.md`、路线图承接（2026-11-04） |
 | 46 | `interop-hardening` | 控制语义加深 | ✅ 已归档 | 入站 PlaybackControl 驱动会话、PTZ 状态、光圈/预置位、RecordCmd/IFrame、未实现显式 ERROR（2026-11-04） |
+| 47 | `webui-platform-live-and-recordings` | Web UI 平台拉流与录像库 | ✅ 已归档 | 平台通道拉流/预览、`GET …/live`、平台录像库页；设备页行为不变（2026-11-04） |
 
 ## 补充归档索引
 
@@ -109,6 +110,6 @@
 - 原始路线图中 #3 为 `core-manscdp-and-ps`，后被 `enterprise-skeleton` 占位，本文件保留原始编号顺序。
 - 部分 change 内部拆分为多个子 change 归档；它们与无编号跟进统一登记在「补充归档索引」。
 - #10 原名 `dynamic-catalog-and-query`，实际由 `dynamic-sim-features` change 实现（动态目录/报警、录像与回放、移动位置、运行时触发 API）。
-- 已完成 46 个编号（#1–#46），含 2026-11-04 归档的 #45/#46。
-- 当前无进行中条目；#47+ 候选：Web UI 平台拉流/录像库入口、cascade 可观测性、校时/媒体保活、SIP TLS / SRTP。
+- 已完成 47 个编号（#1–#47），含 2026-11-04 归档的 #45/#46/#47。
+- 当前无进行中条目；#48+ 候选：cascade 可观测性、校时/媒体保活、SIP TLS / SRTP。
 - 路线图同步契约见 capability `docs-roadmap-sync`；每次归档必须在同提交更新本文件；协议面归档须同步 `docs/gb28181-coverage.md`。

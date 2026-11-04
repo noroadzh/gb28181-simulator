@@ -287,6 +287,7 @@ func (s *NodeService) startLiveWithKey(ctx context.Context, key liveKey, id mode
 	}
 
 	sess.callID = callID
+	sess.info.SessionID = "live-" + channelID
 	sess.info.SSRC = parsed.SSRC
 	sess.deizer = s.liveDeizer(parsed.SSRC)
 
@@ -323,6 +324,21 @@ func (s *NodeService) StopLive(ctx context.Context, id model.NodeID, channelID s
 	}
 	s.endLive(sess, true)
 	return nil
+}
+
+// GetLive reports the active pull for (node, channel), if any. Relay sessions
+// (keyed with a peer Call-ID) are not visible here — they belong to cascade
+// observability, not the operator live control surface.
+func (s *NodeService) GetLive(_ context.Context, id model.NodeID, channelID string) (port.LiveSessionInfo, bool) {
+	sess := s.liveSession(liveKey{id.String(), channelID})
+	if sess == nil {
+		return port.LiveSessionInfo{}, false
+	}
+	info := sess.info
+	if info.SessionID == "" {
+		info.SessionID = "live-" + channelID
+	}
+	return info, true
 }
 
 // LivePS hands a consumer the PS frames of an active pull. The third return

@@ -693,6 +693,10 @@ func (a autoIDChannelView) StopLive(_ context.Context, _ model.NodeID, _ string)
 	return nil
 }
 
+func (a autoIDChannelView) GetLive(_ context.Context, _ model.NodeID, _ string) (port.LiveSessionInfo, bool) {
+	return port.LiveSessionInfo{}, false
+}
+
 func (a autoIDChannelView) Recordings(_ context.Context, _ model.NodeID, _ string, _, _ time.Time) ([]port.Recording, error) {
 	return nil, fmt.Errorf("recording unsupported")
 }

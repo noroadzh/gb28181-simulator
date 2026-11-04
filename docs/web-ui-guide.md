@@ -47,8 +47,8 @@
 |------|----------|----------|
 | 端口（Docker） | `18080` | `18081` |
 | 节点类型 | platform-large / platform-small | device |
-| 有无通道 | ❌ 无 | ✅ 有 |
-| 通道/媒体源/PTZ/对讲功能 | 不可用（界面不显示） | 完整可用 |
+| 有无通道 | ✅ 有（聚合下级；可拉流） | ✅ 有 |
+| 通道/媒体源/PTZ/对讲功能 | 通道拉流 + 平台录像库可用；无本地媒体源/PTZ/对讲面板 | 完整可用（本地源/PTZ/对讲/设备录像） |
 | 抓包面板 | ✅ 可用 | ✅ 可用 |
 | 故障注入 | ✅ 可用 | ✅ 可用 |
 | 场景管理 | ✅ 可用 | ✅ 可用 |
@@ -309,8 +309,8 @@ device 节点可展开查看所有通道。该页面从 `GET /v1/nodes/:id/chann
 | 运维命令（#44） | 已实现：DeviceStatus、Broadcast（ack + 设备主动音频 INVITE）、报警查询与布防撤防（GuardCmd）、ConfigDownload 查询/下发、DeviceUpgrade、DeviceControl/TeleBoot；HTTP 入口 `/status`、`/config`、`/upgrade`、`/reboot`、`…/alarms`、`…/alarm-mode`、`…/download` |
 | 级联 MESSAGE 信令中继 | 已实现：按 X-RoutePath / 下一跳投递 MANSCDP MESSAGE 并回传应答；**不等于**媒体中继——不自动转发 INVITE/RTP |
 | 级联媒体中继 | 已实现（独立路径）：上级对属于在线下级的通道发实时视频 INVITE 时，平台作为 B2BUA 双对话桥接（PS 原样转发，两侧传输独立 UDP/TCP）；上级 BYE/下级 BYE 成对传播；中继流同样可预览与录像 |
-| 平台录像 | 已实现：拉流即自动分段录制（`recording.enabled` 默认开，`dir` 默认存储目录下 `recordings/`）；`GET …/recordings` 查询、`GET …/recordings/:id/flv` 回放；平台对上级的 RecordInfo 与回放 INVITE 从录像库作答 |
-| 平台拉流（实时） | 已实现：`POST /v1/nodes/:id/channels/:ch/live`（body 可带 `transport: udp|tcp`）向在线下级发视频 INVITE，返回 `local_port`；`GET /v1/flv/:id/:ch` 优先输出实时会话，`?source=live|local` 显式选择；`POST …/live/stop` 幂等停止 |
+| 平台录像 | 已实现：拉流即自动分段录制（`recording.enabled` 默认开，`dir` 默认存储目录下 `recordings/`）；`GET …/recordings` 查询、`GET …/recordings/:id/flv` 回放；平台对上级的 RecordInfo 与回放 INVITE 从录像库作答；**Web UI**：平台节点录像页走录像库（非设备 RecordInfo） |
+| 平台拉流（实时） | 已实现：`POST …/live`、`POST …/live/stop`、`GET …/live`（无会话 404）；`GET /v1/flv/:id/:ch?source=live|local`；**Web UI**：平台通道详情提供拉流条与 live 预览（隐藏 PTZ/对讲） |
 | CANCEL / re-INVITE | 已实现：CANCEL 在 INVITE 事务挂起时回 200 + 487，否则 481；re-INVITE 关闭旧媒体后重新协商；device 节点正常应答 BYE/CANCEL |
 | GB 35114 | 配置 `security.gb35114` 后启用进程级 SM2 身份：SM3 Digest、可选 SM3 Note、双向 `SecurityInfo` 签名（设备侧验证平台签名，失败即注册失败）；默认关闭 |
 

@@ -98,6 +98,9 @@ type ChannelView interface {
 	// no-op, so callers can retry safely.
 	StopLive(ctx context.Context, id model.NodeID, channelID string) error
 
+	// GetLive returns the active live-pull session for the channel, if any.
+	GetLive(ctx context.Context, id model.NodeID, channelID string) (port.LiveSessionInfo, bool)
+
 	// Snapshot triggers a SnapShot NOTIFY; returns the snapshot bytes
 	// (PNG/JPEG), the media type, and an error. The first return is empty
 	// when the platform does not have a snapshot subsystem and the request

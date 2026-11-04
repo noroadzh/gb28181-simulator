@@ -54,13 +54,43 @@ export const api = {
     }).then(ok)
   },
 
-  // ─── Records ────────────────────────────────────────────────────────────────
+  // ─── Records (device RecordInfo) ────────────────────────────────────────────
 
   listRecords (nodeId, ch, start, end) {
     const u = new URL(`${BASE}/v1/nodes/${encodeURIComponent(nodeId)}/channels/${encodeURIComponent(ch)}/records`, location.href)
     if (start) u.searchParams.set('start', start)
     if (end) u.searchParams.set('end', end)
     return fetch(u).then(ok)
+  },
+
+  // ─── Platform recordings library (#42 / #47) ────────────────────────────────
+
+  listRecordings (nodeId, ch, start, end) {
+    const u = new URL(`${BASE}/v1/nodes/${encodeURIComponent(nodeId)}/channels/${encodeURIComponent(ch)}/recordings`, location.href)
+    if (start) u.searchParams.set('start', start)
+    if (end) u.searchParams.set('end', end)
+    return fetch(u).then(ok)
+  },
+  recordingFlvUrl (nodeId, ch, recordingId) {
+    return `${BASE}/v1/nodes/${encodeURIComponent(nodeId)}/channels/${encodeURIComponent(ch)}/recordings/${encodeURIComponent(recordingId)}/flv`
+  },
+
+  // ─── Platform live pull (#41 / #47) ─────────────────────────────────────────
+
+  startLive (nodeId, ch, transport = 'udp') {
+    return fetch(`${BASE}/v1/nodes/${encodeURIComponent(nodeId)}/channels/${encodeURIComponent(ch)}/live`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ transport })
+    }).then(ok)
+  },
+  stopLive (nodeId, ch) {
+    return fetch(`${BASE}/v1/nodes/${encodeURIComponent(nodeId)}/channels/${encodeURIComponent(ch)}/live/stop`, {
+      method: 'POST'
+    }).then(ok)
+  },
+  getLive (nodeId, ch) {
+    return fetch(`${BASE}/v1/nodes/${encodeURIComponent(nodeId)}/channels/${encodeURIComponent(ch)}/live`).then(ok)
   },
 
   // ─── Talk ───────────────────────────────────────────────────────────────────
@@ -80,10 +110,13 @@ export const api = {
 
   // ─── Flv stream URL ─────────────────────────────────────────────────────────
 
-  flvUrl (nodeId, ch) {
+  flvUrl (nodeId, ch, opts = {}) {
     // 相对路径：自动跟随当前页面的 host + port 与后端主 HTTP 监听地址，
     // 避免与后端实际端口/路径不匹配导致 404。
-    return `${BASE}/v1/flv/${encodeURIComponent(nodeId)}/${encodeURIComponent(ch)}`
+    // opts.source: 'live' | 'local' | 'auto'（缺省由后端 live-优先）
+    let url = `${BASE}/v1/flv/${encodeURIComponent(nodeId)}/${encodeURIComponent(ch)}`
+    if (opts.source) url += `?source=${encodeURIComponent(opts.source)}`
+    return url
   },
 
   // ─── Media file URL (native <video src>) ────────────────────────────────────

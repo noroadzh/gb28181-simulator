@@ -12,11 +12,20 @@ const nodeId = computed(() => route.params.id)
 const channelId = computed(() => route.params.ch)
 
 const channel = ref(null)
+const nodeKind = ref('')
+const isPlatform = computed(() => String(nodeKind.value || '').startsWith('platform'))
 const loading = ref(false)
 const playing = ref(false)
 const playerError = ref('')
 const playerRef = ref(null)
 let player = null
+
+// Platform live pull (#47)
+const liveTransport = ref('udp')
+const liveBusy = ref(false)
+const liveError = ref('')
+const liveSession = ref(null)
+const liveActive = computed(() => !!liveSession.value)
 
 // 播放模式：'native' | 'flv' | null
 const playerMode = ref(null)
@@ -28,6 +37,7 @@ let playGeneration = 0
 
 function currentPlayUrl () {
   if (playerMode.value === 'native') return api.mediaFileUrl(nodeId.value, channelId.value)
+  if (isPlatform.value) return api.flvUrl(nodeId.value, channelId.value, { source: 'live' })
   return api.flvUrl(nodeId.value, channelId.value)
 }
 
@@ -71,15 +81,58 @@ const snapshotVisible = ref(false)
 async function loadChannel () {
   loading.value = true
   try {
-    channel.value = await api.listChannels(nodeId.value).then(cs => {
-      const found = Array.isArray(cs) ? cs.find(c => c.id === channelId.value) : null
-      if (!found) throw new Error('通道不存在')
-      return found
-    })
+    const [cs, node] = await Promise.all([
+      api.listChannels(nodeId.value),
+      api.getNode(nodeId.value).catch(() => null)
+    ])
+    nodeKind.value = node?.kind || ''
+    channel.value = Array.isArray(cs) ? cs.find(c => c.id === channelId.value) : null
+    if (!channel.value) throw new Error('通道不存在')
+    if (isPlatform.value) await refreshLive()
   } catch (e) {
     ElMessage.error(`加载失败：${e.message}`)
   } finally {
     loading.value = false
+  }
+}
+
+async function refreshLive () {
+  try {
+    liveSession.value = await api.getLive(nodeId.value, channelId.value)
+    liveError.value = ''
+  } catch (_) {
+    liveSession.value = null
+  }
+}
+
+async function startLivePull () {
+  liveBusy.value = true
+  liveError.value = ''
+  try {
+    liveSession.value = await api.startLive(nodeId.value, channelId.value, liveTransport.value)
+    ElMessage.success(`拉流成功 · ${liveSession.value.transport}:${liveSession.value.local_port}`)
+  } catch (e) {
+    liveSession.value = null
+    liveError.value = e.message
+    ElMessage.error(`拉流失败：${e.message}`)
+  } finally {
+    liveBusy.value = false
+  }
+}
+
+async function stopLivePull () {
+  liveBusy.value = true
+  liveError.value = ''
+  try {
+    if (playing.value) stopPlay()
+    await api.stopLive(nodeId.value, channelId.value)
+    liveSession.value = null
+    ElMessage.success('已停止拉流')
+  } catch (e) {
+    liveError.value = e.message
+    ElMessage.error(`停止失败：${e.message}`)
+  } finally {
+    liveBusy.value = false
   }
 }
 
@@ -91,7 +144,9 @@ function startFlv () {
     return
   }
   playerMode.value = 'flv'
-  const url = api.flvUrl(nodeId.value, channelId.value)
+  const url = isPlatform.value
+    ? api.flvUrl(nodeId.value, channelId.value, { source: 'live' })
+    : api.flvUrl(nodeId.value, channelId.value)
   player = flvjs.createPlayer({
     type: 'flv',
     url,
@@ -206,8 +261,20 @@ function stopPlay () {
   playerMode.value = null
 }
 
-// 播放入口：解析媒体配置后分派播放模式。
+// 播放入口：平台走 live FLV；设备解析媒体配置后分派播放模式。
 async function startPlay () {
+  if (isPlatform.value) {
+    if (!liveActive.value) {
+      playerError.value = '请先点击「开始拉流」'
+      ElMessage.warning('请先开始拉流')
+      return
+    }
+    stopPlay()
+    fallbackToFlv.value = false
+    playerError.value = ''
+    startFlv()
+    return
+  }
   if (!channel.value?.has_media) {
     playerError.value = '该通道未配置媒体源'
     return
@@ -415,15 +482,46 @@ onMounted(loadChannel)
       <el-col :span="16">
         <div style="position:relative;background:#000;border-radius:8px;overflow:hidden;aspect-ratio:16/9">
           <video ref="playerRef" style="width:100%;height:100%;display:block" muted @error="onVideoError"></video>
-          <div v-if="!channel?.has_media" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;color:#9ca3af">
+          <div v-if="!isPlatform && !channel?.has_media" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;color:#9ca3af">
             <div style="font-size:40px;opacity:0.4">📹</div>
             <div>通道未配置媒体源</div>
             <el-button type="primary" size="small" @click="router.push({ name: 'channels', params: { id: nodeId } })">去配置</el-button>
+          </div>
+          <div v-else-if="isPlatform && !liveActive && !playing && !playerError" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;color:#9ca3af">
+            <div style="font-size:40px;opacity:0.4">📡</div>
+            <div>平台通道：先拉流再播放下级实时画面</div>
           </div>
           <div v-else-if="playerError" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;color:#ef4444">
             <div style="font-size:32px">⚠️</div>
             <div style="font-size:13px">{{ playerError }}</div>
           </div>
+        </div>
+
+        <!-- 平台拉流条 -->
+        <div v-if="isPlatform" style="margin-top:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:#111827;border-radius:8px;padding:12px">
+          <span style="font-size:13px;color:#9ca3af">实时拉流</span>
+          <el-radio-group v-model="liveTransport" size="small" :disabled="liveActive || liveBusy">
+            <el-radio-button label="udp">UDP</el-radio-button>
+            <el-radio-button label="tcp">TCP</el-radio-button>
+          </el-radio-group>
+          <el-button
+            v-if="!liveActive"
+            type="primary"
+            size="small"
+            :loading="liveBusy"
+            @click="startLivePull"
+          >开始拉流</el-button>
+          <el-button
+            v-else
+            type="danger"
+            size="small"
+            :loading="liveBusy"
+            @click="stopLivePull"
+          >停止拉流</el-button>
+          <el-tag v-if="liveSession" size="small" type="success">
+            {{ liveSession.session_id }} · {{ liveSession.transport }}:{{ liveSession.local_port }}
+          </el-tag>
+          <span v-if="liveError" style="color:#f59e0b;font-size:12px">{{ liveError }}</span>
         </div>
 
         <!-- 播放控制栏 -->
@@ -432,9 +530,10 @@ onMounted(loadChannel)
             {{ playing ? '停止播放' : '开始播放' }}
           </el-button>
           <el-button @click="copyPlayUrl" size="small">{{ playerMode === 'native' ? '复制播放地址' : '复制FLV地址' }}</el-button>
-          <el-button @click="takeSnapshot" size="small" :disabled="!playing">快照</el-button>
-          <el-button @click="ptzVisible = !ptzVisible" size="small" :type="ptzVisible ? 'warning' : ''">云台控制</el-button>
+          <el-button v-if="!isPlatform" @click="takeSnapshot" size="small" :disabled="!playing">快照</el-button>
+          <el-button v-if="!isPlatform" @click="ptzVisible = !ptzVisible" size="small" :type="ptzVisible ? 'warning' : ''">云台控制</el-button>
           <el-button
+            v-if="!isPlatform"
             :type="talkActive ? 'warning' : ''"
             @click="talkActive ? stopTalk() : startTalk()"
             size="small"
@@ -445,8 +544,8 @@ onMounted(loadChannel)
           <span v-if="talkError" style="color:#f59e0b;font-size:12px">{{ talkError }}</span>
         </div>
 
-        <!-- PTZ 面板 -->
-        <div v-if="ptzVisible" style="margin-top:16px;background:#111827;border-radius:8px;padding:16px">
+        <!-- PTZ 面板（仅设备） -->
+        <div v-if="!isPlatform && ptzVisible" style="margin-top:16px;background:#111827;border-radius:8px;padding:16px">
           <div style="margin-bottom:12px;font-size:13px;color:#9ca3af">云台控制 · 速度 {{ ptzSpeed }}%</div>
           <el-slider v-model="ptzSpeed" :min="10" :max="100" style="max-width:300px;margin-bottom:16px" />
           <div style="display:grid;grid-template-columns:repeat(5,60px);grid-template-rows:repeat(3,50px);gap:6px;width:fit-content">
@@ -510,17 +609,21 @@ onMounted(loadChannel)
         <el-card shadow="never" style="background:#111827;border:1px solid #1F2937">
           <template #header><b style="color:#F9FAFB">通道信息</b></template>
           <div style="font-size:13px;line-height:2.2;color:#D1D5DB">
-            <div><b style="color:#9ca3af">设备ID：</b>{{ nodeId }}</div>
+            <div><b style="color:#9ca3af">节点ID：</b>{{ nodeId }}</div>
+            <div><b style="color:#9ca3af">类型：</b>{{ nodeKind || '—' }}</div>
             <div><b style="color:#9ca3af">通道ID：</b>{{ channelId }}</div>
             <div><b style="color:#9ca3af">状态：</b>
               <el-tag :type="channel?.status === 'on' ? 'success' : 'info'" size="small">{{ channel?.status }}</el-tag>
             </div>
-            <div><b style="color:#9ca3af">媒体源：</b>{{ channel?.has_media ? '已配置' : '未配置' }}</div>
+            <div v-if="!isPlatform"><b style="color:#9ca3af">媒体源：</b>{{ channel?.has_media ? '已配置' : '未配置' }}</div>
+            <div v-else><b style="color:#9ca3af">拉流：</b>{{ liveActive ? '进行中' : '未拉流' }}</div>
             <div v-if="channel?.online_url"><b style="color:#9ca3af">拉流URL：</b><code style="font-size:11px;word-break:break-all">{{ channel.online_url }}</code></div>
           </div>
           <div style="margin-top:16px;display:flex;flex-direction:column;gap:8px">
-            <el-button type="primary" @click="router.push({ name: 'record', params: { id: nodeId, ch: channelId } })" size="small">录像回放</el-button>
-            <el-button @click="router.push({ name: 'media', params: { id: nodeId } })" size="small">媒体源配置</el-button>
+            <el-button type="primary" @click="router.push({ name: 'record', params: { id: nodeId, ch: channelId } })" size="small">
+              {{ isPlatform ? '平台录像库' : '录像回放' }}
+            </el-button>
+            <el-button v-if="!isPlatform" @click="router.push({ name: 'media', params: { id: nodeId } })" size="small">媒体源配置</el-button>
           </div>
         </el-card>
 

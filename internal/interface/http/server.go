@@ -175,6 +175,7 @@ func (s *Server) registerRoutes(e *echo.Echo) {
 	e.POST("/v1/nodes/:id/channels/:ch/download", s.handleChannelDownload)
 	e.GET("/v1/nodes/:id/channels/:ch/recordings", s.handleRecordingList)
 	e.GET("/v1/nodes/:id/channels/:ch/recordings/:recording/flv", s.handleRecordingFLV)
+	e.GET("/v1/nodes/:id/channels/:ch/live", s.handleLiveGet)
 	e.POST("/v1/nodes/:id/channels/:ch/live", s.handleLiveStart)
 	e.POST("/v1/nodes/:id/channels/:ch/live/stop", s.handleLiveStop)
 	e.GET("/v1/nodes/:id/channels/:ch/talk/audio", s.handleTalkAudio)

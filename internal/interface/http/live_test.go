@@ -28,6 +28,7 @@ type liveView struct {
 	startedTransport string
 	stopped          bool
 	startCalls       int
+	active           *port.LiveSessionInfo
 }
 
 func (v *liveView) StartLive(_ context.Context, _ model.NodeID, channelID, transport string) (port.LiveSessionInfo, error) {
@@ -36,12 +37,22 @@ func (v *liveView) StartLive(_ context.Context, _ model.NodeID, channelID, trans
 	if v.startErr != nil {
 		return port.LiveSessionInfo{}, v.startErr
 	}
-	return port.LiveSessionInfo{SessionID: "live-" + channelID, Transport: transport, LocalPort: 41000, SSRC: 12345}, nil
+	info := port.LiveSessionInfo{SessionID: "live-" + channelID, Transport: transport, LocalPort: 41000, SSRC: 12345}
+	v.active = &info
+	return info, nil
 }
 
 func (v *liveView) StopLive(_ context.Context, _ model.NodeID, _ string) error {
 	v.stopped = true
+	v.active = nil
 	return v.stopErr
+}
+
+func (v *liveView) GetLive(_ context.Context, _ model.NodeID, _ string) (port.LiveSessionInfo, bool) {
+	if v.active == nil {
+		return port.LiveSessionInfo{}, false
+	}
+	return *v.active, true
 }
 
 func newLiveServer(t *testing.T, view httpapi.ChannelView) (*httptest.Server, model.NodeID) {
@@ -175,6 +186,50 @@ func TestLiveStop_Is204(t *testing.T) {
 	}
 	if !view.stopped {
 		t.Error("the service was not asked to stop")
+	}
+}
+
+func TestLiveGet_ReportsActiveSession(t *testing.T) {
+	view := &liveView{fakeChannelView: newFakeChannelView()}
+	ts, nodeID := newLiveServer(t, view)
+	base := ts.URL + "/v1/nodes/" + nodeID.String() + "/channels/ch-1/live"
+
+	resp, err := http.Get(base)
+	if err != nil {
+		t.Fatalf("GET live: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("idle status = %d, want 404", resp.StatusCode)
+	}
+
+	start, err := http.Post(base, "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST live: %v", err)
+	}
+	_ = start.Body.Close()
+	if start.StatusCode != http.StatusOK {
+		t.Fatalf("POST status = %d, want 200", start.StatusCode)
+	}
+
+	resp, err = http.Get(base)
+	if err != nil {
+		t.Fatalf("GET live after start: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got struct {
+		SessionID string `json:"session_id"`
+		Transport string `json:"transport"`
+		LocalPort int    `json:"local_port"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.SessionID != "live-ch-1" || got.Transport != "udp" || got.LocalPort != 41000 {
+		t.Errorf("response = %+v", got)
 	}
 }
 

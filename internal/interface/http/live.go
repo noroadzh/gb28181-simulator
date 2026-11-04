@@ -4,9 +4,10 @@ package httpapi
 //
 //	POST /v1/nodes/:id/channels/:ch/live        start pulling the channel
 //	POST /v1/nodes/:id/channels/:ch/live/stop   stop it (idempotent)
+//	GET  /v1/nodes/:id/channels/:ch/live        report the active session (404 if none)
 //
 // The pull itself is a SIP dialog the platform opens with the downstream
-// device; these endpoints only start and stop it.
+// device; these endpoints only start, stop, and inspect it.
 
 import (
 	"errors"
@@ -92,6 +93,33 @@ func (s *Server) handleLiveStop(c echo.Context) error {
 		return liveError(c, err)
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+func (s *Server) handleLiveGet(c echo.Context) error {
+	if s.channels == nil {
+		return c.JSON(http.StatusNotImplemented, errorBody{Error: "channels not implemented"})
+	}
+	id, err := s.nodeIDParam(c)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, errorBody{Error: err.Error()})
+	}
+	channelID := strings.TrimSpace(c.Param("ch"))
+	if channelID == "" {
+		return c.JSON(http.StatusBadRequest, errorBody{Error: "channel id is required"})
+	}
+	if !s.nodeExists(c.Request().Context(), id) {
+		return c.JSON(http.StatusNotFound, errorBody{Error: "unknown node " + id.String()})
+	}
+	info, ok := s.channels.GetLive(c.Request().Context(), id, channelID)
+	if !ok {
+		return c.JSON(http.StatusNotFound, errorBody{Error: "no active live session"})
+	}
+	return c.JSON(http.StatusOK, liveStartResponse{
+		SessionID: info.SessionID,
+		Transport: info.Transport,
+		LocalPort: info.LocalPort,
+		SSRC:      info.SSRC,
+	})
 }
 
 // liveError maps the live-pull vocabulary onto HTTP. The distinction that

@@ -367,6 +367,10 @@ func (f *fakeChannelView) StopLive(_ context.Context, _ model.NodeID, _ string) 
 	return nil
 }
 
+func (f *fakeChannelView) GetLive(_ context.Context, _ model.NodeID, _ string) (port.LiveSessionInfo, bool) {
+	return port.LiveSessionInfo{}, false
+}
+
 func (f *fakeChannelView) Recordings(_ context.Context, _ model.NodeID, _ string, _, _ time.Time) ([]port.Recording, error) {
 	return nil, fmt.Errorf("recording unsupported")
 }

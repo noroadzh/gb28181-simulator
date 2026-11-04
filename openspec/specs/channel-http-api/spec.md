@@ -312,6 +312,7 @@
 
 - `POST /v1/nodes/:id/channels/:ch/live` MUST 拉起实时会话，请求体可带 `{"transport": "udp"|"tcp"}`（缺省 `udp`），成功返回 `200 {session_id, transport, local_port, ssrc?}`。
 - `POST /v1/nodes/:id/channels/:ch/live/stop` MUST 停止该通道的实时会话，成功返回 `204`。
+- `GET /v1/nodes/:id/channels/:ch/live` MUST 在有活动会话时返回 `200` 与同上字段；无会话返回 `404`；MUST NOT 创建或修改会话。
 
 失败 MUST 可辨识：节点身份不支持拉流（如 `device`）返回 `501`；没有可拉取的下级设备返回 `404`；设备不可达或应答不可用返回 `502`；设备无最终应答返回 `504`；通道或节点不存在返回 `404`。停止一个不存在的会话 MUST 返回 `204`（幂等）。
 
@@ -340,6 +341,16 @@
 
 - **WHEN** 对没有活动会话的通道调用 live stop
 - **THEN** 返回 204，不报错
+
+#### Scenario: 查询活动会话
+
+- **WHEN** 平台已对某通道成功 POST live
+- **THEN** GET live 返回 200 与同一会话的 transport、local_port
+
+#### Scenario: 无会话查询
+
+- **WHEN** 该通道没有活动拉流会话
+- **THEN** GET live 返回 404
 
 ### Requirement: 平台录像 HTTP 端点
 

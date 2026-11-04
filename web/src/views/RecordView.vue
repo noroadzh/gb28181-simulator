@@ -19,7 +19,9 @@ const playerRef = ref(null)
 let player = null
 const playing = ref(false)
 const playError = ref('')
-// activeSn is the playback session currently streaming, if any.
+const nodeKind = ref('')
+const isPlatform = computed(() => String(nodeKind.value || '').startsWith('platform'))
+// activeSn is the device-side playback session currently streaming, if any.
 let activeSn = ''
 
 function formatTime (offsetSec) {
@@ -28,10 +30,55 @@ function formatTime (offsetSec) {
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
+function toRFC3339Local (value) {
+  const d = new Date(String(value).replace(' ', 'T'))
+  return isNaN(d.getTime()) ? value : d.toISOString()
+}
+
+function mapPlatformRecordings (body) {
+  const list = Array.isArray(body?.recordings) ? body.recordings : (Array.isArray(body) ? body : [])
+  return list.map((r) => {
+    const start = r.start_time
+    const end = r.end_time
+    const ms = Math.max(0, new Date(end) - new Date(start))
+    return {
+      id: r.id,
+      start_time: start,
+      end_time: end,
+      duration: Math.round(ms / 1000),
+      size: r.size,
+      file_path: r.file_path,
+      type: '平台录像',
+      _platform: true
+    }
+  })
+}
+
+async function ensureKind () {
+  if (nodeKind.value) return
+  try {
+    const node = await api.getNode(nodeId.value)
+    nodeKind.value = node?.kind || ''
+  } catch (_) {
+    nodeKind.value = ''
+  }
+}
+
 async function query () {
   loading.value = true
   try {
-    records.value = await api.listRecords(nodeId.value, channelId.value, startTime.value, endTime.value)
+    await ensureKind()
+    if (isPlatform.value) {
+      const body = await api.listRecordings(
+        nodeId.value,
+        channelId.value,
+        toRFC3339Local(startTime.value),
+        toRFC3339Local(endTime.value)
+      )
+      records.value = mapPlatformRecordings(body)
+    } else {
+      records.value = await api.listRecords(nodeId.value, channelId.value, startTime.value, endTime.value)
+    }
   } catch (e) {
     ElMessage.error(`查询失败：${e.message}`)
   } finally {
@@ -59,30 +106,10 @@ function sessionSn (rec) {
   return String(raw).replace(/[^0-9A-Za-z]/g, '').slice(-24) || String(Date.now())
 }
 
-async function playRecord (rec) {
-  if (!rec) return
-  destroyPlayer()
-  if (!flvjs.isSupported()) {
-    playError.value = '浏览器不支持 FLV'
-    return
-  }
-  const sn = sessionSn(rec)
-  try {
-    await api.startPlayback(nodeId.value, channelId.value, {
-      sn,
-      start: rfc3339(rec.start_time),
-      end: rfc3339(rec.end_time)
-    })
-  } catch (e) {
-    playError.value = e.message
-    ElMessage.error(`回放建立失败：${e.message}`)
-    return
-  }
-  activeSn = sn
-  playError.value = ''
+function attachFlv (url) {
   player = flvjs.createPlayer({
     type: 'flv',
-    url: api.playbackFlvUrl(nodeId.value, channelId.value, sn),
+    url,
     isLive: false
   }, {
     // 同 ChannelDetailView，关闭 worker 避免 flv.js + Vite 5 的模块继承链崩溃。
@@ -104,9 +131,46 @@ async function playRecord (rec) {
   })
 }
 
+async function playRecord (rec) {
+  if (!rec) return
+  selected.value = rec
+  destroyPlayer()
+  if (!flvjs.isSupported()) {
+    playError.value = '浏览器不支持 FLV'
+    return
+  }
+
+  // Platform library: stream the stored segment; no device playback INVITE.
+  if (isPlatform.value || rec._platform) {
+    if (!rec.id) {
+      playError.value = '录像缺少 id'
+      return
+    }
+    playError.value = ''
+    attachFlv(api.recordingFlvUrl(nodeId.value, channelId.value, rec.id))
+    return
+  }
+
+  const sn = sessionSn(rec)
+  try {
+    await api.startPlayback(nodeId.value, channelId.value, {
+      sn,
+      start: rfc3339(rec.start_time),
+      end: rfc3339(rec.end_time)
+    })
+  } catch (e) {
+    playError.value = e.message
+    ElMessage.error(`回放建立失败：${e.message}`)
+    return
+  }
+  activeSn = sn
+  playError.value = ''
+  attachFlv(api.playbackFlvUrl(nodeId.value, channelId.value, sn))
+}
+
 function destroyPlayer () {
   // Ending the local view also ends the server-side session, so the device
-  // stops sending.
+  // stops sending. Platform recording FLV needs no teardown INVITE.
   if (activeSn) {
     api.stopPlayback(nodeId.value, channelId.value, activeSn).catch(() => {})
     activeSn = ''
@@ -132,7 +196,10 @@ onBeforeUnmount(destroyPlayer)
   <div style="min-height:100vh;background:#0B1120;color:#F9FAFB;padding:16px">
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
       <el-button @click="router.back()" size="small">返回</el-button>
-      <span style="font-size:18px;font-weight:600">{{ nodeId }} / {{ channelId }} · 录像回放</span>
+      <span style="font-size:18px;font-weight:600">
+        {{ nodeId }} / {{ channelId }} · {{ isPlatform ? '平台录像库' : '录像回放' }}
+      </span>
+      <el-tag v-if="nodeKind" size="small" type="info">{{ nodeKind }}</el-tag>
     </div>
 
     <el-row :gutter="16">
