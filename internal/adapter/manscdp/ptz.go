@@ -18,6 +18,7 @@ type ptzControlEnvelope struct {
 	Command   string   `xml:"Cmd,omitempty"`
 	Speed     int      `xml:"Speed,omitempty"`
 	Priority  int      `xml:"Priority,omitempty"`
+	PresetID  int      `xml:"PresetID,omitempty"`
 }
 
 // DecodePTZControl parses a MANSCDP PTZ control command body.
@@ -30,7 +31,11 @@ func (c *MANSCDPCodecAdapter) DecodePTZControl(body string) (model.PTZControl, e
 	if err := xml.Unmarshal([]byte(trimmed), &env); err != nil {
 		return model.PTZControl{}, fmt.Errorf("manscdp: unmarshal ptz control: %w", err)
 	}
-	return model.NewPTZControl(env.DeviceID, env.ChannelID, env.Command, env.SN, env.Speed, env.Priority), nil
+	ctrl := model.NewPTZControl(env.DeviceID, env.ChannelID, env.Command, env.SN, env.Speed, env.Priority)
+	if env.PresetID > 0 {
+		ctrl = ctrl.WithPresetID(env.PresetID)
+	}
+	return ctrl, nil
 }
 
 // MarshalPTZControl renders a PTZ control command body.
@@ -46,6 +51,7 @@ func (c *MANSCDPCodecAdapter) MarshalPTZControl(control model.PTZControl) (strin
 		Command:   control.Command,
 		Speed:     control.Speed,
 		Priority:  control.Priority,
+		PresetID:  control.PresetID,
 	}, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("manscdp: marshal ptz control: %w", err)

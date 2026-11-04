@@ -263,7 +263,7 @@ device 节点可展开查看所有通道。该页面从 `GET /v1/nodes/:id/chann
 ![通道详情 - PTZ 云台控制](screenshots/13-channel-detail-ptz.png)
 
 - **方向按钮**：八方向（上/下/左/右/左上/右上/左下/右下），按住持续发送指令（每 500ms 轮询一次），松开停止。
-- **辅助功能**：变倍（zoom in/out）、变焦（focus near/far）已实现；光圈（iris open/close）与预置位暂不支持，后端返回 501（见 §5.6）。
+- **辅助功能**：变倍、变焦、光圈（iris）已实现；预置位调用走 DeviceControl `<PresetID>`（见 §5.6）。
 - **速度滑块**：控制转动速度（1–10），默认 5。
 - **预置位**：输入预置位号（1–255），点击「预设」保存当前位置，「调用」触发定位。
 - **抓图**：点击「抓图」按钮调用 `GET /v1/nodes/:id/channels/:ch/snapshot`，返回 JPEG 并自动下载。
@@ -295,7 +295,8 @@ device 节点可展开查看所有通道。该页面从 `GET /v1/nodes/:id/chann
 | 操作 | 当前行为 |
 |---|---|
 | PTZ 八方向 / 变倍 / 聚焦 | 已实现：MANSCDP DeviceControl 下发（device 节点自环、platform 节点转发下级） |
-| PTZ 光圈、预置位 | **501**：这套 PTZCmd 位布局没有对应字段 |
+| PTZ 光圈、预置位 | 已实现：光圈用 FI 指令字节（0x44/0x48）；预置位用 `<PresetID>`；设备侧更新模拟姿态/预置索引 |
+| 入站 PlaybackControl | 已实现：Play/Pause/Teardown/Scale 驱动与 INFO 共用的回放会话；无会话 pause 可辨识失败 |
 | 快照（合成测试图源） | 200 + JPEG（640×480） |
 | 快照（file / RTSP / HLS 源） | **501**：需要视频解码器，当前构建不含 |
 | 快照（通道未配置媒体源） | **503** |
@@ -306,7 +307,8 @@ device 节点可展开查看所有通道。该页面从 `GET /v1/nodes/:id/chann
 | 真实平台向设备拉实时流 | 已实现：device 受理 `m=video` INVITE，回 `a=sendonly` SDP 并按通道媒体源发 PS/RTP；通道无源 404、BYE 停流 |
 | TCP 媒体（附录 D） | 已实现（设备侧 video/playback）：offer 的 m-line 为 `TCP/RTP/AVP` 时按 `a=setup` 主动连接或被动监听，RTP 包带 2 字节长度前缀；无法承载回 488 |
 | 运维命令（#44） | 已实现：DeviceStatus、Broadcast（ack + 设备主动音频 INVITE）、报警查询与布防撤防（GuardCmd）、ConfigDownload 查询/下发、DeviceUpgrade、DeviceControl/TeleBoot；HTTP 入口 `/status`、`/config`、`/upgrade`、`/reboot`、`…/alarms`、`…/alarm-mode`、`…/download` |
-| 级联媒体中继 | 已实现：上级对属于在线下级的通道发实时视频 INVITE 时，平台作为 B2BUA 双对话桥接（PS 原样转发，两侧传输独立 UDP/TCP）；上级 BYE/下级 BYE 成对传播；中继流同样可预览与录像 |
+| 级联 MESSAGE 信令中继 | 已实现：按 X-RoutePath / 下一跳投递 MANSCDP MESSAGE 并回传应答；**不等于**媒体中继——不自动转发 INVITE/RTP |
+| 级联媒体中继 | 已实现（独立路径）：上级对属于在线下级的通道发实时视频 INVITE 时，平台作为 B2BUA 双对话桥接（PS 原样转发，两侧传输独立 UDP/TCP）；上级 BYE/下级 BYE 成对传播；中继流同样可预览与录像 |
 | 平台录像 | 已实现：拉流即自动分段录制（`recording.enabled` 默认开，`dir` 默认存储目录下 `recordings/`）；`GET …/recordings` 查询、`GET …/recordings/:id/flv` 回放；平台对上级的 RecordInfo 与回放 INVITE 从录像库作答 |
 | 平台拉流（实时） | 已实现：`POST /v1/nodes/:id/channels/:ch/live`（body 可带 `transport: udp|tcp`）向在线下级发视频 INVITE，返回 `local_port`；`GET /v1/flv/:id/:ch` 优先输出实时会话，`?source=live|local` 显式选择；`POST …/live/stop` 幂等停止 |
 | CANCEL / re-INVITE | 已实现：CANCEL 在 INVITE 事务挂起时回 200 + 487，否则 481；re-INVITE 关闭旧媒体后重新协商；device 节点正常应答 BYE/CANCEL |

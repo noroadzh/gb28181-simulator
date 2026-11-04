@@ -9,10 +9,15 @@ package app
 
 import (
 	"context"
+	"encoding/base64"
+	"errors"
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/your-org/gb28181-simulator/internal/domain/port"
 )
 
 // handleMediaStatus processes a downstream MediaStatus notify. The port is
@@ -48,31 +53,85 @@ func (a *Acceptor) handleMediaStatus(
 	return resp, true
 }
 
-// handlePlaybackControl forwards a downstream PlaybackControl notify to the
-// playback port. When the port is absent the notify is merely acknowledged.
+// handlePlaybackControl decodes PlaybackControl and drives the same
+// PlaybackPort entry points MANSRTSP INFO uses.
 func (a *Acceptor) handlePlaybackControl(
-	_ context.Context,
+	ctx context.Context,
 	p *platform,
 	req model.Message,
 	notify model.Notify,
 ) (model.Message, bool) {
-	if a.playback != nil {
-		// PlaybackControl detail is carried in the MANSCDP body; the notify
-		// gives us the device id, sn and a status hint. Real command fields
-		// are extracted by the adapter when needed.
-		a.log.Debug("playback control received",
-			"node_id", p.id.String(), "device_id", notify.DeviceID(), "sn", notify.SN())
-	} else {
+	if a.playback == nil {
 		a.log.Warn("playback control notify dropped: playback port not configured",
 			"node_id", p.id.String(), "device_id", notify.DeviceID())
+		return a.replyOK(req)
 	}
-	resp, err := buildResponse(200, "OK", req, nil, "")
+	ctrl, err := a.manscdp.DecodePlaybackControl(req.Body())
 	if err != nil {
-		a.log.Warn("cannot answer a PlaybackControl",
+		a.log.Warn("cannot decode PlaybackControl",
 			"node_id", p.id.String(), "error", err.Error())
+		return sipStatus(req, 400, "Bad Request")
+	}
+	sessionID := ctrl.MediaID()
+	if sessionID == "" {
+		sessionID = ctrl.ChannelID()
+	}
+	if sessionID == "" {
+		sessionID = req.CallID()
+	}
+	cmd := strings.ToLower(ctrl.Command())
+	scale := 1.0
+	if s := strings.TrimSpace(ctrl.Scale()); s != "" {
+		v, perr := strconv.ParseFloat(s, 64)
+		if perr != nil {
+			return sipStatus(req, 400, "Bad Request")
+		}
+		scale = v
+	}
+	switch cmd {
+	case "play":
+		if _, err := a.playback.Play(ctx, ctrl.DeviceID(), ctrl.ChannelID(), ctrl.StartTime(), ctrl.EndTime(), scale); err != nil {
+			return playbackControlFail(req, err)
+		}
+	case "pause":
+		if err := a.playback.SetScale(ctx, sessionID, 0); err != nil {
+			return playbackControlFail(req, err)
+		}
+	case "teardown", "stop":
+		if err := a.playback.Stop(ctx, sessionID); err != nil {
+			return playbackControlFail(req, err)
+		}
+	default:
+		// Scale-only / unknown verb with Scale present.
+		if strings.TrimSpace(ctrl.Scale()) != "" {
+			if err := a.playback.SetScale(ctx, sessionID, scale); err != nil {
+				return playbackControlFail(req, err)
+			}
+		} else {
+			a.log.Warn("unsupported PlaybackControl command",
+				"node_id", p.id.String(), "cmd", ctrl.Command())
+			return sipStatus(req, 400, "Bad Request")
+		}
+	}
+	a.log.Debug("playback control applied",
+		"node_id", p.id.String(), "device_id", ctrl.DeviceID(),
+		"cmd", ctrl.Command(), "session_id", sessionID, "scale", scale)
+	return a.replyOK(req)
+}
+
+func sipStatus(req model.Message, status int, reason string) (model.Message, bool) {
+	resp, err := buildResponse(status, reason, req, nil, "")
+	if err != nil {
 		return model.Message{}, false
 	}
 	return resp, true
+}
+
+func playbackControlFail(req model.Message, err error) (model.Message, bool) {
+	if errors.Is(err, port.ErrPlaybackUnsupported) {
+		return sipStatus(req, 400, "Bad Request")
+	}
+	return sipStatus(req, 404, "Not Found")
 }
 
 // handleDeviceInfo answers a DeviceInfo query with the static facts the
@@ -549,28 +608,114 @@ func (a *Acceptor) handleDeviceControl(
 	req model.Message,
 	_ model.Notify,
 ) (model.Message, bool) {
+	body := req.Body()
 	// TeleBoot is a 2022 control element with its own XML tag. Detect it
 	// before the generic PTZ decoder so the reboot is recorded.
-	if strings.Contains(req.Body(), "<TeleBoot>") {
+	if strings.Contains(body, "<TeleBoot>") {
 		return a.handleTeleBoot(ctx, p, req)
 	}
 	// GuardCmd (SetGuard / ResetGuard) is the arming control.
-	if strings.Contains(req.Body(), "<GuardCmd>") {
+	if strings.Contains(body, "<GuardCmd>") {
 		return a.handleGuardCmd(ctx, p, req)
 	}
-	control, err := a.manscdp.DecodePTZControl(req.Body())
+	// Geometry controls we do not simulate — refuse explicitly.
+	if strings.Contains(body, "<DragZoom") || strings.Contains(body, "<TargetTrack") {
+		ack, err := a.manscdp.MarshalOpsAck(model.OpsAck{
+			SN: 0, DeviceID: p.id.String(), Result: model.ResultError,
+		}, model.CmdTypeDeviceControl)
+		if err != nil {
+			return sipStatus(req, 501, "Not Implemented")
+		}
+		return a.answerMANSCDP(req, ack)
+	}
+	if strings.Contains(body, "<RecordCmd>") {
+		recording := !strings.Contains(body, "StopRecord")
+		a.mutateControlState(p.id, func(st *DeviceControlState) { st.Recording = recording })
+		a.log.Info("record cmd applied", "node_id", p.id.String(), "recording", recording)
+		return a.replyOK(req)
+	}
+	if strings.Contains(body, "<IFrameCmd>") || strings.Contains(body, "<IFameCmd>") {
+		a.mutateControlState(p.id, func(st *DeviceControlState) {
+			st.IFrameCount++
+			st.LastIFrameAt = time.Now()
+		})
+		a.log.Info("iframe cmd applied", "node_id", p.id.String())
+		return a.replyOK(req)
+	}
+	control, err := a.manscdp.DecodePTZControl(body)
 	if err != nil {
 		a.log.Warn("cannot read a device control",
 			"node_id", p.id.String(), "error", err.Error())
 		return model.Message{}, false
 	}
-	a.log.Debug("PTZ control received", "node_id", p.id.String(),
-		"device_id", control.DeviceID)
-	resp, err := buildResponse(200, "OK", req, nil, "")
-	if err != nil {
-		a.log.Warn("cannot answer a DeviceControl",
-			"node_id", p.id.String(), "error", err.Error())
-		return model.Message{}, false
+	if control.PresetID > 0 {
+		a.mutateControlState(p.id, func(st *DeviceControlState) {
+			st.PresetID = control.PresetID
+			st.Moving = ""
+		})
+		a.log.Debug("preset recalled", "node_id", p.id.String(), "preset_id", control.PresetID)
+		return a.replyOK(req)
 	}
-	return resp, true
+	direction := decodePTZDirection(control.Command)
+	a.mutateControlState(p.id, func(st *DeviceControlState) {
+		applyPTZDirection(st, direction)
+	})
+	a.log.Debug("PTZ control received", "node_id", p.id.String(),
+		"device_id", control.DeviceID, "direction", direction)
+	return a.replyOK(req)
+}
+
+// decodePTZDirection maps a base64 PTZCmd (or a plain direction token) to the
+// API vocabulary used by applyPTZDirection.
+func decodePTZDirection(command string) string {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return ""
+	}
+	lower := strings.ToLower(command)
+	switch lower {
+	case "up", "down", "left", "right",
+		"upleft", "upright", "downleft", "downright",
+		"zoomin", "zoomout", "focusnear", "focusfar",
+		"irisin", "irisout", "stop", "in", "out":
+		return lower
+	}
+	raw, err := base64.StdEncoding.DecodeString(command)
+	if err != nil || len(raw) < 4 {
+		return lower
+	}
+	switch raw[3] {
+	case 0x01:
+		return "right"
+	case 0x02:
+		return "left"
+	case 0x04:
+		return "down"
+	case 0x08:
+		return "up"
+	case 0x09:
+		return "upright"
+	case 0x0A:
+		return "upleft"
+	case 0x05:
+		return "downright"
+	case 0x06:
+		return "downleft"
+	case 0x10:
+		return "zoomin"
+	case 0x20:
+		return "zoomout"
+	case 0x40:
+		return "focusnear"
+	case 0x80:
+		return "focusfar"
+	case 0x44:
+		return "irisin"
+	case 0x48:
+		return "irisout"
+	case 0x00:
+		return "stop"
+	default:
+		return lower
+	}
 }

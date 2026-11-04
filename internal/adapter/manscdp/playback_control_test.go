@@ -32,6 +32,27 @@ func TestMarshalPlaybackControl_Golden(t *testing.T) {
 	}
 }
 
+func TestDecodePlaybackControl_Golden(t *testing.T) {
+	body := `<?xml version="1.0"?>
+<Control>
+  <CmdType>PlaybackControl</CmdType>
+  <SN>11</SN>
+  <DeviceID>34020000001310000001</DeviceID>
+  <ChannelID>ch-1</ChannelID>
+  <MediaID>sess-9</MediaID>
+  <Cmd>Pause</Cmd>
+  <Scale>0</Scale>
+</Control>
+`
+	ctrl, err := NewMANSCDPCodec().DecodePlaybackControl(body)
+	if err != nil {
+		t.Fatalf("DecodePlaybackControl: %v", err)
+	}
+	if ctrl.Command() != "Pause" || ctrl.Scale() != "0" || ctrl.MediaID() != "sess-9" {
+		t.Fatalf("got cmd=%q scale=%q media=%q", ctrl.Command(), ctrl.Scale(), ctrl.MediaID())
+	}
+}
+
 func TestMarshalPlaybackControl_RequiresDeviceAndCommand(t *testing.T) {
 	ctrl, err := model.NewPlaybackControl("34020000001310000001", "Play", "ch-1", "", "", 9)
 	if err != nil {

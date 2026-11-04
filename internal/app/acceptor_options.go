@@ -97,6 +97,11 @@ type Acceptor struct {
 	responses   *responseTable
 	controlWait time.Duration
 
+	// controlState holds per-node simulated DeviceControl effects (PTZ pose,
+	// iris, preset, recording flag, I-frame count). Memory only.
+	controlMu    sync.Mutex
+	controlState map[string]*DeviceControlState
+
 	// catalogPollEvery configures the catalog pull interval for each serving
 	// node. Zero means the poller is disabled (the default). Set through
 	// WithCatalogPollInterval before the first call to Serve.

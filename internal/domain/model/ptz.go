@@ -15,6 +15,7 @@ type PTZControl struct {
 	Command   string
 	Speed     int
 	Priority  int
+	PresetID  int // >0 → DeviceControl <PresetID>; Command (PTZCmd) may be empty
 }
 
 // NewPTZControl builds a PTZ control command.
@@ -28,6 +29,12 @@ func NewPTZControl(deviceID, channelID, command string, sn uint32, speed, priori
 		Speed:     speed,
 		Priority:  priority,
 	}
+}
+
+// WithPresetID returns a copy that recalls the named preset via <PresetID>.
+func (p PTZControl) WithPresetID(id int) PTZControl {
+	p.PresetID = id
+	return p
 }
 
 // String renders a log-safe one-line summary.

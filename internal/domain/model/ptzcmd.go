@@ -7,10 +7,11 @@ import (
 	"strings"
 )
 
-// PTZ instruction bits in byte 4. The eight direction bits are unambiguous
-// across implementations; the zoom and focus bits follow the most widely used
-// mapping. Iris and preset recall need bits this layout does not have, so
-// EncodePTZCmd refuses them rather than guessing.
+// PTZ instruction bits in byte 3 (0-based index 3). Direction / zoom / focus
+// follow the common GB/T 28181 PTZCmd layout. Iris uses the FI instruction
+// bytes widely adopted by open-source GB28181 stacks (expand=0x44, reduce=0x48);
+// preset recall is NOT encoded here — callers MUST send DeviceControl
+// <PresetID> instead of inventing PTZCmd bits.
 const (
 	ptzRight     byte = 0x01
 	ptzLeft      byte = 0x02
@@ -20,6 +21,9 @@ const (
 	ptzZoomOut   byte = 0x20
 	ptzFocusNear byte = 0x40
 	ptzFocusFar  byte = 0x80
+	// FI iris mapping (industry common; documented for interop-hardening).
+	ptzIrisIn  byte = 0x44 // expand / open
+	ptzIrisOut byte = 0x48 // reduce / close
 )
 
 // ptzDirectionBits maps the API's direction vocabulary onto the instruction
@@ -38,6 +42,8 @@ var ptzDirectionBits = map[string]byte{
 	"zoomout":   ptzZoomOut,
 	"focusnear": ptzFocusNear,
 	"focusfar":  ptzFocusFar,
+	"irisin":    ptzIrisIn,
+	"irisout":   ptzIrisOut,
 	"stop":      0x00,
 }
 
@@ -51,7 +57,7 @@ var ptzDirectionBits = map[string]byte{
 func EncodePTZCmd(direction string, speed int) (string, error) {
 	bits, ok := ptzDirectionBits[strings.ToLower(strings.TrimSpace(direction))]
 	if !ok {
-		return "", fmt.Errorf("model: unsupported ptz direction %q (iris and preset recall need fields this encoding does not define)", direction)
+		return "", fmt.Errorf("model: unsupported ptz direction %q (preset recall uses DeviceControl PresetID, not PTZCmd)", direction)
 	}
 	if speed < 0 {
 		speed = 0
@@ -65,14 +71,22 @@ func EncodePTZCmd(direction string, speed int) (string, error) {
 	cmd[1] = 0x0F
 	cmd[2] = 0x01
 	cmd[3] = bits
-	if bits&(ptzLeft|ptzRight) != 0 {
-		cmd[4] = byte(speed)
-	}
-	if bits&(ptzUp|ptzDown) != 0 {
-		cmd[5] = byte(speed)
-	}
-	if bits&(ptzZoomIn|ptzZoomOut) != 0 {
+	// FI iris codes (0x44/0x48) share bit patterns with pan/tilt masks, so
+	// iris/zoom/focus must be exact matches before the directional OR tests.
+	switch bits {
+	case ptzIrisIn, ptzIrisOut:
 		cmd[6] = byte(speed&0x0F) << 4
+	case ptzZoomIn, ptzZoomOut:
+		cmd[6] = byte(speed&0x0F) << 4
+	case ptzFocusNear, ptzFocusFar:
+		// Focus speed is not carried in this layout; leave speed bytes clear.
+	default:
+		if bits&(ptzLeft|ptzRight) != 0 {
+			cmd[4] = byte(speed)
+		}
+		if bits&(ptzUp|ptzDown) != 0 {
+			cmd[5] = byte(speed)
+		}
 	}
 	for _, b := range cmd[:7] {
 		cmd[7] += b

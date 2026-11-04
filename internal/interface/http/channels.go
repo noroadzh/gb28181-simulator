@@ -419,10 +419,28 @@ func (s *Server) handleDeleteChannelMedia(c echo.Context) error {
 }
 
 // ptzInput is the body for POST /channels/:ch/ptz.
+// Accepts direction / cmd / command aliases used by Web UI and specs.
 type ptzInput struct {
 	Direction  string `json:"direction"`
+	Cmd        string `json:"cmd"`
+	Command    string `json:"command"`
 	Speed      int    `json:"speed"`
 	DurationMs int    `json:"duration_ms"`
+	PresetID   int    `json:"preset_id"`
+}
+
+func (in *ptzInput) direction() string {
+	for _, v := range []string{in.Direction, in.Cmd, in.Command} {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+// ptzPresetSender is implemented by NodeService for preset recalls.
+type ptzPresetSender interface {
+	PTZPreset(ctx context.Context, id model.NodeID, channelID, direction string, speed, durationMs, presetID int) error
 }
 
 func (s *Server) handleChannelPTZ(c echo.Context) error {
@@ -444,8 +462,9 @@ func (s *Server) handleChannelPTZ(c echo.Context) error {
 	if err := c.Bind(&in); err != nil {
 		return c.JSON(http.StatusBadRequest, errorBody{Error: "invalid JSON: " + err.Error()})
 	}
-	if !isValidPTZDirection(in.Direction) {
-		return c.JSON(http.StatusBadRequest, errorBody{Error: "invalid direction: " + in.Direction})
+	dir := in.direction()
+	if !isValidPTZDirection(dir) {
+		return c.JSON(http.StatusBadRequest, errorBody{Error: "invalid direction: " + dir})
 	}
 	if in.Speed < 0 || in.Speed > 255 {
 		return c.JSON(http.StatusBadRequest, errorBody{Error: "speed must be in [0,255]"})
@@ -453,7 +472,17 @@ func (s *Server) handleChannelPTZ(c echo.Context) error {
 	if in.DurationMs < 0 {
 		return c.JSON(http.StatusBadRequest, errorBody{Error: "duration_ms must be >= 0"})
 	}
-	if err := s.channels.PTZ(c.Request().Context(), id, channelID, in.Direction, in.Speed, in.DurationMs); err != nil {
+	ctx := c.Request().Context()
+	if in.PresetID > 0 || strings.EqualFold(dir, "preset_call") {
+		if sender, ok := s.channels.(ptzPresetSender); ok {
+			err = sender.PTZPreset(ctx, id, channelID, dir, in.Speed, in.DurationMs, in.PresetID)
+		} else {
+			err = port.PTZUnsupported(id, channelID, "preset_call requires PTZPreset")
+		}
+	} else {
+		err = s.channels.PTZ(ctx, id, channelID, dir, in.Speed, in.DurationMs)
+	}
+	if err != nil {
 		if errors.Is(err, port.ErrControlTargetUnreachable) {
 			return c.JSON(http.StatusBadGateway, errorBody{Error: err.Error()})
 		}
@@ -467,17 +496,22 @@ func (s *Server) handleChannelPTZ(c echo.Context) error {
 	}
 	return c.JSON(http.StatusOK, map[string]any{
 		"channel_id": channelID,
-		"direction":  in.Direction,
+		"direction":  dir,
 		"speed":      in.Speed,
 		"duration":   in.DurationMs,
+		"preset_id":  in.PresetID,
 	})
 }
 
 func isValidPTZDirection(d string) bool {
-	switch d {
+	switch strings.ToLower(strings.TrimSpace(d)) {
 	case "up", "down", "left", "right",
 		"upleft", "upright", "downleft", "downright",
-		"in", "out", "stop":
+		"in", "out", "zoomin", "zoomout",
+		"zoom-in", "zoom-out",
+		"focusnear", "focusfar", "focus-near", "focus-far",
+		"irisin", "irisout", "iris-open", "iris-close",
+		"preset_call", "stop":
 		return true
 	}
 	return false

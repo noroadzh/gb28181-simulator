@@ -262,7 +262,7 @@ Start ──▶ serve (Acceptor.Serve)  ──▶ advanceOnline ──▶ online
 
 - `model.EncodePTZCmd` 把方向/速度编成 8 字节 PTZCmd 再 base64，放进 `<Control>` 的 `<Cmd>`；方向位 0x01–0x08、变倍 0x10/0x20、聚焦 0x40/0x80，第 8 字节是前七字节和的低 8 位。
 - 目标解析：`device` 节点**自环**到自己的监听口，设备侧 acceptor 走与真实平台下发完全相同的接收路径（抓包页可见）；`platform` 节点按通道的 `ParentID` 找在线下级，只有一个在线下级时直接使用。
-- 光圈（`irisin` / `irisout`）与预置位**不支持**：这套位布局没有对应字段，返回 501 而不是猜一种编码。
+- 光圈（`irisin` / `irisout`）使用 FI 指令字节（expand=0x44 / reduce=0x48）；预置位调用走 DeviceControl `<PresetID>`（非 PTZCmd 比特猜测）。设备侧维护可观测模拟姿态（见 `#46`）。
 
 **录像查询**
 
@@ -272,9 +272,9 @@ Start ──▶ serve (Acceptor.Serve)  ──▶ advanceOnline ──▶ online
 
 **回放**
 
-- `PlaybackControl`（`<Cmd>` = Play/Pause/Teardown，`<Scale>` 仅 `speed` 动作）经 MESSAGE 下发。
+- `PlaybackControl`（`<Cmd>` = Play/Pause/Teardown，`<Scale>` 仅 `speed` 动作）经 MESSAGE 下发；设备侧入站控制与 MANSRTSP INFO 共用回放会话（深化见路线图 `#46 interop-hardening`）。
 - 每 `node|channel` 一个会话：重复 `play` 先 Teardown 旧会话；`teardown` 清会话；空闲 `playbackIdle`（默认 60s）自动 Teardown 并回收。
-- **FLV 历史流尚未接入**：`/playback/flv` 仍返回未实现，留给后续 change（需要 INVITE/SDP 拉流 + RTP 接收 + 转封装）。
+- **FLV 历史流已接入**（`#37 playback-flv-stream`）：`POST …/playback` 带时间窗发起回放 INVITE 并登记会话；`GET /v1/nodes/:id/channels/:ch/playback/flv?sn=` 按会话窗口输出 FLV；未知或过期 `sn` 返回 404。
 
 **失败语义**
 

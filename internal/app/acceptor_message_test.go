@@ -141,6 +141,45 @@ func (f *fakeMANSCDP) MarshalDeviceInfoResponse(resp model.DeviceInfoResponse) (
 	return "device-info-response", nil
 }
 
+func (f *fakeMANSCDP) DecodePlaybackControl(body string) (model.PlaybackControl, error) {
+	// Prefer a real decode so tests can send raw XML; fall back to canned notify fields.
+	trimmed := strings.TrimSpace(body)
+	if strings.Contains(trimmed, "<Cmd>") {
+		cmd := extractXMLTag(trimmed, "Cmd")
+		scale := extractXMLTag(trimmed, "Scale")
+		media := extractXMLTag(trimmed, "MediaID")
+		ch := extractXMLTag(trimmed, "ChannelID")
+		dev := extractXMLTag(trimmed, "DeviceID")
+		sn := uint32(0)
+		if s := extractXMLTag(trimmed, "SN"); s != "" {
+			if n, err := strconv.ParseUint(s, 10, 32); err == nil {
+				sn = uint32(n)
+			}
+		}
+		ctrl, err := model.NewPlaybackControl(dev, cmd, ch, "", "", sn)
+		if err != nil {
+			return model.PlaybackControl{}, err
+		}
+		return ctrl.WithScale(scale).WithMediaID(media), nil
+	}
+	return model.PlaybackControl{}, fmt.Errorf("fake: no PlaybackControl in body")
+}
+
+func extractXMLTag(body, tag string) string {
+	open := "<" + tag + ">"
+	close := "</" + tag + ">"
+	i := strings.Index(body, open)
+	if i < 0 {
+		return ""
+	}
+	i += len(open)
+	j := strings.Index(body[i:], close)
+	if j < 0 {
+		return ""
+	}
+	return strings.TrimSpace(body[i : i+j])
+}
+
 func (f *fakeMANSCDP) MarshalPlaybackControl(ctrl model.PlaybackControl, scale string) (string, error) {
 	return "<Control/>", nil
 }
@@ -213,7 +252,22 @@ func (f *fakeMANSCDP) renderedMobilePositions() []model.MobilePositionNotify {
 }
 
 func (f *fakeMANSCDP) DecodePTZControl(body string) (model.PTZControl, error) {
-	return model.PTZControl{}, nil
+	dev := extractXMLTag(body, "DeviceID")
+	ch := extractXMLTag(body, "ChannelID")
+	cmd := extractXMLTag(body, "Cmd")
+	sn := uint32(0)
+	if s := extractXMLTag(body, "SN"); s != "" {
+		if n, err := strconv.ParseUint(s, 10, 32); err == nil {
+			sn = uint32(n)
+		}
+	}
+	ctrl := model.NewPTZControl(dev, ch, cmd, sn, 0, 0)
+	if s := extractXMLTag(body, "PresetID"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil {
+			ctrl = ctrl.WithPresetID(n)
+		}
+	}
+	return ctrl, nil
 }
 
 func (f *fakeMANSCDP) MarshalPTZControl(control model.PTZControl) (string, error) {
@@ -1594,5 +1648,5 @@ func (f *fakeMANSCDP) DecodeUpgrade(body string) (model.UpgradeCommand, error) {
 }
 
 func (f *fakeMANSCDP) MarshalOpsAck(ack model.OpsAck, cmdType string) (string, error) {
-	return fmt.Sprintf("%s-ack-%s", cmdType, ack.Result), nil
+	return fmt.Sprintf("<Response><CmdType>%s</CmdType><Result>%s</Result></Response>", cmdType, ack.Result), nil
 }

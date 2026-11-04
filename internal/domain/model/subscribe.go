@@ -85,9 +85,11 @@ type PlaybackControl struct {
 	deviceID  string
 	sn        uint32
 	channelID string
-	command   string // Play / Stop / Pause / …
+	command   string // Play / Stop / Pause / Teardown / …
 	startTime string
 	endTime   string
+	scale     string // optional wire Scale; empty means default
+	mediaID   string // optional MediaID used as session key
 }
 
 // NewPlaybackControl builds a parsed playback control.
@@ -110,6 +112,18 @@ func NewPlaybackControl(deviceID, command, channelID, startTime, endTime string,
 	}, nil
 }
 
+// WithScale returns a copy carrying the optional Scale wire value.
+func (p PlaybackControl) WithScale(scale string) PlaybackControl {
+	p.scale = strings.TrimSpace(scale)
+	return p
+}
+
+// WithMediaID returns a copy carrying the optional MediaID session key.
+func (p PlaybackControl) WithMediaID(mediaID string) PlaybackControl {
+	p.mediaID = strings.TrimSpace(mediaID)
+	return p
+}
+
 // DeviceID returns the target device id.
 func (p PlaybackControl) DeviceID() string { return p.deviceID }
 
@@ -128,8 +142,14 @@ func (p PlaybackControl) StartTime() string { return p.startTime }
 // EndTime returns the requested end time (ISO 8601).
 func (p PlaybackControl) EndTime() string { return p.endTime }
 
+// Scale returns the optional Scale wire value.
+func (p PlaybackControl) Scale() string { return p.scale }
+
+// MediaID returns the optional MediaID session key.
+func (p PlaybackControl) MediaID() string { return p.mediaID }
+
 // String renders a log-safe summary.
 func (p PlaybackControl) String() string {
-	return fmt.Sprintf("PlaybackControl<device=%s cmd=%s channel=%s start=%s end=%s sn=%d>",
-		p.deviceID, p.command, p.channelID, p.startTime, p.endTime, p.sn)
+	return fmt.Sprintf("PlaybackControl<device=%s cmd=%s channel=%s start=%s end=%s sn=%d scale=%s media=%s>",
+		p.deviceID, p.command, p.channelID, p.startTime, p.endTime, p.sn, p.scale, p.mediaID)
 }

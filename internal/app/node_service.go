@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -1234,14 +1235,20 @@ func (s *NodeService) Channel(ctx context.Context, id model.NodeID, channelID st
 	return node.Profile().ChannelByID(channelID)
 }
 
-// PTZ sends a device-control command for the channel. direction ∈
-// {"up","down","left","right","upleft","upright","downleft","downright","in","out"};
-// speed ∈ [0,255]; durationMs ≥ 0.
+// PTZ sends a DeviceControl MESSAGE for the channel. direction ∈
+// {"up","down","left","right","upleft","upright","downleft","downright",
+// "zoomin","zoomout","focusnear","focusfar","stop", …}; speed ∈ [0,255].
 //
-// The outbound DeviceControl is not implemented yet. It reports that instead
-// of returning nil: a silent 200 told the dashboard a camera had moved when
-// nothing had been sent, which is worse than an honest 501.
+// Unsupported directions (or missing codec / transport) return
+// ErrPTZUnsupported (HTTP 501) rather than a silent success: a 200 that
+// claimed the camera moved when nothing was sent is worse than an honest 501.
 func (s *NodeService) PTZ(ctx context.Context, id model.NodeID, channelID, direction string, speed, durationMs int) error {
+	return s.PTZPreset(ctx, id, channelID, direction, speed, durationMs, 0)
+}
+
+// PTZPreset is PTZ with an optional preset recall. presetID > 0 sends
+// DeviceControl <PresetID> instead of a PTZCmd blob.
+func (s *NodeService) PTZPreset(ctx context.Context, id model.NodeID, channelID, direction string, speed, durationMs, presetID int) error {
 	node, ok := s.registry.Get(ctx, id)
 	if !ok {
 		return model.ErrUnknownNode
@@ -1249,10 +1256,7 @@ func (s *NodeService) PTZ(ctx context.Context, id model.NodeID, channelID, direc
 	if s.controlCodec == nil {
 		return port.PTZUnsupported(id, channelID, "no MANSCDP codec wired")
 	}
-	command, err := model.EncodePTZCmd(direction, speed)
-	if err != nil {
-		return port.PTZUnsupported(id, channelID, err.Error())
-	}
+	direction = normalizePTZDirection(direction)
 	tr := s.lifecycle.Transport(id)
 	if tr == nil {
 		return port.PTZUnsupported(id, channelID, "node has no bound listener")
@@ -1263,8 +1267,21 @@ func (s *NodeService) PTZ(ctx context.Context, id model.NodeID, channelID, direc
 	}
 
 	sn := uint32(s.clock.Now().UnixNano())
-	body, err := s.controlCodec.MarshalPTZControl(
-		model.NewPTZControl(target, channelID, command, sn, speed, 0))
+	var body string
+	if presetID > 0 || direction == "preset_call" {
+		if presetID <= 0 {
+			return port.PTZUnsupported(id, channelID, "preset_call requires preset_id")
+		}
+		ctrl := model.NewPTZControl(target, channelID, "", sn, 0, 0).WithPresetID(presetID)
+		body, err = s.controlCodec.MarshalPTZControl(ctrl)
+	} else {
+		command, encErr := model.EncodePTZCmd(direction, speed)
+		if encErr != nil {
+			return port.PTZUnsupported(id, channelID, encErr.Error())
+		}
+		body, err = s.controlCodec.MarshalPTZControl(
+			model.NewPTZControl(target, channelID, command, sn, speed, 0))
+	}
 	if err != nil {
 		return port.PTZUnsupported(id, channelID, err.Error())
 	}
@@ -1275,12 +1292,31 @@ func (s *NodeService) PTZ(ctx context.Context, id model.NodeID, channelID, direc
 	if err := tr.Send(ctx, msg, addr); err != nil {
 		return fmt.Errorf("app: send PTZ to %s: %w: %w", addr, port.ErrControlTargetUnreachable, err)
 	}
-	// durationMs has no field in the direction-encoded PTZCmd; a continuous
-	// move is stopped by a "stop" command, as the standard intends.
+	_ = durationMs
 	s.log.Info("ptz sent",
 		"node_id", id.String(), "target", target, "channel", channelID,
-		"direction", direction, "speed", speed)
+		"direction", direction, "speed", speed, "preset_id", presetID)
 	return nil
+}
+
+// normalizePTZDirection maps UI / legacy aliases onto EncodePTZCmd keys.
+func normalizePTZDirection(d string) string {
+	switch strings.ToLower(strings.TrimSpace(d)) {
+	case "in", "zoom-in", "zoom_in":
+		return "zoomin"
+	case "out", "zoom-out", "zoom_out":
+		return "zoomout"
+	case "focus-near", "focus_near":
+		return "focusnear"
+	case "focus-far", "focus_far":
+		return "focusfar"
+	case "iris-open", "iris_open":
+		return "irisin"
+	case "iris-close", "iris_close":
+		return "irisout"
+	default:
+		return strings.ToLower(strings.TrimSpace(d))
+	}
 }
 
 // controlTarget resolves who a control command is sent to and where.

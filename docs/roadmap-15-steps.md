@@ -49,6 +49,8 @@
 | 42 | `platform-recording` | 平台侧录像 | ✅ 已归档 | 拉流即分段录制（文件系统索引、重启可查）；HTTP 录像列表与 FLV 回放；平台对上级的 RecordInfo 与回放 INVITE 从录像库作答（2026-10-27） |
 | 43 | `cascade-media-relay` | 级联媒体中继 | ✅ 已归档 | 平台作为 B2BUA：上级拉下级通道时双对话桥接 PS/RTP（两侧传输独立）；BYE 成对传播；中继流可预览/录像（2026-10-29） |
 | 44 | `device-control-coverage` | 六类运维命令 | ✅ 已归档 | DeviceStatus、Broadcast（ack + 设备主动音频 INVITE）、报警查询与布防撤防、ConfigDownload、DeviceUpgrade/TeleBoot、文件下载；HTTP 七个入口；平台异步转发下级（2026-10-30） |
+| 45 | `docs-sync-gb28181-coverage` | 国标覆盖文档同步 | ✅ 已归档 | 修正架构/规格漂移、GuardCmd 用词、新增 `docs/gb28181-coverage.md`、路线图承接（2026-11-04） |
+| 46 | `interop-hardening` | 控制语义加深 | ✅ 已归档 | 入站 PlaybackControl 驱动会话、PTZ 状态、光圈/预置位、RecordCmd/IFrame、未实现显式 ERROR（2026-11-04） |
 
 ## 补充归档索引
 
@@ -107,6 +109,6 @@
 - 原始路线图中 #3 为 `core-manscdp-and-ps`，后被 `enterprise-skeleton` 占位，本文件保留原始编号顺序。
 - 部分 change 内部拆分为多个子 change 归档；它们与无编号跟进统一登记在「补充归档索引」。
 - #10 原名 `dynamic-catalog-and-query`，实际由 `dynamic-sim-features` change 实现（动态目录/报警、录像与回放、移动位置、运行时触发 API）。
-- 已完成 44 个编号（#1–#44），对应 60 个归档 change 目录（2026-10-30 同步）。
-- 当前无待实施条目：全部登记阶段已归档。#41–#44 探索登记的候选已全部交付；下一阶段候选待规划（如 Web UI 的拉流/录像入口、平台主动 TCP 媒体），新增时从 #45 起。
-- 路线图同步契约见 capability `docs-roadmap-sync`；每次归档必须在同提交更新本文件。
+- 已完成 46 个编号（#1–#46），含 2026-11-04 归档的 #45/#46。
+- 当前无进行中条目；#47+ 候选：Web UI 平台拉流/录像库入口、cascade 可观测性、校时/媒体保活、SIP TLS / SRTP。
+- 路线图同步契约见 capability `docs-roadmap-sync`；每次归档必须在同提交更新本文件；协议面归档须同步 `docs/gb28181-coverage.md`。

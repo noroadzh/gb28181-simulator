@@ -169,6 +169,7 @@ type playbackControlEnvelope struct {
 	SN        uint32   `xml:"SN"`
 	DeviceID  string   `xml:"DeviceID"`
 	ChannelID string   `xml:"ChannelID,omitempty"`
+	MediaID   string   `xml:"MediaID,omitempty"`
 	Cmd       string   `xml:"Cmd,omitempty"`
 	Scale     string   `xml:"Scale,omitempty"`
 }
@@ -182,11 +183,15 @@ func (c *MANSCDPCodecAdapter) MarshalPlaybackControl(ctrl model.PlaybackControl,
 	if strings.TrimSpace(ctrl.Command()) == "" {
 		return "", fmt.Errorf("manscdp: playback control without a command")
 	}
+	if strings.TrimSpace(scale) == "" {
+		scale = ctrl.Scale()
+	}
 	body, err := xml.MarshalIndent(playbackControlEnvelope{
 		CmdType:   model.CmdTypePlaybackControl,
 		SN:        ctrl.SN(),
 		DeviceID:  ctrl.DeviceID(),
 		ChannelID: ctrl.ChannelID(),
+		MediaID:   ctrl.MediaID(),
 		Cmd:       ctrl.Command(),
 		Scale:     strings.TrimSpace(scale),
 	}, "", "  ")
@@ -194,4 +199,21 @@ func (c *MANSCDPCodecAdapter) MarshalPlaybackControl(ctrl model.PlaybackControl,
 		return "", fmt.Errorf("manscdp: marshal playback control: %w", err)
 	}
 	return xmlHeader + string(body) + "\n", nil
+}
+
+// DecodePlaybackControl parses a MANSCDP PlaybackControl body.
+func (c *MANSCDPCodecAdapter) DecodePlaybackControl(body string) (model.PlaybackControl, error) {
+	trimmed := strings.TrimSpace(body)
+	trimmed = strings.TrimPrefix(trimmed, xmlHeader)
+	trimmed = strings.TrimSpace(trimmed)
+
+	var env playbackControlEnvelope
+	if err := xml.Unmarshal([]byte(trimmed), &env); err != nil {
+		return model.PlaybackControl{}, fmt.Errorf("manscdp: unmarshal playback control: %w", err)
+	}
+	ctrl, err := model.NewPlaybackControl(env.DeviceID, env.Cmd, env.ChannelID, "", "", env.SN)
+	if err != nil {
+		return model.PlaybackControl{}, err
+	}
+	return ctrl.WithScale(env.Scale).WithMediaID(env.MediaID), nil
 }

@@ -31,6 +31,8 @@ func TestEncodePTZCmd_GoldenBytes(t *testing.T) {
 		{"left", "left", 255, []byte{0xA5, 0x0F, 0x01, 0x02, 0xFF, 0x00, 0x00, 0xB6}},
 		{"upright", "upright", 10, []byte{0xA5, 0x0F, 0x01, 0x09, 0x0A, 0x0A, 0x00, 0xD2}},
 		{"zoomin", "zoomin", 3, []byte{0xA5, 0x0F, 0x01, 0x10, 0x00, 0x00, 0x30, 0xF5}},
+		{"irisin", "irisin", 4, []byte{0xA5, 0x0F, 0x01, 0x44, 0x00, 0x00, 0x40, 0x39}},
+		{"irisout", "irisout", 4, []byte{0xA5, 0x0F, 0x01, 0x48, 0x00, 0x00, 0x40, 0x3D}},
 		{"stop", "stop", 200, []byte{0xA5, 0x0F, 0x01, 0x00, 0x00, 0x00, 0x00, 0xB5}},
 	}
 	for _, tc := range cases {
@@ -50,7 +52,7 @@ func TestEncodePTZCmd_GoldenBytes(t *testing.T) {
 }
 
 func TestEncodePTZCmd_RefusesUnmappedDirections(t *testing.T) {
-	for _, dir := range []string{"irisin", "irisout", "", "preset_call"} {
+	for _, dir := range []string{"", "preset_call", "dragzoom"} {
 		if _, err := EncodePTZCmd(dir, 64); err == nil {
 			t.Errorf("EncodePTZCmd(%q) accepted a direction the encoding cannot express", dir)
 		}

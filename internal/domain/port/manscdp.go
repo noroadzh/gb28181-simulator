@@ -63,6 +63,10 @@ type MANSCDPCodec interface {
 	// MarshalPlaybackControl renders a PlaybackControl command body.
 	MarshalPlaybackControl(ctrl model.PlaybackControl, scale string) (string, error)
 
+	// DecodePlaybackControl parses a PlaybackControl command body
+	// (Play/Pause/Teardown and optional Scale/MediaID).
+	DecodePlaybackControl(body string) (model.PlaybackControl, error)
+
 	// MarshalRecordInfoQuery renders a RecordInfo query body.
 	MarshalRecordInfoQuery(query model.RecordInfoQuery, sn uint32) (string, error)
 
