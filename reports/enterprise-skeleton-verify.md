@@ -32,7 +32,7 @@ Date: 2026-09-24 · Toolchain: Go with `CGO_ENABLED=0`
 | §9 cmd entry rewrite | 3 | 3 | both binaries use Provide/Build/MustGet |
 | §10 Dependency baseline | 3 | 3 | OTel `v1.26.0`, cross-compiles verified |
 | §11 End-to-end | 5 | **4** | §11.4 blocked (§6) |
-| §12 Docs & report | 3 | 3 | README, `docs/architecture.md`, this file |
+| §12 Docs & report | 3 | 3 | README, `docs/04-architecture/architecture.md`, this file |
 
 Total 47, complete 46.
 

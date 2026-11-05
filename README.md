@@ -140,7 +140,7 @@ nodes:
       heartbeat_max_failures: 3    # 可选；默认 3
 ```
 
-> **节点配置已迁移至数据库**（自 Change "runtime-node-configuration"）。上面的 `nodes:` 段仅作为迁移期的解析兼容保留：DB 为空时被一次性导入，DB 非空时被忽略。运行期改节点请通过 WebUI 或 `POST /v1/nodes`（完整 API 与真源表结构见 [`docs/configuration.md`](docs/configuration.md)）。迁移脚本：`go run scripts/migrations/yaml_to_db.go <release.yaml>` 输出 SQL，请人工核对后再入库。回滚请参 [`docs/configuration.md` 的"节点配置回滚"](docs/configuration.md#节点配置回滚)。
+> **节点配置已迁移至数据库**（自 Change "runtime-node-configuration"）。上面的 `nodes:` 段仅作为迁移期的解析兼容保留：DB 为空时被一次性导入，DB 非空时被忽略。运行期改节点请通过 WebUI 或 `POST /v1/nodes`（完整 API 与真源表结构见 [`docs/03-config/configuration.md`](docs/03-config/configuration.md)）。迁移脚本：`go run scripts/migrations/yaml_to_db.go <release.yaml>` 输出 SQL，请人工核对后再入库。回滚请参 [`docs/03-config/configuration.md` 的"节点配置回滚"](docs/03-config/configuration.md#节点配置回滚)。
 
 ## 技术栈
 
@@ -159,7 +159,7 @@ nodes:
 
 ## 架构
 
-`internal/` 采用六边形（端口与适配器）布局 —— 分层图、端口契约清单与 ServiceContext 用法见 [`docs/architecture.md`](docs/architecture.md)。
+`internal/` 采用六边形（端口与适配器）布局 —— 分层图、端口契约清单与 ServiceContext 用法见 [`docs/04-architecture/architecture.md`](docs/04-architecture/architecture.md)。
 
 ## 目录
 
@@ -207,13 +207,15 @@ make smoke          # 冒烟基线：单元测试 + 5 平台编译 + 前端构�
 
 `bin/gb28181-simulator sipprobe ...` 同样暴露诊断探针，因此单个二进制既能当模拟器也能当探针。
 
-### 测试与部署文档
+### 文档
 
-- [操作手册](docs/操作手册.md) — 联调入口、角色视角、平台/设备日常操作、测试机启停与排查
-- [冒烟测试](docs/smoke-test.md) — 测试矩阵、本地/CI 执行、结果解读、失败排查
-- [Linux 单机部署](docs/deploy-linux.md) — systemd 安装、升级与回滚
-- [Docker Compose 部署](docs/deploy-docker-compose.md) — 单实例多角色（一套 Web）；可选双容器附录
-- [Web 管理界面操作手册](docs/web-ui-guide.md) — Dashboard / 通道列表 / PTZ / 回放 / 对讲 / 抓图（页面详解）
+完整分类索引见 [docs/README.md](docs/README.md)。
+
+- [操作手册](docs/01-guides/操作手册.md) — 联调入口、角色视角、平台/设备日常操作、测试机启停与排查
+- [Web 管理界面操作手册](docs/01-guides/web-ui-guide.md) — Dashboard / 通道列表 / PTZ / 回放 / 对讲 / 抓图（页面详解）
+- [Docker Compose 部署](docs/02-deploy/deploy-docker-compose.md) — 单实例多角色（一套 Web）；可选双容器附录
+- [Linux 单机部署](docs/02-deploy/deploy-linux.md) — systemd 安装、升级与回滚
+- [冒烟测试](docs/05-testing/smoke-test.md) — 测试矩阵、本地/CI 执行、结果解读、失败排查
 
 仪表盘源码位于 `web/`；生产构建产物写入 `internal/interface/webui/embed/dist/`，并通过 `//go:embed` 内嵌进 Go 二进制。
 

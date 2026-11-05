@@ -4,7 +4,7 @@
 #   docker compose -f docker-compose.dual.yml up -d --build
 #
 # 需要先准备 deploy/platform/config.yaml 与 deploy/device/config.yaml
-#（见 docs/deploy-docker-compose.md「双容器附录」）。
+#（见 docs/02-deploy/deploy-docker-compose.md「双容器附录」）。
 
 name: gb28181-simulator-dual
 

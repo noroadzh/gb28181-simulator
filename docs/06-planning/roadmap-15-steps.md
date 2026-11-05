@@ -22,7 +22,7 @@
 | 15 | `scenario-engine` | YAML 场景引擎（2026-09-27） | ✅ 已归档 | YAML-driven 场景脚本引擎 + 报告产出 |
 | 16 | `manscdp-logging-coverage` | MANSCDP+ 业务面日志覆盖 | ✅ 已归档 | acceptor 7 处成功路径补 Debug 日志（codec 包按惯例保持无日志）（2026-09-29） |
 | 17 | `media-aggregator-integration` | 媒体热循环聚合接入 | ✅ 已归档 | `ps_packetizer.go` / `rtpizer.go` 接入 `error_aggregator`（2026-09-29） |
-| 18 | `logging-user-docs` | 日志配置用户文档 | ✅ 已归档 | `docs/logging.md`：env 变量、`log.modules` 语法、PATCH 接口契约（2026-09-29） |
+| 18 | `logging-user-docs` | 日志配置用户文档 | ✅ 已归档 | `docs/03-config/logging.md`：env 变量、`log.modules` 语法、PATCH 接口契约（2026-09-29） |
 | 19 | `media-source-config` | 媒体源端到端配置 | ✅ 已归档 | config `media:` 段 + HTTP API + Web UI 面板；打通 #8 遗留的 app 层 wiring（2026-10-08） |
 | 20 | `fix-catalog-aggregate-and-channel-autogen` | 目录聚合 + 通道自动编号 + 循环校验 + 实时日志页 | ✅ 已归档 | Catalog 展开下游通道、通道 ID 自动生成、loop 仅限 file 校验、Web 实时日志页（2026-10-10） |
 | 21 | `fix-device-registration-peer-matching` | 设备注册对端匹配修复 | ✅ 已归档 | 设备启动注册直接失败；修正对端地址匹配（2026-10-10） |
@@ -49,7 +49,7 @@
 | 42 | `platform-recording` | 平台侧录像 | ✅ 已归档 | 拉流即分段录制（文件系统索引、重启可查）；HTTP 录像列表与 FLV 回放；平台对上级的 RecordInfo 与回放 INVITE 从录像库作答（2026-10-27） |
 | 43 | `cascade-media-relay` | 级联媒体中继 | ✅ 已归档 | 平台作为 B2BUA：上级拉下级通道时双对话桥接 PS/RTP（两侧传输独立）；BYE 成对传播；中继流可预览/录像（2026-10-29） |
 | 44 | `device-control-coverage` | 六类运维命令 | ✅ 已归档 | DeviceStatus、Broadcast（ack + 设备主动音频 INVITE）、报警查询与布防撤防、ConfigDownload、DeviceUpgrade/TeleBoot、文件下载；HTTP 七个入口；平台异步转发下级（2026-10-30） |
-| 45 | `docs-sync-gb28181-coverage` | 国标覆盖文档同步 | ✅ 已归档 | 修正架构/规格漂移、GuardCmd 用词、新增 `docs/gb28181-coverage.md`、路线图承接（2026-11-04） |
+| 45 | `docs-sync-gb28181-coverage` | 国标覆盖文档同步 | ✅ 已归档 | 修正架构/规格漂移、GuardCmd 用词、新增 `docs/04-architecture/gb28181-coverage.md`、路线图承接（2026-11-04） |
 | 46 | `interop-hardening` | 控制语义加深 | ✅ 已归档 | 入站 PlaybackControl 驱动会话、PTZ 状态、光圈/预置位、RecordCmd/IFrame、未实现显式 ERROR（2026-11-04） |
 | 47 | `webui-platform-live-and-recordings` | Web UI 平台拉流与录像库 | ✅ 已归档 | 平台通道拉流/预览、`GET …/live`、平台录像库页；设备页行为不变（2026-11-04） |
 | 48 | `cascade-observability` | 级联中继可观测 | ✅ 已归档 | `GET …/cascade/sessions` + Web 级联页（2026-11-04） |
@@ -115,4 +115,4 @@
 - #10 原名 `dynamic-catalog-and-query`，实际由 `dynamic-sim-features` change 实现（动态目录/报警、录像与回放、移动位置、运行时触发 API）。
 - 已完成 50 个编号（#1–#50），含 2026-11-04 归档的 #48/#49/#50。
 - 当前无进行中条目；#51+ 候选：SIP TLS / SRTP。
-- 路线图同步契约见 capability `docs-roadmap-sync`；每次归档必须在同提交更新本文件；协议面归档须同步 `docs/gb28181-coverage.md`。
+- 路线图同步契约见 capability `docs-roadmap-sync`；每次归档必须在同提交更新本文件；协议面归档须同步 `docs/04-architecture/gb28181-coverage.md`。

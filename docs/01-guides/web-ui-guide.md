@@ -56,7 +56,7 @@
 
 <div style="max-width:900px">
 
-![平台系统与设备系统共用同一 Web UI 架构图](screenshots/00-architecture-overview.png)
+![平台系统与设备系统共用同一 Web UI 架构图](../screenshots/00-architecture-overview.png)
 
 </div>
 
@@ -107,7 +107,7 @@ npm ci && npm run build
 
 <div style="max-width:900px">
 
-![侧边栏导航与 Header](screenshots/00-sidebar-nav.png)
+![侧边栏导航与 Header](../screenshots/00-sidebar-nav.png)
 
 </div>
 
@@ -131,7 +131,7 @@ npm ci && npm run build
 
 <div style="max-width:900px">
 
-![平台系统 - 节点概览](screenshots/01-platform-nodes-overview.png)
+![平台系统 - 节点概览](../screenshots/01-platform-nodes-overview.png)
 
 </div>
 
@@ -175,7 +175,7 @@ npm ci && npm run build
 
 <div style="max-width:900px">
 
-![设备系统 - 节点概览](screenshots/02-device-nodes-overview.png)
+![设备系统 - 节点概览](../screenshots/02-device-nodes-overview.png)
 
 </div>
 
@@ -218,7 +218,7 @@ device 节点可展开查看所有通道。该页面从 `GET /v1/nodes/:id/chann
 
 <div style="max-width:900px">
 
-![通道列表页面](screenshots/11-channel-list.png)
+![通道列表页面](../screenshots/11-channel-list.png)
 
 </div>
 
@@ -251,14 +251,14 @@ device 节点可展开查看所有通道。该页面从 `GET /v1/nodes/:id/chann
 
 ### 5.1 实时播放
 
-![通道详情 - 实时播放](screenshots/12-channel-detail-player.png)
+![通道详情 - 实时播放](../screenshots/12-channel-detail-player.png)
 
 - 使用 `flv.js`（BSD 协议）通过 HTTP-FLV 拉取后端流媒体网关 `/v1/flv/:id/:ch`，自动处理浏览器 MSE 兼容。
 - 播放器下方显示当前连接状态。
 
 ### 5.2 PTZ 云台控制
 
-![通道详情 - PTZ 云台控制](screenshots/13-channel-detail-ptz.png)
+![通道详情 - PTZ 云台控制](../screenshots/13-channel-detail-ptz.png)
 
 - **方向按钮**：八方向（上/下/左/右/左上/右上/左下/右下），按住持续发送指令（每 500ms 轮询一次），松开停止。
 - **辅助功能**：变倍、变焦、光圈（iris）已实现；预置位调用走 DeviceControl `<PresetID>`（见 §5.6）。
@@ -269,7 +269,7 @@ device 节点可展开查看所有通道。该页面从 `GET /v1/nodes/:id/chann
 
 ### 5.3 语音对讲
 
-![通道详情 - 语音对讲](screenshots/14-channel-detail-talk.png)
+![通道详情 - 语音对讲](../screenshots/14-channel-detail-talk.png)
 
 - 点击「开始对讲」：浏览器请求麦克风权限，8kHz 单声道采集后在浏览器内编码为 **G.711 μ-law**，经 `/v1/nodes/:id/channels/:ch/talk/audio?session=<id>` 以二进制帧上行；下行帧同样经 μ-law 解码后播放。
 - 后端基于 SIP INVITE 建立音频 RTP 会话（PCMU 编码），下行音频通过 WebSocket 推回浏览器播放。
@@ -335,7 +335,7 @@ security:
 
 **代码位置**：`web/src/views/RecordView.vue`
 
-![录像回放页面](screenshots/16-record-playback.png)
+![录像回放页面](../screenshots/16-record-playback.png)
 
 ### 功能
 
@@ -364,7 +364,7 @@ security:
 
 <div style="max-width:900px">
 
-![平台系统 - 抓包面板](screenshots/03-platform-capture.png)
+![平台系统 - 抓包面板](../screenshots/03-platform-capture.png)
 
 </div>
 
@@ -401,7 +401,7 @@ security:
 
 <div style="max-width:900px">
 
-![设备系统 - 抓包面板](screenshots/04-device-capture.png)
+![设备系统 - 抓包面板](../screenshots/04-device-capture.png)
 
 </div>
 
@@ -441,7 +441,7 @@ capture:
 
 <div style="max-width:900px">
 
-![平台系统 - 故障注入面板](screenshots/05-platform-fault.png)
+![平台系统 - 故障注入面板](../screenshots/05-platform-fault.png)
 
 </div>
 
@@ -472,7 +472,7 @@ capture:
 
 <div style="max-width:900px">
 
-![设备系统 - 故障注入面板](screenshots/06-device-fault.png)
+![设备系统 - 故障注入面板](../screenshots/06-device-fault.png)
 
 </div>
 
@@ -509,7 +509,7 @@ capture:
 
 <div style="max-width:900px">
 
-![平台系统 - 场景管理列表](screenshots/07-platform-scenarios.png)
+![平台系统 - 场景管理列表](../screenshots/07-platform-scenarios.png)
 
 </div>
 
@@ -548,7 +548,7 @@ capture:
 
 <div style="max-width:900px">
 
-![设备系统 - 场景管理列表](screenshots/08-device-scenarios.png)
+![设备系统 - 场景管理列表](../screenshots/08-device-scenarios.png)
 
 </div>
 
@@ -580,7 +580,7 @@ capture:
 
 <div style="max-width:900px">
 
-![平台系统 - 仪表盘](screenshots/10-platform-dashboard.png)
+![平台系统 - 仪表盘](../screenshots/10-platform-dashboard.png)
 
 </div>
 
@@ -606,7 +606,7 @@ capture:
 
 <div style="max-width:900px">
 
-![空状态页面示例](screenshots/18-empty-state.png)
+![空状态页面示例](../screenshots/18-empty-state.png)
 
 </div>
 

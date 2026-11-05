@@ -22,7 +22,7 @@ import (
 // registrationInput is the JSON shape of one registration row. Durations
 // arrive as plain numbers (seconds for the heartbeat pair, milliseconds
 // for the transaction timeout) because the API must stay typeable by hand
-// — the same rule docs/configuration.md states for the YAML it replaces.
+// — the same rule docs/03-config/configuration.md states for the YAML it replaces.
 type registrationInput struct {
 	Server               string `json:"server"`
 	ServerID             string `json:"server_id"`
@@ -418,7 +418,7 @@ func domainFromID(id string) string {
 
 // newNodeDetailResponse renders the live node together with its stored
 // definition. Registration is rendered without the password — the API
-// never echoes a secret back; the redaction rules docs/logging.md states
+// never echoes a secret back; the redaction rules docs/03-config/logging.md states
 // for logs apply to responses too.
 func newNodeDetailResponse(n model.Node, sn model.StoredNode) nodeDetailResponse {
 	resp := nodeDetailResponse{

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`docs/logging.md` 是运维与二次开发者配置、检查、排查模拟器日志的单一入口文档。
+`docs/03-config/logging.md` 是运维与二次开发者配置、检查、排查模拟器日志的单一入口文档。
 本 capability 规定该文档必须覆盖的内容边界，以及它必须准确描述的契约：
 `log.*` 配置项总表、`log.modules` 前缀最长匹配规则、`PATCH /v1/config/log` 的运行时
 热更新语义、component/subsystem 标签对照表、媒体聚合摘要语义与故障排查手册。
@@ -12,11 +12,11 @@
 
 ### Requirement: Log configuration reference
 
-`docs/logging.md` MUST document every field of the `log.*` YAML configuration block (`level`, `file`, `add_source`, `redact_keys`, `modules`) with: YAML key, type, default value, and one-line effect description. The `modules` field MUST be described as `map[string]Level` keyed by `component` prefix.
+`docs/03-config/logging.md` MUST document every field of the `log.*` YAML configuration block (`level`, `file`, `add_source`, `redact_keys`, `modules`) with: YAML key, type, default value, and one-line effect description. The `modules` field MUST be described as `map[string]Level` keyed by `component` prefix.
 
 #### Scenario: every config field is covered
 - **WHEN** a reader looks up any `log.*` field present in `internal/platform/config.LogConfig`
-- **THEN** `docs/logging.md` contains a table row for that field with its YAML key, type and default
+- **THEN** `docs/03-config/logging.md` contains a table row for that field with its YAML key, type and default
 
 #### Scenario: level enumeration is accurate
 - **WHEN** the document lists the supported level values

@@ -45,11 +45,11 @@
 部署文档 MUST 提供两种配置模式示例：有密码（生产环境）和无密码（测试/内网），并 MUST 明确说明每种场景的适用条件。
 
 #### Scenario: deploy-linux.md contains no-auth example
-- **WHEN** 运维工程师打开 `docs/deploy-linux.md`
+- **WHEN** 运维工程师打开 `docs/02-deploy/deploy-linux.md`
 - **THEN** 文档中包含 `allow_no_auth: true` 的最小可用配置样例
 - **AND** 文档"常见故障"章节包含"密码为空导致注册失败"的排查条目
 
 #### Scenario: deploy-docker-compose.md contains no-auth device example
-- **WHEN** 运维工程师打开 `docs/deploy-docker-compose.md`
+- **WHEN** 运维工程师打开 `docs/02-deploy/deploy-docker-compose.md`
 - **THEN** device 节点的配置示例展示 `allow_no_auth: true` 用法
 - **AND** platform 节点示例展示 `platform.allow_no_auth: true` 用法

@@ -76,7 +76,7 @@ info "源码目录: $SRC_DIR"
 info "检查依赖..."
 
 check_cmd() {
-  command -v "$1" >/dev/null 2>&1 || fatal "缺少命令: $1（安装方法见 docs/deploy-linux.md §1）"
+  command -v "$1" >/dev/null 2>&1 || fatal "缺少命令: $1（安装方法见 docs/02-deploy/deploy-linux.md §1）"
 }
 
 check_cmd git

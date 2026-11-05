@@ -1,7 +1,7 @@
 # docs-roadmap-sync Specification
 
 ## Purpose
-维护项目路线图文档 `docs/roadmap-15-steps.md` 与归档现实的同步契约：定义状态字段、必填列、同步触发条件，以及防止文档再次脱节的验证机制。
+维护项目路线图文档 `docs/06-planning/roadmap-15-steps.md` 与归档现实的同步契约：定义状态字段、必填列、同步触发条件，以及防止文档再次脱节的验证机制。
 
 ## Requirements
 
@@ -11,7 +11,7 @@
 
 #### Scenario: All five columns present
 
-- **WHEN** 任意贡献者阅读 `docs/roadmap-15-steps.md`
+- **WHEN** 任意贡献者阅读 `docs/06-planning/roadmap-15-steps.md`
 - **THEN** 每行 MUST 同时包含 `阶段编号`、`编号`、`名称`、`状态`、`说明` 五个字段
 - **AND** 阶段编号 MUST 严格递增（`#1`、`#2`、…、`#N`）
 
@@ -42,17 +42,17 @@
 
 ### Requirement: Post-archive roadmap update obligation
 
-每次执行 `openspec archive <change-name>` 成功后，archive 流程执行人 MUST 在同一提交或紧随的提交中更新 `docs/roadmap-15-steps.md`：将对应阶段的 `状态` 从 `🔨 进行中` 改为 `✅ 已归档`，并在 `说明` 列追加归档日期注释。本次归档不允许出现"路线图未更新"的中间态。
+每次执行 `openspec archive <change-name>` 成功后，archive 流程执行人 MUST 在同一提交或紧随的提交中更新 `docs/06-planning/roadmap-15-steps.md`：将对应阶段的 `状态` 从 `🔨 进行中` 改为 `✅ 已归档`，并在 `说明` 列追加归档日期注释。本次归档不允许出现"路线图未更新"的中间态。
 
 #### Scenario: Successful archive updates roadmap same commit
 
 - **WHEN** `openspec archive` 命令成功完成某 change 的归档
-- **THEN** `docs/roadmap-15-steps.md` 中对应行的状态 MUST 在同一提交或紧随的下一次提交中被改为 `✅ 已归档`
+- **THEN** `docs/06-planning/roadmap-15-steps.md` 中对应行的状态 MUST 在同一提交或紧随的下一次提交中被改为 `✅ 已归档`
 - **AND** 该行的归档日期 MUST 填入与目录前缀一致的 `（YYYY-MM-DD）` 注释
 
 ### Requirement: Forward roadmap numbering
 
-路线图文档 MUST 在每个 `✅ 已归档` 行的下方保留至少一个 `🔨 进行中` 或 `⬜ 待实施` 行，或在文档末尾的"说明"小节中显式登记下一阶段的 `编号` 与 `名称` 候选。一旦所有当前登记的阶段全部归档，必须在 `docs/roadmap-15-steps.md` 文件名或文档末尾追加新的待实施阶段条目以承接路线图。
+路线图文档 MUST 在每个 `✅ 已归档` 行的下方保留至少一个 `🔨 进行中` 或 `⬜ 待实施` 行，或在文档末尾的"说明"小节中显式登记下一阶段的 `编号` 与 `名称` 候选。一旦所有当前登记的阶段全部归档，必须在 `docs/06-planning/roadmap-15-steps.md` 文件名或文档末尾追加新的待实施阶段条目以承接路线图。
 
 #### Scenario: New pending phases appended after archive
 
@@ -62,11 +62,11 @@
 
 ### Requirement: Sync verification before commit
 
-在涉及路线图变更的提交中，archive 流程执行人 MUST 在本地核对 `openspec list --specs` 与 `docs/roadmap-15-steps.md` 的对应关系，且核对命令的输出 MUST 在提交说明中可追溯（例如在 commit message 中引用 `openspec list` 输出摘要）。
+在涉及路线图变更的提交中，archive 流程执行人 MUST 在本地核对 `openspec list --specs` 与 `docs/06-planning/roadmap-15-steps.md` 的对应关系，且核对命令的输出 MUST 在提交说明中可追溯（例如在 commit message 中引用 `openspec list` 输出摘要）。
 
 #### Scenario: Roadmap change accompanied by verification artifact
 
-- **WHEN** 提交修改 `docs/roadmap-15-steps.md` 或创建新的 `openspec/changes/` 目录
+- **WHEN** 提交修改 `docs/06-planning/roadmap-15-steps.md` 或创建新的 `openspec/changes/` 目录
 - **THEN** 提交说明或合并请求描述 MUST 引用 `openspec list` 的输出（或等价命令）
 - **AND** 若修改了归档日期注释，必须同时验证 `openspec/changes/archive/<date>-<name>/` 目录存在
 
@@ -86,13 +86,13 @@
 
 ### Requirement: 协议覆盖表与路线图同步
 
-当仓库存在 `docs/gb28181-coverage.md` 时，每次归档会改变国标章节覆盖状态的 change（例如新增 CmdType、媒体路径、安全能力）MUST 在同一提交或紧随提交中更新该覆盖表中对应行的状态与说明；同时 MUST 按既有 Forward roadmap numbering 在 `docs/roadmap-15-steps.md` 保留 `#N+1` 承接行。
+当仓库存在 `docs/04-architecture/gb28181-coverage.md` 时，每次归档会改变国标章节覆盖状态的 change（例如新增 CmdType、媒体路径、安全能力）MUST 在同一提交或紧随提交中更新该覆盖表中对应行的状态与说明；同时 MUST 按既有 Forward roadmap numbering 在 `docs/06-planning/roadmap-15-steps.md` 保留 `#N+1` 承接行。
 
 #### Scenario: 归档后覆盖表与路线图同时更新
 
 - **WHEN** 归档一个改变协议覆盖面的 change（如新增 DeviceControl 子类型）
-- **THEN** `docs/roadmap-15-steps.md` 对应行改为 `✅ 已归档` 并带归档日期
-- **AND** `docs/gb28181-coverage.md` 中相关行的状态/说明与新能力一致
+- **THEN** `docs/06-planning/roadmap-15-steps.md` 对应行改为 `✅ 已归档` 并带归档日期
+- **AND** `docs/04-architecture/gb28181-coverage.md` 中相关行的状态/说明与新能力一致
 - **AND** 若无更多进行中阶段，文档 MUST 仍保留至少一个 `⬜ 待实施` 或 `🔨 进行中` 承接行
 
 #### Scenario: 本阶段登记 #45 与 #46

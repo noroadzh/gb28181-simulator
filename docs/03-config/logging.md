@@ -121,7 +121,7 @@ log:
 
 PATCH 修改的是进程内 `MultiHandler.moduleLevels` 与 `defaultLevel` 字段，**不写盘**。重启后回退到 `configs/config.example.yaml` 中 `log.level` 与 `log.modules` 的声明值。
 
-冒烟用例与并发安全性见 `internal/interface/http/log_config_test.go`（10 个用例）以及 `docs/smoke-test.md` §7。
+冒烟用例与并发安全性见 `internal/interface/http/log_config_test.go`（10 个用例）以及 `docs/05-testing/smoke-test.md` §7。
 
 ---
 
@@ -269,5 +269,5 @@ curl -X PATCH http://127.0.0.1:18080/v1/config/log \
 - 能力契约：`openspec/specs/logging-coverage/spec.md`（源自 `enhance-logging-coverage` 已归档 change）
 - 实现：`internal/platform/observability/logging/{handler,level,logger}.go`
 - HTTP 端点：`internal/interface/http/log_config.go`（+ `_test.go`）
-- 冒烟用例：`docs/smoke-test.md` §7
-- 路线图：§"日志配置用户文档（docs/logging.md）"（编号 #18）
+- 冒烟用例：`docs/05-testing/smoke-test.md` §7
+- 路线图：§"日志配置用户文档（docs/03-config/logging.md）"（编号 #18）

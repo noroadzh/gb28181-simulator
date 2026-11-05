@@ -276,7 +276,7 @@ corrected.
    Requests work because the builders generate `Via`/`From`/`To`/`Call-ID`/`CSeq`
    themselves, but a hand-built response loses its headers and is rejected on
    the wire. Out of scope here (`sipprobe --answer` builds gosip messages
-   directly and is unaffected). Documented in `docs/architecture.md`.
+   directly and is unaffected). Documented in `docs/04-architecture/architecture.md`.
 2. **Asynchronous socket release.** gosip's `layer.Cancel()` only closes a
    channel; the socket is released by its own goroutine. `Transport.Close()`
    now waits up to 500 ms for the port to become bindable, which fixes
@@ -389,7 +389,7 @@ None. No task is left unchecked and no requirement is missing an implementation.
    → Add `gofmt -l` to lint, or run a one-off `gofmt -w ./internal ./cmd`.
 
 3. **`modelToGosip` drops caller headers** (Change 3 legacy, documented in
-   `docs/architecture.md`). Out of scope here, but it will bite Change 5 the
+   `docs/04-architecture/architecture.md`). Out of scope here, but it will bite Change 5 the
    moment a response needs a custom header.
 
 ### Final assessment

@@ -1,6 +1,6 @@
 # GB/T 28181 实现覆盖对照
 
-对照文档：`docs/GBT 28181-2016 …（扫描带目录版）.pdf`。  
+对照文档：`docs/90-standards/GBT 28181-2016 …（扫描带目录版）.pdf`。  
 状态：✅ 已实现可联调 · 🟡 部分/模拟级 · ❌ 未做或明确非目标 · ➕ 模拟器增强。  
 维护：协议面 change 归档时须同步更新本表（见 capability `docs-roadmap-sync` / `protocol-coverage-docs`）。
 
