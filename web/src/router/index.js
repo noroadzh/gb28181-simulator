@@ -12,8 +12,11 @@ import AccountsView from '../views/AccountsView.vue'
 import HelpView from '../views/HelpView.vue'
 import LogView from '../views/LogView.vue'
 import CascadeView from '../views/CascadeView.vue'
+import LoginView from '../views/LoginView.vue'
+import { useAuthStore } from '../stores/auth'
 
 const routes = [
+  { path: '/login', name: 'login', component: LoginView, meta: { title: '登录', public: true } },
   { path: '/', redirect: '/dashboard' },
   { path: '/nodes', name: 'nodes', component: NodesView, meta: { title: '节点概览' } },
   { path: '/accounts/:id?', name: 'accounts', component: AccountsView, meta: { title: '账号管理', roles: ['platform'] } },
@@ -35,8 +38,28 @@ const router = createRouter({
   routes
 })
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   document.title = `gb28181-simulator - ${to.meta.title || ''}`
+  const auth = useAuthStore()
+  if (!auth.ready) {
+    try {
+      await auth.refresh()
+    } catch (_) {
+      auth.ready = true
+      auth.enabled = false
+      auth.authenticated = true
+    }
+  }
+  if (to.meta.public) {
+    if (to.name === 'login' && auth.enabled && auth.authenticated) {
+      return { path: '/dashboard' }
+    }
+    return true
+  }
+  if (auth.needsLogin) {
+    return { path: '/login', query: { redirect: to.fullPath } }
+  }
+  return true
 })
 
 export default router

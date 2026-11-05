@@ -355,11 +355,45 @@ type TracingConfig struct {
 type HTTPConfig struct {
 	Host string `mapstructure:"host"`
 	Port int    `mapstructure:"port"`
+	// Auth protects the Web UI and /v1 API with a single operator login.
+	// Disabled by default so local/dev and existing tests stay open.
+	Auth HTTPAuthConfig `mapstructure:"auth"`
+}
+
+// HTTPAuthConfig is the Web console login gate (not SIP Digest).
+type HTTPAuthConfig struct {
+	Enabled  bool   `mapstructure:"enabled"`
+	Username string `mapstructure:"username"`
+	Password string `mapstructure:"password"`
+	// SessionTTLHours is how long a login cookie stays valid. 0 → 24h.
+	SessionTTLHours int `mapstructure:"session_ttl_hours"`
 }
 
 // Addr returns host:port suitable for net.Listen.
 func (h HTTPConfig) Addr() string {
 	return fmt.Sprintf("%s:%d", h.Host, h.Port)
+}
+
+// SessionTTL returns the login cookie lifetime.
+func (a HTTPAuthConfig) SessionTTL() time.Duration {
+	if a.SessionTTLHours > 0 {
+		return time.Duration(a.SessionTTLHours) * time.Hour
+	}
+	return 24 * time.Hour
+}
+
+// ValidateAuth fails fast when auth is enabled without credentials.
+func (a HTTPAuthConfig) ValidateAuth() error {
+	if !a.Enabled {
+		return nil
+	}
+	if strings.TrimSpace(a.Username) == "" {
+		return fmt.Errorf("config: http.auth.username is required when auth is enabled")
+	}
+	if a.Password == "" {
+		return fmt.Errorf("config: http.auth.password is required when auth is enabled")
+	}
+	return nil
 }
 
 // LogConfig configures the logger package.
@@ -468,6 +502,9 @@ func Load(path string) (*Config, error) {
 	// An illegal node entry fails loading: silently skipping it would start
 	// the process with fewer nodes than the operator asked for (design D7).
 	if err := cfg.ValidateNodes(); err != nil {
+		return nil, err
+	}
+	if err := cfg.HTTP.Auth.ValidateAuth(); err != nil {
 		return nil, err
 	}
 	return cfg, nil

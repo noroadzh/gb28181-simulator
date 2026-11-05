@@ -1,14 +1,17 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { useNodeStore } from './stores/nodes'
 import { useRoleStore } from './stores/role'
+import { useAuthStore } from './stores/auth'
 import { api } from './api'
 
 const router = useRouter()
 const route = useRoute()
 const nodeStore = useNodeStore()
 const roleStore = useRoleStore()
+const authStore = useAuthStore()
 const meta = ref({ version: '…', commit: '…', go: '…', platform: '…', status: 'unknown' })
 
 const menu = [
@@ -24,6 +27,7 @@ const menu = [
   { path: '/help', title: '帮助' }
 ]
 
+const isLoginPage = computed(() => route.name === 'login')
 const visibleMenu = computed(() => menu.filter(item => roleStore.menuVisible(item)))
 
 const roleMode = computed({
@@ -48,27 +52,48 @@ async function loadMeta () {
     meta.value.commit = j.commit
     meta.value.go = j.go_version
     meta.value.platform = j.platform
+    meta.value.status = 'ok'
   } catch (_) {
     meta.value.version = 'unreachable'
+    meta.value.status = 'down'
   }
 }
 
+async function logout () {
+  await authStore.logout()
+  ElMessage.success('已退出登录')
+  router.replace('/login')
+}
+
 watch(() => roleStore.mode, () => {
-  // If current route is hidden for this role, bounce to nodes.
   const hit = menu.find(m => route.path === m.path || route.path.startsWith(m.path + '/'))
   if (hit && !roleStore.menuVisible(hit)) {
     router.push('/nodes')
   }
 })
 
-onMounted(() => {
-  loadMeta()
-  nodeStore.refresh()
+watch(() => authStore.authenticated, (ok) => {
+  if (ok && !isLoginPage.value) {
+    loadMeta()
+    nodeStore.refresh()
+  }
+})
+
+onMounted(async () => {
+  if (!authStore.ready) {
+    try { await authStore.refresh() } catch (_) {}
+  }
+  if (!authStore.needsLogin) {
+    loadMeta()
+    nodeStore.refresh()
+  }
 })
 </script>
 
 <template>
-  <el-container style="min-height:100vh">
+  <router-view v-if="isLoginPage" />
+
+  <el-container v-else style="min-height:100vh">
     <el-aside width="200px" :style="asideStyle">
       <div style="height:60px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:15px;font-weight:bold;line-height:1.2;padding:0 8px;text-align:center">
         <div>gb28181-simulator</div>
@@ -102,6 +127,10 @@ onMounted(() => {
           </el-radio-group>
           <el-tag type="success" size="small">{{ meta.status }}</el-tag>
           <span>v{{ meta.version }}</span>
+          <template v-if="authStore.enabled">
+            <span>{{ authStore.username || '已登录' }}</span>
+            <el-button size="small" text type="primary" @click="logout">退出</el-button>
+          </template>
         </div>
       </el-header>
 

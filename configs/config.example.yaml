@@ -6,6 +6,12 @@
 http:
   host: 127.0.0.1
   port: 18080
+  # Web 操作台登录（与 SIP 设备账号无关）。默认关闭便于本地开发。
+  # auth:
+  #   enabled: true
+  #   username: admin
+  #   password: "change-me"
+  #   session_ttl_hours: 24
 
 log:
   level: info             # trace|debug|info|warn|error

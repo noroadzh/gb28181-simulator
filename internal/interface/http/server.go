@@ -56,6 +56,9 @@ type Server struct {
 	// concurrent ID-less adds cannot both observe the same next sequence
 	// number. Explicit-ID adds never take this lock.
 	autoIDMu sync.Mutex
+
+	// sessions is nil when http.auth.enabled is false.
+	sessions *sessionStore
 }
 
 var upgrader = websocket.Upgrader{
@@ -97,7 +100,9 @@ func NewServer(cfg platformconfig.Config, hub *logging.Hub, ver Version, nodes N
 		echo:      e,
 		log:       slog.Default(),
 		streaming: streaming,
+		sessions:  ensureAuthStore(cfg.HTTP.Auth),
 	}
+	e.Use(s.authMiddleware)
 	s.registerRoutes(e)
 	return s
 }
@@ -112,6 +117,11 @@ func (s *Server) WithEventsHub(h *events.Hub) *Server {
 }
 
 func (s *Server) registerRoutes(e *echo.Echo) {
+	// Auth (public when gated; no-ops when auth is off).
+	e.GET("/v1/auth/status", s.handleAuthStatus)
+	e.POST("/v1/auth/login", s.handleAuthLogin)
+	e.POST("/v1/auth/logout", s.handleAuthLogout)
+
 	// v1 API routes
 	e.GET("/v1/health", s.handleHealth)
 	e.GET("/v1/version", s.handleVersion)
