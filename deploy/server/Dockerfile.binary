@@ -1,0 +1,24 @@
+# 预编译二进制运行时（服务器无 Node/Go 构建环境时使用）
+FROM alpine:3.20
+
+RUN apk add --no-cache ca-certificates tzdata tini wget
+
+RUN addgroup -g 10001 -S gbsim && \
+    adduser -u 10001 -S -G gbsim -h /var/lib/gb28181-simulator gbsim
+
+RUN mkdir -p /var/lib/gb28181-simulator /var/lib/gb28181-simulator/.local/state /etc/gb28181-simulator && \
+    chown -R gbsim:gbsim /var/lib/gb28181-simulator /etc/gb28181-simulator
+
+COPY --chown=gbsim:gbsim binary/gb28181-simulator-linux-amd64 /usr/local/bin/gb28181-simulator
+RUN chmod 755 /usr/local/bin/gb28181-simulator
+
+USER gbsim
+WORKDIR /var/lib/gb28181-simulator
+
+EXPOSE 5060/udp 5060/tcp 5061/udp 5061/tcp 8080/tcp
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD wget -qO- http://127.0.0.1:8080/healthz || exit 1
+
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["gb28181-simulator", "--config", "/etc/gb28181-simulator/config.yaml"]

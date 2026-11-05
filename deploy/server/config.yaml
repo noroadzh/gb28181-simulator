@@ -1,0 +1,59 @@
+# 单实例多角色（platform + device 同进程，一套 Web :18080）
+# 部署机：/slow2/gb28181-simulator/config.yaml
+
+http:
+  host: "0.0.0.0"
+  port: 8080
+
+log:
+  level: info
+
+auto_start: true
+
+capture:
+  enabled: true
+  capacity: 2048
+
+storage:
+  path: /var/lib/gb28181-simulator/data.db
+
+recording:
+  enabled: true
+  dir: /var/lib/gb28181-simulator/recordings
+
+nodes:
+  - id: "34020000002000000001"
+    kind: platform-large
+    domain: "3402000000"
+    addr: "0.0.0.0:5060"
+    vendor: docker
+    platform:
+      realm: "3402000000"
+      accounts:
+        - username: "34020000001310000001"
+          password: "Gb28181@2024"
+      min_expires: 60
+      default_expires: 3600
+      max_expires: 86400
+      catalog_poll_interval: 30s
+
+  - id: "34020000001310000001"
+    kind: device
+    domain: "3402000000"
+    addr: "0.0.0.0:5061"
+    vendor: docker
+    registration:
+      server: "127.0.0.1:5060"
+      server_id: "34020000002000000001"
+      username: "34020000001310000001"
+      password: "Gb28181@2024"
+      expires: 3600
+      transport: udp
+      timeout: 5s
+      heartbeat_interval: 60s
+      heartbeat_timeout: 5s
+      heartbeat_max_failures: 3
+    media:
+      kind: synthetic
+      fps: 25
+      mtu: 1400

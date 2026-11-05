@@ -1,0 +1,36 @@
+# 单实例多角色：一套 Web + 同进程 platform/device
+# 镜像由 Dockerfile.binary + 预编译 linux/amd64 二进制构建
+
+name: gb28181-simulator
+
+services:
+  gbsim:
+    build:
+      context: .
+      dockerfile: Dockerfile.binary
+    image: gb28181-simulator:${GB28181_VERSION:-latest}
+    container_name: gbsim
+    hostname: gbsim
+    restart: unless-stopped
+    ports:
+      - "15060:5060/udp"
+      - "15060:5060/tcp"
+      - "15061:5061/udp"
+      - "15061:5061/tcp"
+      - "18080:8080/tcp"
+    volumes:
+      - ./config.yaml:/etc/gb28181-simulator/config.yaml:ro
+      - ./data:/var/lib/gb28181-simulator
+    networks:
+      - gbsim-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+
+networks:
+  gbsim-net:
+    driver: bridge
+    name: gbsim-net

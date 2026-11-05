@@ -52,3 +52,7 @@ node_modules/
 
 # Stray build output from `go build` on scripts/ (e.g. go build scripts/migrations/yaml_to_db.go)
 /migrations
+
+# Server deploy runtime stamp (generated per release)
+deploy/server/.env
+deploy/server/binary/
