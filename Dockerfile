@@ -56,7 +56,7 @@ FROM alpine:3.20
 
 # CA certs for outbound TLS (RTSP pull, HTTPS media sources); tzdata for
 # Asia/Shanghai log timestamps; tini for correct signal forwarding.
-RUN apk add --no-cache ca-certificates tzdata tini
+RUN apk add --no-cache ca-certificates tzdata tini wget
 
 # Run as a non-root user. UID/GID 10001 is arbitrary but stable.
 RUN addgroup -g 10001 -S gbsim && \
@@ -73,7 +73,7 @@ WORKDIR /var/lib/gb28181-simulator
 
 # SIP over UDP/TCP, HTTP management API, optional media RTP/RTCP port range
 # is configured via config file and bound at runtime.
-EXPOSE 5060/udp 5060/tcp 8080/tcp
+EXPOSE 5060/udp 5060/tcp 5061/udp 5061/tcp 8080/tcp
 
 # Health check matches the /healthz endpoint asserted by internal/test/e2e.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \

@@ -1,21 +1,17 @@
-# gb28181-simulator Docker Compose — multi-node topology
+# gb28181-simulator — 单实例多角色（默认）
 #
-# Change: fix-problems-and-smoke-deploy-docs, task 6.2.
-# Defines a 2-node minimal topology on a single host:
-#   - gbsim-platform : platform-large (receives registrations, INVITE upstream)
-#   - gbsim-device   : device (registers into gbsim-platform)
-# Both share a private network and persist config + logs via named volumes.
+# 一个容器 = 一套 Web UI（顶栏 全部/平台/设备）+ 同进程 platform + device。
+# 配置：configs/examples/compose-single.yaml
 #
-# Run:
-#   docker compose up -d
-#   docker compose ps
-#   docker compose logs -f gbsim-platform
+#   docker compose up -d --build
+#   open http://127.0.0.1:18080
+#
+# 若仍需「两容器各跑一种角色」，见 docker-compose.dual.yml。
 
 name: gb28181-simulator
 
 services:
-  # ─────────────── platform-large node ───────────────
-  gbsim-platform:
+  gbsim:
     build:
       context: .
       args:
@@ -23,69 +19,27 @@ services:
         COMMIT: compose-dev
         BUILT_AT: compose-dev
     image: gb28181-simulator:compose-dev
-    container_name: gbsim-platform
-    hostname: gbsim-platform
+    container_name: gbsim
+    hostname: gbsim
     restart: unless-stopped
-    environment:
-      # Override individual config keys via GB28181_SIMULATOR_ env vars.
-      # The full list lives in internal/platform/config.
-      GB28181_SIMULATOR_NODE_ID: "34020000002000000001"
-      GB28181_SIMULATOR_NODE_ROLE: "platform-large"
-      GB28181_SIMULATOR_SIP_LISTEN: "0.0.0.0:5060"
-      GB28181_SIMULATOR_HTTP_LISTEN: "0.0.0.0:8080"
     ports:
-      - "5060:5060/udp"   # SIP signalling
-      - "5060:5060/tcp"   # SIP over TCP (GB/T 28181 Annex D)
-      - "8080:8080/tcp"   # HTTP management + Web UI
+      - "15060:5060/udp"   # 平台 SIP（对外对接入口）
+      - "15060:5060/tcp"
+      - "15061:5061/udp"   # 设备 SIP（同进程内注册用；可选对外）
+      - "15061:5061/tcp"
+      - "18080:8080/tcp"   # 唯一 Web UI + REST API
     volumes:
-      - platform-config:/etc/gb28181-simulator:ro
-      - platform-data:/var/lib/gb28181-simulator
+      - ./configs/examples/compose-single.yaml:/etc/gb28181-simulator/config.yaml:ro
+      - gbsim-data:/var/lib/gb28181-simulator
     networks:
       gbsim-net:
-        # 静态 IP：避免容器重启后地址漂移（设备注册的 Contact / 平台 received 依赖可预期地址）
         ipv4_address: 172.26.0.2
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
       interval: 30s
       timeout: 3s
       retries: 3
-      start_period: 10s
-
-  # ─────────────── device node ───────────────
-  gbsim-device:
-    build:
-      context: .
-    image: gb28181-simulator:compose-dev
-    container_name: gbsim-device
-    hostname: gbsim-device
-    restart: unless-stopped
-    environment:
-      GB28181_SIMULATOR_NODE_ID: "34020000001310000001"
-      GB28181_SIMULATOR_NODE_ROLE: "device"
-      GB28181_SIMULATOR_SIP_LISTEN: "0.0.0.0:5060"
-      GB28181_SIMULATOR_HTTP_LISTEN: "0.0.0.0:8080"
-      # Where this device should register.
-      GB28181_SIMULATOR_SIP_UPSTREAM: "gbsim-platform:5060"
-    ports:
-      - "5061:5060/udp"   # host-side: device SIP mapped to 5061 to avoid clash
-      - "5061:5060/tcp"
-      - "8081:8080/tcp"   # host-side HTTP mapped to 8081
-    volumes:
-      - device-config:/etc/gb28181-simulator:ro
-      - device-data:/var/lib/gb28181-simulator
-    networks:
-      gbsim-net:
-        # 静态 IP：避免容器重启后地址漂移（注册 Contact 地址保持稳定）
-        ipv4_address: 172.26.0.3
-    depends_on:
-      gbsim-platform:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
-      interval: 30s
-      timeout: 3s
-      retries: 3
-      start_period: 10s
+      start_period: 15s
 
 networks:
   gbsim-net:
@@ -97,7 +51,4 @@ networks:
           gateway: 172.26.0.1
 
 volumes:
-  platform-config:
-  platform-data:
-  device-config:
-  device-data:
+  gbsim-data:

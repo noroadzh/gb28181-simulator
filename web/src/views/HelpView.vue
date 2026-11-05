@@ -24,16 +24,15 @@
 
       <pre class="diagram">┌────────────────────────┐         ┌────────────────────────────┐
 │  第三方业务系统 / 设备   │         │   gb28181-simulator         │
-│  (VMS / 真实IPC / APP)  │         │                            │
-└───────────┬────────────┘         │  ┌──────────────────────┐  │
-            │ SIP :15060           │  │ platform 节点 (UAS)  │  │
-            │ REGISTER / CATALOG   │  │  平台 Web UI :18080  │  │
+│  (VMS / 真实IPC / APP)  │         │   单进程 · 一套 Web :18080  │
+└───────────┬────────────┘         │                            │
+            │ SIP :15060           │  ┌──────────────────────┐  │
+            │ REGISTER / CATALOG   │  │ platform 节点 (UAS)  │  │
             │ INVITE / RTP         │  └──────────▲───────────┘  │
             └──────────────────────┼─────────────┼──────────────┘
                                    │      SIP 注册│
                                    │      ┌──────┴───────────┐
                                    │      │ device 节点 (UAC)│  │
-                                   │      │  设备 Web UI:18081│  │
                                    │      └──────────────────┘  │
                                    └────────────────────────────┘</pre>
 
@@ -53,25 +52,25 @@
         </el-step>
       </el-steps>
 
-      <h2 id="uis">三、两个 Web UI 的分工</h2>
+      <h2 id="uis">三、一套 Web、角色视角</h2>
       <el-table :data="uiRoles" style="width:100%;margin:12px 0" border>
-        <el-table-column prop="ui" label="Web UI" width="220" />
-        <el-table-column prop="role" label="角色" width="140" />
+        <el-table-column prop="ui" label="入口" width="220" />
+        <el-table-column prop="role" label="视角" width="140" />
         <el-table-column prop="usage" label="您在这里做什么" />
       </el-table>
       <p>
-        简单记：<b>设备 UI 管通道和媒体源，平台 UI 管账号和看接入</b>。业务系统对接只需要连平台的 SIP 端口。
+        Docker 默认只映射 <b>:18080</b> 一套 UI。顶栏切「平台 / 设备」过滤菜单与节点；业务对接只连平台 SIP（:15060）。
       </p>
 
       <h2 id="ops">四、常见操作</h2>
       <h3>1. 允许一台新设备注册到平台</h3>
-      <p>平台 Web UI →【账号管理】→ 选择 platform 节点 → 新增账号（20 位国标编码 + 密码）。设备侧用同一对用户名/密码注册即可。</p>
+      <p>顶栏选「平台」→【账号管理】→ 选择 platform 节点 → 新增账号（20 位国标编码 + 密码）。设备节点用同一对用户名/密码注册即可。</p>
 
       <h3>2. 给设备增加一路子通道（虚拟摄像头）</h3>
-      <p>设备 Web UI →【节点概览】→ device 节点卡片 →【通道】→ 新增通道（20 位编码 + 名称）。新增的通道会持久化到 SQLite，重启不丢，并即时出现在 CATALOG 目录里。</p>
+      <p>顶栏选「设备」→【节点概览】→ device 节点卡片 →【通道】→ 新增通道（20 位编码 + 名称）。新增的通道会持久化到 SQLite，重启不丢，并即时出现在 CATALOG 目录里。</p>
 
       <h3>3. 给通道配置视频源</h3>
-      <p>设备 Web UI → 通道卡片 →【媒体源】：</p>
+      <p>设备视角 → 通道卡片 →【媒体源】：</p>
       <ul>
         <li><b>RTSP 流</b>：填 rtsp://... 地址，设备把外部 RTSP 流转封装为 PS+RTP 推出；</li>
         <li><b>MP4 等文件</b>：直接<b>拖拽上传</b>（自动保存到容器内并回填路径），或手动填写容器内路径；</li>
@@ -83,10 +82,10 @@
       <p>设备通道详情页提供 HTTP-FLV 播放器，无需 VLC 即可直接观看本地媒体源。</p>
 
       <h3>5. 平台侧拉流与录像库</h3>
-      <p>平台节点 →【通道】→ 通道详情：选择 UDP/TCP →「开始拉流」→「开始播放」预览下级实时画面；「平台录像库」查询拉流自动落盘的分段并 FLV 回放。设备侧 PTZ/对讲仍在设备通道页操作。</p>
+      <p>平台视角 → 通道详情：选择 UDP/TCP →「开始拉流」→「开始播放」预览下级实时画面；「平台录像库」查询拉流自动落盘的分段并 FLV 回放。PTZ/对讲仍在设备通道页操作。</p>
 
-      <h3>6. 角色视角与级联观测</h3>
-      <p>顶栏可切换「全部 / 平台 / 设备」视角（合壳不分两套系统）：平台视角突出账号与【级联中继】只读会话表；设备视角突出媒体源。级联拆链仍走 SIP BYE，不在 UI 强制拆。</p>
+      <h3>6. 级联观测</h3>
+      <p>平台视角侧栏【级联中继】只读会话表。级联拆链仍走 SIP BYE，不在 UI 强制拆。</p>
 
       <h2 id="ports">五、默认端口速查</h2>
       <el-table :data="ports" style="width:100%" border>
@@ -100,16 +99,16 @@
 
 <script>
 const uiRoles = [
-  { ui: '平台 Web UI（:18080）', role: '国标平台管理端', usage: '维护 SIP 注册账号；平台通道拉流/录像库；抓包、故障注入、场景编排、抓取 pcap' },
-  { ui: '设备 Web UI（:18081）', role: '模拟设备管理端', usage: '维护通道（新增/删除子通道）；配置节点级/通道级媒体源（RTSP/上传 MP4/HLS/合成图）；PTZ、录像回放、对讲' }
+  { ui: 'Web UI :18080 · 平台视角', role: '平台', usage: '账号管理、级联中继、平台通道拉流/录像库；抓包、故障、场景' },
+  { ui: 'Web UI :18080 · 设备视角', role: '设备', usage: '通道增删、媒体源（RTSP/MP4/HLS/合成）、PTZ、录像回放、对讲' },
+  { ui: 'Web UI :18080 · 全部', role: '全部', usage: '同屏管理 platform 与 device 节点（默认推荐）' }
 ]
 const ports = [
-  { port: '15060', proto: 'SIP/UDP', desc: '平台 SIP 信令端口（业务系统/设备对接入口）' },
-  { port: '15061', proto: 'SIP/UDP', desc: '设备侧 SIP 端口（级联场景）' },
-  { port: '18080', proto: 'HTTP', desc: '平台 Web UI + REST API' },
-  { port: '18081', proto: 'HTTP', desc: '设备 Web UI + REST API' },
-  { port: '18090', proto: 'HTTP-FLV', desc: '流媒体网关（浏览器直接播放）' },
-  { port: '30000-31000', proto: 'RTP/UDP', desc: '媒体流传输端口范围' }
+  { port: '15060', proto: 'SIP/UDP·TCP', desc: '平台 SIP（业务系统/外部设备对接入口）' },
+  { port: '15061', proto: 'SIP/UDP·TCP', desc: '同进程设备 SIP（对内注册；可选对外）' },
+  { port: '18080', proto: 'HTTP', desc: '唯一 Web UI + REST API（合壳多角色）' },
+  { port: '18090', proto: 'HTTP-FLV', desc: '流媒体网关（浏览器直接播放，若单独暴露）' },
+  { port: '动态', proto: 'RTP/UDP', desc: '媒体流传输端口（按会话分配）' }
 ]
 export default {
   data () {

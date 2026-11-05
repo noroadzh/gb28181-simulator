@@ -211,7 +211,7 @@ make smoke          # 冒烟基线：单元测试 + 5 平台编译 + 前端构�
 
 - [冒烟测试](docs/smoke-test.md) — 测试矩阵、本地/CI 执行、结果解读、失败排查
 - [Linux 单机部署](docs/deploy-linux.md) — systemd 安装、升级与回滚
-- [Docker Compose 部署](docs/deploy-docker-compose.md) — 多节点容器化部署
+- [Docker Compose 部署](docs/deploy-docker-compose.md) — 单实例多角色（一套 Web）；可选双容器附录
 - [Web 管理界面操作手册](docs/web-ui-guide.md) — Dashboard / 通道列表 / PTZ / 回放 / 对讲 / 抓图
 
 仪表盘源码位于 `web/`；生产构建产物写入 `internal/interface/webui/embed/dist/`，并通过 `//go:embed` 内嵌进 Go 二进制。

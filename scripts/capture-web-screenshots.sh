@@ -12,8 +12,10 @@
 set -euo pipefail
 
 BASE_HOST="${1:-127.0.0.1}"
-PLATFORM_URL="http://${BASE_HOST}:18080"
-DEVICE_URL="http://${BASE_HOST}:18081"
+# 默认单实例一套 Web；不再区分 18080/18081。
+UI_URL="http://${BASE_HOST}:18080"
+PLATFORM_URL="$UI_URL"
+DEVICE_URL="$UI_URL"
 
 # 兼容脚本位于 scripts/ 或项目根目录两种摆放方式
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -68,8 +70,7 @@ shoot () {
 }
 
 echo "=== gb28181-simulator Web UI 截图采集 ==="
-echo "平台地址：$PLATFORM_URL"
-echo "设备地址：$DEVICE_URL"
+echo "Web UI：$UI_URL"
 echo "输出目录：$OUT_DIR"
 echo ""
 
@@ -77,23 +78,21 @@ FAIL=0
 
 # ─── 通用页面 ───
 echo "--- 架构/导航 ---"
-shoot "$PLATFORM_URL/"                    "00-architecture-overview.png"   || FAIL=$((FAIL+1))
-shoot "$PLATFORM_URL/nodes"               "00-sidebar-nav.png"             || FAIL=$((FAIL+1))
+shoot "$UI_URL/"                    "00-architecture-overview.png"   || FAIL=$((FAIL+1))
+shoot "$UI_URL/nodes"               "00-sidebar-nav.png"             || FAIL=$((FAIL+1))
 
-# ─── 平台系统 ───
-echo "--- 平台系统（18080）---"
-shoot "$PLATFORM_URL/nodes"               "01-platform-nodes-overview.png" || FAIL=$((FAIL+1))
-shoot "$PLATFORM_URL/capture"             "03-platform-capture.png"        || FAIL=$((FAIL+1))
-shoot "$PLATFORM_URL/fault"               "05-platform-fault.png"          || FAIL=$((FAIL+1))
-shoot "$PLATFORM_URL/scenarios"           "07-platform-scenarios.png"      || FAIL=$((FAIL+1))
-shoot "$PLATFORM_URL/dashboard"           "10-platform-dashboard.png"      || FAIL=$((FAIL+1))
+# ─── 合壳页面（历史文件名保留 platform/device 前缀） ───
+echo "--- 合壳 Web（18080）---"
+shoot "$UI_URL/nodes"               "01-platform-nodes-overview.png" || FAIL=$((FAIL+1))
+shoot "$UI_URL/capture"             "03-platform-capture.png"        || FAIL=$((FAIL+1))
+shoot "$UI_URL/fault"               "05-platform-fault.png"          || FAIL=$((FAIL+1))
+shoot "$UI_URL/scenarios"           "07-platform-scenarios.png"      || FAIL=$((FAIL+1))
+shoot "$UI_URL/dashboard"           "10-platform-dashboard.png"      || FAIL=$((FAIL+1))
 
-# ─── 设备系统 ───
-echo "--- 设备系统（18081）---"
-shoot "$DEVICE_URL/nodes"                 "02-device-nodes-overview.png"   || FAIL=$((FAIL+1))
-shoot "$DEVICE_URL/capture"               "04-device-capture.png"          || FAIL=$((FAIL+1))
-shoot "$DEVICE_URL/fault"                 "06-device-fault.png"            || FAIL=$((FAIL+1))
-shoot "$DEVICE_URL/scenarios"             "08-device-scenarios.png"        || FAIL=$((FAIL+1))
+shoot "$UI_URL/nodes"               "02-device-nodes-overview.png"   || FAIL=$((FAIL+1))
+shoot "$UI_URL/capture"             "04-device-capture.png"          || FAIL=$((FAIL+1))
+shoot "$UI_URL/fault"               "06-device-fault.png"            || FAIL=$((FAIL+1))
+shoot "$UI_URL/scenarios"           "08-device-scenarios.png"        || FAIL=$((FAIL+1))
 
 # ─── 设备系统专属页面（需要具体节点 ID，这里用路由占位，如需精确截图请手动替换 ID） ───
 echo "--- 设备系统专属页面 ---"

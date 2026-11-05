@@ -1,0 +1,78 @@
+# 可选：双容器拓扑（平台 / 设备各一个进程、两套 Web）。
+# 默认请用 docker-compose.yml 单实例多角色。
+#
+#   docker compose -f docker-compose.dual.yml up -d --build
+#
+# 需要先准备 deploy/platform/config.yaml 与 deploy/device/config.yaml
+#（见 docs/deploy-docker-compose.md「双容器附录」）。
+
+name: gb28181-simulator-dual
+
+services:
+  gbsim-platform:
+    build:
+      context: .
+      args:
+        VERSION: compose-dev
+        COMMIT: compose-dev
+        BUILT_AT: compose-dev
+    image: gb28181-simulator:compose-dev
+    container_name: gbsim-platform
+    hostname: gbsim-platform
+    restart: unless-stopped
+    ports:
+      - "15060:5060/udp"
+      - "15060:5060/tcp"
+      - "18080:8080/tcp"
+    volumes:
+      - ./deploy/platform/config.yaml:/etc/gb28181-simulator/config.yaml:ro
+      - platform-data:/var/lib/gb28181-simulator
+    networks:
+      gbsim-net:
+        ipv4_address: 172.26.0.2
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  gbsim-device:
+    build:
+      context: .
+    image: gb28181-simulator:compose-dev
+    container_name: gbsim-device
+    hostname: gbsim-device
+    restart: unless-stopped
+    ports:
+      - "15061:5060/udp"
+      - "15061:5060/tcp"
+      - "18081:8080/tcp"
+    volumes:
+      - ./deploy/device/config.yaml:/etc/gb28181-simulator/config.yaml:ro
+      - device-data:/var/lib/gb28181-simulator
+    networks:
+      gbsim-net:
+        ipv4_address: 172.26.0.3
+    depends_on:
+      gbsim-platform:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+networks:
+  gbsim-net:
+    driver: bridge
+    name: gbsim-net-dual
+    ipam:
+      config:
+        - subnet: 172.26.0.0/16
+          gateway: 172.26.0.1
+
+volumes:
+  platform-data:
+  device-data:

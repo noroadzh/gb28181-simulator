@@ -1,0 +1,55 @@
+# Docker Compose 默认拓扑：单进程、一套 Web、平台+设备同实例。
+#
+# 顶栏切换「全部 / 平台 / 设备」即可管理两种角色；无需再起第二个容器。
+# 设备向本机 platform 注册（127.0.0.1:5060）；对外 SIP 映射宿主 15060。
+
+http:
+  host: "0.0.0.0"
+  port: 8080
+
+log:
+  level: info
+
+# 首次空库时从下方 nodes 灌入 DB 并自动启动；之后以 DB 为准。
+auto_start: true
+
+storage:
+  path: /var/lib/gb28181-simulator/data.db
+
+recording:
+  enabled: true
+  dir: /var/lib/gb28181-simulator/recordings
+
+nodes:
+  - id: "34020000002000000001"
+    kind: platform-large
+    domain: "3402000000"
+    addr: "0.0.0.0:5060"
+    vendor: docker
+    platform:
+      realm: "3402000000"
+      accounts:
+        - username: "34020000001310000001"
+          password: "compose-strong-password"
+      min_expires: 60
+      default_expires: 3600
+      max_expires: 86400
+
+  - id: "34020000001310000001"
+    kind: device
+    domain: "3402000000"
+    addr: "0.0.0.0:5061"
+    vendor: docker
+    registration:
+      server: "127.0.0.1:5060"
+      server_id: "34020000002000000001"
+      username: "34020000001310000001"
+      password: "compose-strong-password"
+      expires: 3600
+      transport: udp
+      heartbeat_interval: 60s
+      heartbeat_timeout: 5s
+    media:
+      kind: synthetic
+      fps: 25
+      mtu: 1400
