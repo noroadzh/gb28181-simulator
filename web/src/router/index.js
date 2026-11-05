@@ -14,6 +14,7 @@ import LogView from '../views/LogView.vue'
 import CascadeView from '../views/CascadeView.vue'
 import LoginView from '../views/LoginView.vue'
 import { useAuthStore } from '../stores/auth'
+import { handleUnauthorized } from '../auth-guard'
 
 const routes = [
   { path: '/login', name: 'login', component: LoginView, meta: { title: '登录', public: true } },
@@ -57,6 +58,7 @@ router.beforeEach(async (to) => {
     return true
   }
   if (auth.needsLogin) {
+    handleUnauthorized('required', { navigate: false })
     return { path: '/login', query: { redirect: to.fullPath } }
   }
   return true

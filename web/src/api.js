@@ -1,3 +1,5 @@
+import { handleUnauthorized } from './auth-guard'
+
 const BASE = ''
 
 function authHeaders (extra = {}) {
@@ -15,11 +17,7 @@ function request (url, options = {}) {
   }
   return fetch(`${BASE}${url}`, opts).then(async (resp) => {
     if (resp.status === 401 && !url.startsWith('/v1/auth/')) {
-      sessionStorage.removeItem('gbsim_token')
-      if (!location.hash.includes('/login')) {
-        const redirect = encodeURIComponent(location.hash.replace(/^#/, '') || '/dashboard')
-        location.hash = `#/login?redirect=${redirect}`
-      }
+      handleUnauthorized('expired')
     }
     return resp
   })

@@ -33,13 +33,17 @@ export const useAuthStore = defineStore('auth', {
       }
       return s
     },
+    markUnauthenticated () {
+      sessionStorage.removeItem('gbsim_token')
+      this.authenticated = false
+      this.username = ''
+    },
     async logout () {
       try {
         await api.logout()
       } finally {
-        sessionStorage.removeItem('gbsim_token')
-        this.authenticated = !this.enabled
-        this.username = ''
+        this.markUnauthenticated()
+        if (!this.enabled) this.authenticated = true
       }
     }
   }
