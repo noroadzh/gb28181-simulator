@@ -6,9 +6,9 @@
 package capture
 
 import (
-	"github.com/your-org/gb28181-simulator/internal/adapter/audit"
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/audit"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
 )
 
 // AuditBridge returns an audit.Emitter that appends every WireEvent into the

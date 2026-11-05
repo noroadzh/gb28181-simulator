@@ -4,7 +4,7 @@ package port
 import (
 	"errors"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // Sentinel errors the HTTP management layer maps to status codes. They are

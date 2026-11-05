@@ -6,9 +6,9 @@ import (
 	"os"
 	"testing"
 
-	"github.com/your-org/gb28181-simulator/internal/adapter/media"
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/media"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
 )
 
 // 内置小体积测试素材（go test 工作目录为包目录，testdata 在 adapter/media 下）。

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // TestDecodeSubscribe_Golden verifies the SUBSCRIBE parser against a real

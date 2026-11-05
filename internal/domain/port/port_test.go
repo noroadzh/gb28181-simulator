@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // fakeTransport is a hand-rolled stub that records the messages sent and

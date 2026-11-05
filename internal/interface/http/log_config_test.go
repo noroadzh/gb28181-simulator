@@ -10,7 +10,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/your-org/gb28181-simulator/internal/platform/observability/logging"
+	"github.com/noroadzh/gb28181-simulator/internal/platform/observability/logging"
 )
 
 // setupLogConfigTest initialises the logging package with a fresh handler and

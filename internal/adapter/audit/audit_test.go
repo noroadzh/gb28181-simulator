@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/your-org/gb28181-simulator/internal/adapter/audit"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/audit"
 )
 
 // TestMain resets the global emitter after the package tests run so we

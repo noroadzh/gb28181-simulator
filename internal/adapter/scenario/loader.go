@@ -14,7 +14,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // KnownStepTypes is the set of step handlers the engine understands.

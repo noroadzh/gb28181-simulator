@@ -5,7 +5,7 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 
-	"github.com/your-org/gb28181-simulator/internal/adapter/sm"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/sm"
 )
 
 // HashFunc returns the hex-encoded (lowercase) digest of its input.

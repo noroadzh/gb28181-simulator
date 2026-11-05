@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/your-org/gb28181-simulator/internal/adapter/manscdp"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/manscdp"
 )
 
 type cascadeFleet struct {

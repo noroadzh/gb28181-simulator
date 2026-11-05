@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // ErrMediaStatusUnsupported is returned by a MediaStatusPort adapter that

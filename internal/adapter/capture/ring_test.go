@@ -7,9 +7,9 @@ import (
 
 	"github.com/google/gopacket/pcapgo"
 
-	"github.com/your-org/gb28181-simulator/internal/adapter/audit"
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/audit"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
 )
 
 // newStore is a shorthand used throughout these tests.

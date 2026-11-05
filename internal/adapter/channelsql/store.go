@@ -13,8 +13,8 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
 )
 
 // Store is the durable channel store. The zero value is NOT usable;

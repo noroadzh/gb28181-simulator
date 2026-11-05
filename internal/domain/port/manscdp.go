@@ -1,7 +1,7 @@
 // Package port — MANSCDP codec.
 package port
 
-import "github.com/your-org/gb28181-simulator/internal/domain/model"
+import "github.com/noroadzh/gb28181-simulator/internal/domain/model"
 
 // MANSCDPCodec reads and writes the MANSCDP bodies a platform exchanges:
 // the notify a downstream sends and the catalog answer the platform gives

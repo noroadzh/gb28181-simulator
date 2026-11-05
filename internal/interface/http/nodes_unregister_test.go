@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // failingUnregisterView makes leaving fail with a staged error, the way a

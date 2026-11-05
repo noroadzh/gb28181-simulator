@@ -9,7 +9,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // Sweeping bounds how stale the online table may get. A device is thrown

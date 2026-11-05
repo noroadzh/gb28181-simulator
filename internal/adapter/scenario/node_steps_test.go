@@ -7,11 +7,11 @@ import (
 	"sync"
 	"testing"
 
-	nodereg "github.com/your-org/gb28181-simulator/internal/adapter/nodereg"
-	"github.com/your-org/gb28181-simulator/internal/adapter/siptransport"
-	"github.com/your-org/gb28181-simulator/internal/app"
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
+	nodereg "github.com/noroadzh/gb28181-simulator/internal/adapter/nodereg"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/siptransport"
+	"github.com/noroadzh/gb28181-simulator/internal/app"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
 )
 
 // fakeNodeController records create/start/stop outcomes so the handler

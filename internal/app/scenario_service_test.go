@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 func TestScenarioService_RunSavesLastRun(t *testing.T) {

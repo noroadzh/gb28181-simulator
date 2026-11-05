@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/your-org/gb28181-simulator/internal/adapter/nodereg"
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/nodereg"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // TestLifecycle_FailFaultsAndReleasesListener is task 7.1: a start that

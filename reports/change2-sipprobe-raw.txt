@@ -13,4 +13,4 @@
 === RUN   TestResult_Print
 --- PASS: TestResult_Print (0.00s)
 PASS
-ok  	github.com/your-org/gb28181-simulator/internal/sipprobe	1.981s
+ok  	github.com/noroadzh/gb28181-simulator/internal/sipprobe	1.981s

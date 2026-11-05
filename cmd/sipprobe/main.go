@@ -13,7 +13,7 @@ package main
 import (
 	"os"
 
-	"github.com/your-org/gb28181-simulator/internal/sipprobe"
+	"github.com/noroadzh/gb28181-simulator/internal/sipprobe"
 )
 
 // Version metadata. Overridden at link time via -ldflags "-X main.version=...".

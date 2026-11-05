@@ -188,7 +188,7 @@
 - **WHEN** 运维按 `docs/deploy-linux.md` 在 CentOS 8 / Ubuntu 22.04 / Debian 12 任一 Linux 上执行源码构建与部署
 - **THEN** 按文档步骤执行后 `systemctl status gb28181-simulator` 显示 `active (running)`
 - **AND** `curl http://localhost:8080/healthz` 返回 `{"status":"ok"}`
-- **AND** 文档**不包含**指向 `github.com/your-org/gb28181-simulator/releases` 的下载链接
+- **AND** 文档**不包含**指向 `github.com/noroadzh/gb28181-simulator/releases` 的下载链接
 
 #### 场景：运维通过 Compose 从源码部署多节点拓扑
 - **WHEN** 运维按 `docs/deploy-docker-compose.md` 在装有 Docker Engine 24+ 与 Compose v2 的主机上执行 `docker compose build && docker compose up -d`

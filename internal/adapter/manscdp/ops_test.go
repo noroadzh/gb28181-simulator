@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // Task 1.1: DeviceStatus answer bytes are the contract a real platform reads.

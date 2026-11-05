@@ -17,7 +17,7 @@ import (
 
 	"github.com/ghettovoice/gosip/sip"
 
-	internalsip "github.com/your-org/gb28181-simulator/internal/adapter/sip"
+	internalsip "github.com/noroadzh/gb28181-simulator/internal/adapter/sip"
 )
 
 // fixedBranch keeps the Via branch deterministic so the golden file can be

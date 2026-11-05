@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // notifyEnvelope is the wire shape of a notify a platform receives. Only the

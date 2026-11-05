@@ -5,8 +5,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/your-org/gb28181-simulator/internal/app"
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/app"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // BehaviorController is the slice of the application service the

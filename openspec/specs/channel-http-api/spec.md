@@ -400,7 +400,7 @@
 - `GET` / `PUT /v1/nodes/:id/config`
 - `POST /v1/nodes/:id/upgrade`（`{"version":"..."}`）
 - `POST /v1/nodes/:id/reboot`
-- `POST /v1/nodes/:id/channels/:ch/download`（`{"start":"...","end":"..."}`）
+- `POST /v1/nodes/:id/channels/:ch/download`（`{"start":"...","end":"...","transport":"udp"|"tcp"}`；`transport` 缺省为 `udp`，与 live 一致）
 
 失败 MUST 可辨识：节点身份不支持 501，目标不在线 502，超时 504，参数非法 400。
 
@@ -422,4 +422,4 @@
 #### Scenario: HTTP 发起下载
 
 - **WHEN** POST download 带时间窗且设备有匹配录像
-- **THEN** 返回 200，平台侧收到文件流
+- **THEN** 返回 200 与 `call_id`/`transport`，平台侧收到文件流（UDP 或附录 D TCP）

@@ -8,9 +8,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/your-org/gb28181-simulator/internal/adapter/nodereg"
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/nodereg"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
 )
 
 // Two legal 20-digit ids (type code 131 -> device) used across the tests.

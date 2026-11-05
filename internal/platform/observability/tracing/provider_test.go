@@ -13,7 +13,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
 
-	"github.com/your-org/gb28181-simulator/internal/platform/observability/tracing"
+	"github.com/noroadzh/gb28181-simulator/internal/platform/observability/tracing"
 )
 
 // TestProvider_NoOpWhenDisabled verifies that constructing a Provider with

@@ -1,7 +1,7 @@
 // Package port — AuditSink / WireEvent re-export.
 package port
 
-import "github.com/your-org/gb28181-simulator/internal/domain/model"
+import "github.com/noroadzh/gb28181-simulator/internal/domain/model"
 
 // AuditSink consumes immutable WireEvent values produced by the transport
 // layer. Adapters (log/pcap/replay) implement it; the transport only knows

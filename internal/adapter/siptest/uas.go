@@ -19,10 +19,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/your-org/gb28181-simulator/internal/adapter/auth"
-	"github.com/your-org/gb28181-simulator/internal/adapter/siptransport"
-	"github.com/your-org/gb28181-simulator/internal/adapter/sm"
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/auth"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/siptransport"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/sm"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // UAS is a one-purpose SIP server: it challenges a REGISTER, checks the

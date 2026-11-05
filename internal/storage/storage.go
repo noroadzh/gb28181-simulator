@@ -13,8 +13,8 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
-	platformconfig "github.com/your-org/gb28181-simulator/internal/platform/config"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
+	platformconfig "github.com/noroadzh/gb28181-simulator/internal/platform/config"
 
 	_ "modernc.org/sqlite"
 )

@@ -7,7 +7,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/your-org/gb28181-simulator/internal/platform/observability/logging"
+	"github.com/noroadzh/gb28181-simulator/internal/platform/observability/logging"
 )
 
 // logConfigRequest is the JSON body accepted by PATCH /v1/config/log.

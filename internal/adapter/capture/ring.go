@@ -13,7 +13,7 @@ import (
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
 )
 
 // New returns a ready-to-use CaptureStore.

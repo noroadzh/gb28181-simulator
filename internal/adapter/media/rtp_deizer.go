@@ -15,7 +15,7 @@ package media
 import (
 	"sort"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // RTPDeizer reassembles RTP packets back into PS frames.

@@ -12,7 +12,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // handleMediaFile 通道媒体文件直出，供浏览器原生 video 标签播放 MP4。

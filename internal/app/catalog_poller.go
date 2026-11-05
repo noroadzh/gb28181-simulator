@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
 )
 
 // catalogPoller is the platform side of the catalog pull cycle. It wakes on

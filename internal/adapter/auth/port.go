@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/your-org/gb28181-simulator/internal/adapter/sm"
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/sm"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
 )
 
 // AuthenticatorAdapter implements port.Authenticator by wrapping the legacy

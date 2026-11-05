@@ -6,14 +6,16 @@ package app
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"strings"
 	"time"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
 )
 
 // ErrOpsUnsupported marks an operation this node cannot serve.
@@ -147,9 +149,8 @@ func (s *NodeService) recordOps(ctx context.Context, id model.NodeID,
 
 // StartDownload pulls a recorded window from the device that owns the
 // channel and writes it into the recording library under a per-download
-// channel key. The device is asked with an `s=Download` INVITE whose SDP
-// names the port the platform will receive on.
-func (s *NodeService) StartDownload(ctx context.Context, id model.NodeID, channelID string, start, end time.Time) (string, error) {
+// channel key. transport is "udp" (default) or "tcp" (GB/T 28181 附录 D).
+func (s *NodeService) StartDownload(ctx context.Context, id model.NodeID, channelID string, start, end time.Time, transport string) (string, error) {
 	if s.recordings == nil {
 		return "", fmt.Errorf("%w: recording library is not wired", port.ErrRecordingUnsupported)
 	}
@@ -159,6 +160,14 @@ func (s *NodeService) StartDownload(ctx context.Context, id model.NodeID, channe
 	if !start.Before(end) {
 		return "", fmt.Errorf("%w: download window %s..%s is not a range", ErrOpsUnsupported, start, end)
 	}
+	transport = strings.ToLower(strings.TrimSpace(transport))
+	switch transport {
+	case "", "udp":
+		transport = "udp"
+	case "tcp":
+	default:
+		return "", fmt.Errorf("%w: download transport %q is not udp or tcp", ErrOpsUnsupported, transport)
+	}
 	node, ok := s.registry.Get(ctx, id)
 	if !ok {
 		return "", model.ErrUnknownNode
@@ -167,33 +176,68 @@ func (s *NodeService) StartDownload(ctx context.Context, id model.NodeID, channe
 	if err != nil {
 		return "", err
 	}
-	conn, err := net.ListenPacket("udp4", "0.0.0.0:0")
-	if err != nil {
-		return "", fmt.Errorf("app: open download port: %w", err)
-	}
-	port := conn.LocalAddr().(*net.UDPAddr).Port
-	body, err := model.PlaybackSDPBytes(model.PlaybackSDP{
+
+	localIP := hostOf(node.Profile().Addr())
+	offer := model.PlaybackSDP{
 		DeviceID: channelID, SN: fmt.Sprintf("%d", time.Now().UnixNano()),
-		ConnIP: hostOf(node.Profile().Addr()), RTPPort: port,
-		Start: start, End: end, Mode: "recvonly", Session: "Download",
-	})
+		ConnIP: localIP, Start: start, End: end, Mode: "recvonly", Session: "Download",
+	}
+
+	var (
+		udp net.PacketConn
+		tcp net.Listener
+	)
+	if transport == "tcp" {
+		ln, lerr := net.Listen("tcp", "0.0.0.0:0")
+		if lerr != nil {
+			return "", fmt.Errorf("app: listen for tcp download media: %w", lerr)
+		}
+		tcp = ln
+		offer.RTPPort = ln.Addr().(*net.TCPAddr).Port
+		offer.Proto = "TCP/RTP/AVP"
+		offer.Setup = "passive"
+	} else {
+		conn, lerr := net.ListenPacket("udp4", "0.0.0.0:0")
+		if lerr != nil {
+			return "", fmt.Errorf("app: open download port: %w", lerr)
+		}
+		udp = conn
+		offer.RTPPort = conn.LocalAddr().(*net.UDPAddr).Port
+	}
+
+	body, err := model.PlaybackSDPBytes(offer)
 	if err != nil {
-		_ = conn.Close()
+		if udp != nil {
+			_ = udp.Close()
+		}
+		if tcp != nil {
+			_ = tcp.Close()
+		}
 		return "", err
 	}
 	callID, err := s.acceptor.InviteDownload(ctx, id, target, addr, channelID, body)
 	if err != nil {
-		_ = conn.Close()
+		if udp != nil {
+			_ = udp.Close()
+		}
+		if tcp != nil {
+			_ = tcp.Close()
+		}
 		return "", err
 	}
-	go s.receiveDownload(conn, id, channelID, end)
+	if transport == "tcp" {
+		go s.receiveDownloadTCP(tcp, id, channelID, end)
+	} else {
+		go s.receiveDownloadUDP(udp, id, channelID, end)
+	}
+	s.log.Info("download started",
+		"node_id", id.String(), "channel", channelID,
+		"transport", transport, "port", offer.RTPPort, "call_id", callID)
 	return callID, nil
 }
 
-// receiveDownload writes the downloaded PS frames into the library. The key
-// carries a download: prefix so a download never mixes with a live recording
-// of the same channel.
-func (s *NodeService) receiveDownload(conn net.PacketConn, id model.NodeID, channelID string, end time.Time) {
+// receiveDownloadUDP writes downloaded PS frames from a UDP RTP port.
+func (s *NodeService) receiveDownloadUDP(conn net.PacketConn, id model.NodeID, channelID string, end time.Time) {
 	defer func() { _ = conn.Close() }()
 	deizer := s.liveDeizer(0)
 	buf := make([]byte, 65536)
@@ -210,17 +254,64 @@ func (s *NodeService) receiveDownload(conn net.PacketConn, id model.NodeID, chan
 			}
 			return
 		}
-		pkt, perr := model.ParseRTPPacket(buf[:n])
-		if perr != nil {
-			continue
-		}
-		ps, derr := deizer.Write(pkt)
-		if derr != nil || ps.Payload == nil {
-			continue
-		}
-		if aerr := s.recordings.Append(context.Background(), id, key, ps); aerr != nil {
-			s.log.Warn("download write failed", "node_id", id.String(), "channel", channelID, "error", aerr.Error())
+		if !s.appendDownloadFrame(deizer, id, key, channelID, buf[:n]) {
 			return
 		}
 	}
+}
+
+// receiveDownloadTCP accepts one TCP media connection and reads length-
+// prefixed RTP packets (附录 D), writing PS frames into the library.
+func (s *NodeService) receiveDownloadTCP(ln net.Listener, id model.NodeID, channelID string, end time.Time) {
+	defer func() { _ = ln.Close() }()
+	_ = ln.(*net.TCPListener).SetDeadline(end)
+	conn, err := ln.Accept()
+	if err != nil {
+		return
+	}
+	defer func() { _ = conn.Close() }()
+	deizer := s.liveDeizer(0)
+	key := "download:" + channelID
+	var prefix [2]byte
+	for {
+		if time.Now().After(end) {
+			return
+		}
+		_ = conn.SetReadDeadline(time.Now().Add(time.Second))
+		if _, err := io.ReadFull(conn, prefix[:]); err != nil {
+			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+				continue
+			}
+			return
+		}
+		size := int(binary.BigEndian.Uint16(prefix[:]))
+		if size == 0 {
+			continue
+		}
+		payload := make([]byte, size)
+		if _, err := io.ReadFull(conn, payload); err != nil {
+			return
+		}
+		if !s.appendDownloadFrame(deizer, id, key, channelID, payload) {
+			return
+		}
+	}
+}
+
+// appendDownloadFrame returns false when the library write fails and the
+// receiver should stop.
+func (s *NodeService) appendDownloadFrame(deizer port.RTPDeizer, id model.NodeID, key, channelID string, datagram []byte) bool {
+	pkt, perr := model.ParseRTPPacket(datagram)
+	if perr != nil {
+		return true
+	}
+	ps, derr := deizer.Write(pkt)
+	if derr != nil || ps.Payload == nil {
+		return true
+	}
+	if aerr := s.recordings.Append(context.Background(), id, key, ps); aerr != nil {
+		s.log.Warn("download write failed", "node_id", id.String(), "channel", channelID, "error", aerr.Error())
+		return false
+	}
+	return true
 }

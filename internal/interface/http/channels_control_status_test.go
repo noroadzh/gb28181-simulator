@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
 )
 
 // unsupportedControlView reports the same typed errors NodeService does while

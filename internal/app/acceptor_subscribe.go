@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // The SIP Event values a served platform accepts SUBSCRIBEs for. They are

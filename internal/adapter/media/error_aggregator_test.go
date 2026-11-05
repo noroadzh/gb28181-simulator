@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/your-org/gb28181-simulator/internal/platform/observability/logging"
+	"github.com/noroadzh/gb28181-simulator/internal/platform/observability/logging"
 )
 
 func TestErrorAggregator_WindowRollsOver(t *testing.T) {

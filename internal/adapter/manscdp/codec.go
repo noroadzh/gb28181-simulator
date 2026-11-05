@@ -1,7 +1,7 @@
 package manscdp
 
 import (
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
 )
 
 // MANSCDPCodecAdapter reads and writes the MANSCDP bodies a platform sees.

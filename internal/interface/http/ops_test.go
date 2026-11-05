@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
-	httpapi "github.com/your-org/gb28181-simulator/internal/interface/http"
-	platformconfig "github.com/your-org/gb28181-simulator/internal/platform/config"
-	"github.com/your-org/gb28181-simulator/internal/platform/observability/logging"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
+	httpapi "github.com/noroadzh/gb28181-simulator/internal/interface/http"
+	platformconfig "github.com/noroadzh/gb28181-simulator/internal/platform/config"
+	"github.com/noroadzh/gb28181-simulator/internal/platform/observability/logging"
 )
 
 type opsNodeView struct {
@@ -28,9 +28,10 @@ type opsNodeView struct {
 	upgraded string
 	rebooted bool
 	download struct {
-		channel string
-		start   time.Time
-		err     error
+		channel   string
+		start     time.Time
+		transport string
+		err       error
 	}
 }
 
@@ -74,9 +75,10 @@ func (v *opsNodeView) Reboot(context.Context, model.NodeID) error {
 	return nil
 }
 
-func (v *opsNodeView) StartDownload(_ context.Context, _ model.NodeID, channelID string, start, _ time.Time) (string, error) {
+func (v *opsNodeView) StartDownload(_ context.Context, _ model.NodeID, channelID string, start, _ time.Time, transport string) (string, error) {
 	v.download.channel = channelID
 	v.download.start = start
+	v.download.transport = transport
 	if v.download.err != nil {
 		return "", v.download.err
 	}
@@ -209,6 +211,37 @@ func TestOpsHTTP_Download(t *testing.T) {
 	}
 	if view.download.channel != "ch-1" || view.download.start.IsZero() {
 		t.Errorf("download got %+v", view.download)
+	}
+	if view.download.transport != "udp" {
+		t.Errorf("default transport = %q, want udp", view.download.transport)
+	}
+
+	tcpBody := fmt.Sprintf(`{"start":%q,"end":%q,"transport":"tcp"}`,
+		"2026-10-30T10:00:00Z", "2026-10-30T10:05:00Z")
+	tcpResp, err := http.Post(ts.URL+"/v1/nodes/"+nodeID.String()+"/channels/ch-1/download",
+		"application/json", strings.NewReader(tcpBody))
+	if err != nil {
+		t.Fatalf("POST tcp download: %v", err)
+	}
+	defer func() { _ = tcpResp.Body.Close() }()
+	if tcpResp.StatusCode != http.StatusOK {
+		out, _ := io.ReadAll(tcpResp.Body)
+		t.Fatalf("tcp download = %d (%s)", tcpResp.StatusCode, out)
+	}
+	if view.download.transport != "tcp" {
+		t.Errorf("tcp transport = %q, want tcp", view.download.transport)
+	}
+
+	badTransport, err := http.Post(ts.URL+"/v1/nodes/"+nodeID.String()+"/channels/ch-1/download",
+		"application/json", strings.NewReader(fmt.Sprintf(
+			`{"start":%q,"end":%q,"transport":"sctp"}`,
+			"2026-10-30T10:00:00Z", "2026-10-30T10:05:00Z")))
+	if err != nil {
+		t.Fatalf("POST bad transport: %v", err)
+	}
+	defer func() { _ = badTransport.Body.Close() }()
+	if badTransport.StatusCode != http.StatusBadRequest {
+		t.Errorf("bad transport = %d, want 400", badTransport.StatusCode)
 	}
 
 	bad, err := http.Post(ts.URL+"/v1/nodes/"+nodeID.String()+"/channels/ch-1/download",

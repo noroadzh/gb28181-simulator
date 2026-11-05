@@ -7,16 +7,16 @@ import (
 	"testing"
 	"time"
 
-	sipauth "github.com/your-org/gb28181-simulator/internal/adapter/auth"
-	"github.com/your-org/gb28181-simulator/internal/adapter/credstore"
-	"github.com/your-org/gb28181-simulator/internal/adapter/devicereg"
-	"github.com/your-org/gb28181-simulator/internal/adapter/manscdp"
-	"github.com/your-org/gb28181-simulator/internal/adapter/nodereg"
-	"github.com/your-org/gb28181-simulator/internal/adapter/siptransport"
-	"github.com/your-org/gb28181-simulator/internal/app"
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
-	"github.com/your-org/gb28181-simulator/internal/platform/clock"
+	sipauth "github.com/noroadzh/gb28181-simulator/internal/adapter/auth"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/credstore"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/devicereg"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/manscdp"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/nodereg"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/siptransport"
+	"github.com/noroadzh/gb28181-simulator/internal/app"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
+	"github.com/noroadzh/gb28181-simulator/internal/platform/clock"
 )
 
 // testLogger returns a slog that writes through t.Log so the test output

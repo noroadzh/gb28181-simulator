@@ -17,7 +17,7 @@
 | 7.6 / 9.6 状态报送 | Keepalive | ✅ | |
 | 7.7 / 9.7 录像检索 | RecordInfo | 🟡 | 设备侧可为合成目录；平台可查录像库 |
 | 7.8 / 9.8 历史回放 | INVITE Playback + FLV | ✅ | FLV `#37`；入站 PlaybackControl 驱动会话 `#46`（与 MANSRTSP INFO 共用） |
-| 7.9 / 9.9 文件下载 | INVITE `s=Download` | ✅ | |
+| 7.9 / 9.9 文件下载 | INVITE `s=Download` | ✅ | 设备应答 + 平台 `StartDownload`；UDP / 附录 D TCP |
 | 7.10 / 9.10 网络校时 | Date / 校时 | 🟡 | SIP 应答带 Date；REGISTER 200 学习 skew；DeviceStatus.DeviceTime 跟随；非完整 NTP |
 | 7.11 / 9.11 订阅通知 | catalog / alarm / mobileposition | ✅ | |
 | 7.12 / 9.12 广播与对讲 | Broadcast + Talk | 🟡 | 对讲完整；广播 ack + 音频 INVITE（不进对讲 WS 桥） |

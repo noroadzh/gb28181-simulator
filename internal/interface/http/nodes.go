@@ -10,9 +10,9 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	app "github.com/your-org/gb28181-simulator/internal/app"
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
+	app "github.com/noroadzh/gb28181-simulator/internal/app"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
 )
 
 // nodeExists is a nil-safe helper that returns false when s.nodes is nil,

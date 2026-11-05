@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
-	httpapi "github.com/your-org/gb28181-simulator/internal/interface/http"
-	platformconfig "github.com/your-org/gb28181-simulator/internal/platform/config"
-	"github.com/your-org/gb28181-simulator/internal/platform/observability/logging"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
+	httpapi "github.com/noroadzh/gb28181-simulator/internal/interface/http"
+	platformconfig "github.com/noroadzh/gb28181-simulator/internal/platform/config"
+	"github.com/noroadzh/gb28181-simulator/internal/platform/observability/logging"
 )
 
 // fakeStreaming is the FLV source: it hands out one chunk and closes.

@@ -11,14 +11,14 @@ import (
 	"testing"
 	"time"
 
-	sipauth "github.com/your-org/gb28181-simulator/internal/adapter/auth"
-	"github.com/your-org/gb28181-simulator/internal/adapter/nodereg"
-	"github.com/your-org/gb28181-simulator/internal/adapter/siptest"
-	"github.com/your-org/gb28181-simulator/internal/adapter/siptransport"
-	"github.com/your-org/gb28181-simulator/internal/adapter/sm"
-	"github.com/your-org/gb28181-simulator/internal/app"
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
+	sipauth "github.com/noroadzh/gb28181-simulator/internal/adapter/auth"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/nodereg"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/siptest"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/siptransport"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/sm"
+	"github.com/noroadzh/gb28181-simulator/internal/app"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
 )
 
 const (

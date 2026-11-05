@@ -4,7 +4,7 @@ package port
 import (
 	"time"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // CaptureEvent is one SIP message buffered for capture or pcap export.

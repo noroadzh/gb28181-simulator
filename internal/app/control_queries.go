@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
 )
 
 // recordTimeFormat is the timestamp layout GB/T 28181 record queries use.

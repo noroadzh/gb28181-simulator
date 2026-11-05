@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/your-org/gb28181-simulator/internal/adapter/credstore"
-	"github.com/your-org/gb28181-simulator/internal/adapter/devicereg"
-	"github.com/your-org/gb28181-simulator/internal/adapter/siptransport"
-	"github.com/your-org/gb28181-simulator/internal/app"
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/credstore"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/devicereg"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/siptransport"
+	"github.com/noroadzh/gb28181-simulator/internal/app"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // e2eSmall is the platform-small in the middle of the cascade: a platform to

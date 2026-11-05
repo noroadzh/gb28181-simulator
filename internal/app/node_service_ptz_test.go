@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/your-org/gb28181-simulator/internal/adapter/manscdp"
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/manscdp"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
 )
 
 // ptzHarness is a started node whose listener captures what it sends, so the

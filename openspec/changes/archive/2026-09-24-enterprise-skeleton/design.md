@@ -46,7 +46,7 @@ package port
 
 import (
     "context"
-    "github.com/your-org/gb28181-simulator/internal/domain/model"
+    "github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 type SIPTransport interface {
@@ -204,14 +204,14 @@ package main
 import (
     "context"
     "log"
-    "github.com/your-org/gb28181-simulator/internal/adapter/auth"
-    "github.com/your-org/gb28181-simulator/internal/adapter/sip"
-    "github.com/your-org/gb28181-simulator/internal/adapter/siptransport"
-    "github.com/your-org/gb28181-simulator/internal/interface/http"
-    "github.com/your-org/gb28181-simulator/internal/platform/config"
-    "github.com/your-org/gb28181-simulator/internal/platform/observability/logging"
-    "github.com/your-org/gb28181-simulator/internal/platform/observability/tracing"
-    "github.com/your-org/gb28181-simulator/internal/platform/servicectx"
+    "github.com/noroadzh/gb28181-simulator/internal/adapter/auth"
+    "github.com/noroadzh/gb28181-simulator/internal/adapter/sip"
+    "github.com/noroadzh/gb28181-simulator/internal/adapter/siptransport"
+    "github.com/noroadzh/gb28181-simulator/internal/interface/http"
+    "github.com/noroadzh/gb28181-simulator/internal/platform/config"
+    "github.com/noroadzh/gb28181-simulator/internal/platform/observability/logging"
+    "github.com/noroadzh/gb28181-simulator/internal/platform/observability/tracing"
+    "github.com/noroadzh/gb28181-simulator/internal/platform/servicectx"
 )
 
 func main() {

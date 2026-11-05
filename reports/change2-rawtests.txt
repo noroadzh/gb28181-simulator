@@ -1,5 +1,5 @@
-?   	github.com/your-org/gb28181-simulator/cmd/gb28181-simulator	[no test files]
-?   	github.com/your-org/gb28181-simulator/cmd/sipprobe	[no test files]
+?   	github.com/noroadzh/gb28181-simulator/cmd/gb28181-simulator	[no test files]
+?   	github.com/noroadzh/gb28181-simulator/cmd/sipprobe	[no test files]
 === RUN   TestNewServer_HealthAndVersion
 --- PASS: TestNewServer_HealthAndVersion (0.00s)
 === RUN   TestSpaHandler_ServesEmbeddedIndex
@@ -12,7 +12,7 @@
 === RUN   TestWSHandler_EchoShutdown
 --- PASS: TestWSHandler_EchoShutdown (0.10s)
 PASS
-ok  	github.com/your-org/gb28181-simulator/internal/api	4.796s
+ok  	github.com/noroadzh/gb28181-simulator/internal/api	4.796s
 === RUN   TestChallenger_GeneratesUniqueNonce
 --- PASS: TestChallenger_GeneratesUniqueNonce (0.00s)
 === RUN   TestChallenger_FormatMatchesRFC7616
@@ -38,7 +38,7 @@ ok  	github.com/your-org/gb28181-simulator/internal/api	4.796s
 === RUN   TestFixtures_SHA256Stable
 --- PASS: TestFixtures_SHA256Stable (0.00s)
 PASS
-ok  	github.com/your-org/gb28181-simulator/internal/auth	2.126s
+ok  	github.com/noroadzh/gb28181-simulator/internal/auth	2.126s
 === RUN   TestConfig_Defaults
 --- PASS: TestConfig_Defaults (0.00s)
 === RUN   TestConfig_YAML_Override
@@ -48,7 +48,7 @@ ok  	github.com/your-org/gb28181-simulator/internal/auth	2.126s
 === RUN   TestDefaultConfigPath_XDG
 --- PASS: TestDefaultConfigPath_XDG (0.00s)
 PASS
-ok  	github.com/your-org/gb28181-simulator/internal/config	2.703s
+ok  	github.com/noroadzh/gb28181-simulator/internal/config	2.703s
 === RUN   TestParseLevel
 --- PASS: TestParseLevel (0.00s)
 === RUN   TestOptions_RedactionAndFanout
@@ -65,7 +65,7 @@ ok  	github.com/your-org/gb28181-simulator/internal/config	2.703s
     logger_ws_e2e_test.go:69: payload: {"time":"2026-09-23T15:23:24.499466+08:00","level":"INFO","msg":"manual ping","reason":"test","password":"***REDACTED***"}
 --- PASS: TestE2E_HubPushedToWebSocketWithRedaction (0.00s)
 PASS
-ok  	github.com/your-org/gb28181-simulator/internal/logger	3.402s
+ok  	github.com/noroadzh/gb28181-simulator/internal/logger	3.402s
 === RUN   TestParse_INVITE_PS_PreservesSSRC
 --- PASS: TestParse_INVITE_PS_PreservesSSRC (0.00s)
 === RUN   TestParse_RFC4566_Only
@@ -93,7 +93,7 @@ ok  	github.com/your-org/gb28181-simulator/internal/logger	3.402s
 === RUN   TestFixtures_SHA256Stable
 --- PASS: TestFixtures_SHA256Stable (0.00s)
 PASS
-ok  	github.com/your-org/gb28181-simulator/internal/sdp	4.851s
+ok  	github.com/noroadzh/gb28181-simulator/internal/sdp	4.851s
 === RUN   TestBuildRequest_MandatoryHeaders
 === PAUSE TestBuildRequest_MandatoryHeaders
 === RUN   TestBuildRequest_XGBVer
@@ -131,7 +131,7 @@ ok  	github.com/your-org/gb28181-simulator/internal/sdp	4.851s
     --- PASS: TestBuildResponse_DefaultReason/Busy_Here (0.00s)
     --- PASS: TestBuildResponse_DefaultReason/Server_Internal_Error (0.00s)
 PASS
-ok  	github.com/your-org/gb28181-simulator/internal/sip	4.371s
+ok  	github.com/noroadzh/gb28181-simulator/internal/sip	4.371s
 === RUN   TestEmitterFunc_Adapter
 === PAUSE TestEmitterFunc_Adapter
 === RUN   TestGlobal_SetAndReset
@@ -157,7 +157,7 @@ ok  	github.com/your-org/gb28181-simulator/internal/sip	4.371s
     --- PASS: TestRedactAuthHeader/RFC_7616_capitalised_Response (0.00s)
     --- PASS: TestRedactAuthHeader/empty_buffer (0.00s)
 PASS
-ok  	github.com/your-org/gb28181-simulator/internal/sip/audit	5.317s
+ok  	github.com/noroadzh/gb28181-simulator/internal/sip/audit	5.317s
 === RUN   TestParseStatus
 --- PASS: TestParseStatus (0.00s)
 === RUN   TestMode
@@ -173,7 +173,7 @@ ok  	github.com/your-org/gb28181-simulator/internal/sip/audit	5.317s
 === RUN   TestResult_Print
 --- PASS: TestResult_Print (0.00s)
 PASS
-ok  	github.com/your-org/gb28181-simulator/internal/sipprobe	4.249s
+ok  	github.com/noroadzh/gb28181-simulator/internal/sipprobe	4.249s
 === RUN   TestTransport_MultiInstance
 === PAUSE TestTransport_MultiInstance
 === RUN   TestTransport_MultiInstanceSimultaneous
@@ -211,7 +211,7 @@ ok  	github.com/your-org/gb28181-simulator/internal/sipprobe	4.249s
 --- PASS: TestTransport_MultiInstance (0.01s)
 --- PASS: TestTransport_MultiInstanceSimultaneous (0.03s)
 PASS
-ok  	github.com/your-org/gb28181-simulator/internal/siptransport	5.926s
+ok  	github.com/noroadzh/gb28181-simulator/internal/siptransport	5.926s
 === RUN   TestBootstrap_Idempotent
 --- PASS: TestBootstrap_Idempotent (0.02s)
 === RUN   TestDefaultDBPath_Explicit
@@ -219,11 +219,11 @@ ok  	github.com/your-org/gb28181-simulator/internal/siptransport	5.926s
 === RUN   TestDefaultDBPath_Fallback
 --- PASS: TestDefaultDBPath_Fallback (0.00s)
 PASS
-ok  	github.com/your-org/gb28181-simulator/internal/storage	7.042s
+ok  	github.com/noroadzh/gb28181-simulator/internal/storage	7.042s
 === RUN   TestEmbedContainsIndex
     dist_test.go:19: entry: embed
 --- PASS: TestEmbedContainsIndex (0.00s)
 === RUN   TestSpaHandlerServesIndex
 --- PASS: TestSpaHandlerServesIndex (0.01s)
 PASS
-ok  	github.com/your-org/gb28181-simulator/internal/webui	6.356s
+ok  	github.com/noroadzh/gb28181-simulator/internal/webui	6.356s

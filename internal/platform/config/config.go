@@ -15,7 +15,7 @@ import (
 
 	"github.com/spf13/viper"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // Config is the top-level configuration tree. Other internal packages should

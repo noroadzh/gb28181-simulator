@@ -1,7 +1,7 @@
 // Package port — Keepalive codec.
 package port
 
-import "github.com/your-org/gb28181-simulator/internal/domain/model"
+import "github.com/noroadzh/gb28181-simulator/internal/domain/model"
 
 // KeepaliveCodec renders the body of a GB/T 28181 keepalive — a MANSCDP
 // notify — from the domain value.

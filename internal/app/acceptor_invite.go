@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // handleInvite answers an incoming INVITE request. For now it creates or

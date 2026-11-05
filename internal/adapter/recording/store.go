@@ -20,8 +20,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
 )
 
 // segmentTimeFormat is the start-time spelling used in file names. It has no

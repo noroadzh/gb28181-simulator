@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // ExpectQuery is the slice of the node registry the expect step reads.

@@ -8,8 +8,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
 )
 
 // TestPortAssertions is a redundant runtime assertion that the adapters satisfy

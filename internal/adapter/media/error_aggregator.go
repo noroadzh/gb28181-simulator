@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/your-org/gb28181-simulator/internal/platform/observability/logging"
+	"github.com/noroadzh/gb28181-simulator/internal/platform/observability/logging"
 )
 
 // DefaultWindow is how long an error signature accumulates before the

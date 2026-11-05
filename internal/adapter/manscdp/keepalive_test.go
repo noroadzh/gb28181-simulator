@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 func testKeepalive(t *testing.T, sn uint32) model.Keepalive {

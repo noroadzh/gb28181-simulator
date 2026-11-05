@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // RegisterWaitSteps wires the wait handler. The step sleeps params.seconds,

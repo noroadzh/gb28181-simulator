@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/your-org/gb28181-simulator/internal/adapter/manscdp"
-	"github.com/your-org/gb28181-simulator/internal/adapter/recording"
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/manscdp"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/recording"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 func psPayload(marker byte) model.PSFrame {

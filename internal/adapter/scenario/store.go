@@ -19,7 +19,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // EmbeddedFS carries the built-in scenario packages (examples/*.yaml).

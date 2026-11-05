@@ -4,7 +4,7 @@ package port
 import (
 	"context"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // SIPTransport is the outbound adapter for raw SIP signalling: send a

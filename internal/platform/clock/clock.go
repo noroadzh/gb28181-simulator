@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
 )
 
 // Real returns a Clock backed by time.Now. Always non-nil.

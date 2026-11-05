@@ -10,7 +10,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // talkAudioView is a ChannelView with a controllable audio bridge.

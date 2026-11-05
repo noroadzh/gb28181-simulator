@@ -13,7 +13,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 func TestPTZ_ReachesTheDeviceAsDeviceControl(t *testing.T) {

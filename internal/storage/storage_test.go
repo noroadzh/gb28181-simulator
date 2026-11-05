@@ -9,7 +9,7 @@ import (
 	"sort"
 	"testing"
 
-	platformconfig "github.com/your-org/gb28181-simulator/internal/platform/config"
+	platformconfig "github.com/noroadzh/gb28181-simulator/internal/platform/config"
 )
 
 func TestBootstrap_Idempotent(t *testing.T) {

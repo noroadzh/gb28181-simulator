@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // DeviceControlState is the simulator's observable device-side control

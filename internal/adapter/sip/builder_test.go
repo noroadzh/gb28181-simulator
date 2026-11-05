@@ -6,7 +6,7 @@ import (
 
 	"github.com/ghettovoice/gosip/sip"
 
-	isip "github.com/your-org/gb28181-simulator/internal/adapter/sip"
+	isip "github.com/noroadzh/gb28181-simulator/internal/adapter/sip"
 )
 
 // TestMain installs a deterministic branch generator and the package's

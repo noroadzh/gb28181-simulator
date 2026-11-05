@@ -1,6 +1,6 @@
 package media
 
-import "github.com/your-org/gb28181-simulator/internal/domain/model"
+import "github.com/noroadzh/gb28181-simulator/internal/domain/model"
 
 // ErrSourceClosed is the error a caller sees when a media source was closed
 // underneath it. It is an alias rather than a second value on purpose: a

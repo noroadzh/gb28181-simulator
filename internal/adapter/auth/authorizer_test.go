@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/your-org/gb28181-simulator/internal/adapter/auth"
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/auth"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // stubRequest is the minimal auth.Request a server-side Verify needs.

@@ -14,9 +14,9 @@ import (
 
 	"github.com/ghettovoice/gosip/sip"
 
-	"github.com/your-org/gb28181-simulator/internal/adapter/audit"
-	isip "github.com/your-org/gb28181-simulator/internal/adapter/sip"
-	"github.com/your-org/gb28181-simulator/internal/adapter/siptransport"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/audit"
+	isip "github.com/noroadzh/gb28181-simulator/internal/adapter/sip"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/siptransport"
 )
 
 // TestMain installs a deterministic branch generator once for the whole

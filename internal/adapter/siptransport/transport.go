@@ -24,7 +24,7 @@ import (
 	"github.com/ghettovoice/gosip/sip"
 	"github.com/ghettovoice/gosip/transport"
 
-	"github.com/your-org/gb28181-simulator/internal/adapter/audit"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/audit"
 )
 
 // DefaultReceiveBuffer is the receive-channel capacity. 64 is the spec

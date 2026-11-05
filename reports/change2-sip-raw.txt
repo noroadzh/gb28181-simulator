@@ -35,7 +35,7 @@
     --- PASS: TestBuildResponse_DefaultReason/Busy_Here (0.00s)
     --- PASS: TestBuildResponse_DefaultReason/Server_Internal_Error (0.00s)
 PASS
-ok  	github.com/your-org/gb28181-simulator/internal/sip	1.533s
+ok  	github.com/noroadzh/gb28181-simulator/internal/sip	1.533s
 === RUN   TestEmitterFunc_Adapter
 === PAUSE TestEmitterFunc_Adapter
 === RUN   TestGlobal_SetAndReset
@@ -61,7 +61,7 @@ ok  	github.com/your-org/gb28181-simulator/internal/sip	1.533s
     --- PASS: TestRedactAuthHeader/RFC_7616_capitalised_Response (0.00s)
     --- PASS: TestRedactAuthHeader/empty_buffer (0.00s)
 PASS
-ok  	github.com/your-org/gb28181-simulator/internal/sip/audit	2.069s
+ok  	github.com/noroadzh/gb28181-simulator/internal/sip/audit	2.069s
 === RUN   TestEmitterFunc_Adapter
 === PAUSE TestEmitterFunc_Adapter
 === RUN   TestGlobal_SetAndReset
@@ -87,4 +87,4 @@ ok  	github.com/your-org/gb28181-simulator/internal/sip/audit	2.069s
     --- PASS: TestRedactAuthHeader/RFC_7616_capitalised_Response (0.00s)
     --- PASS: TestRedactAuthHeader/empty_buffer (0.00s)
 PASS
-ok  	github.com/your-org/gb28181-simulator/internal/sip/audit	1.494s
+ok  	github.com/noroadzh/gb28181-simulator/internal/sip/audit	1.494s

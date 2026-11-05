@@ -1,7 +1,7 @@
 // Package port — catalog media-source propagation value.
 package port
 
-import "github.com/your-org/gb28181-simulator/internal/domain/model"
+import "github.com/noroadzh/gb28181-simulator/internal/domain/model"
 
 // ChannelMedia is one channel's media-source configuration as it arrived on
 // the wire inside a catalog Item's Extension/MediaSource block.

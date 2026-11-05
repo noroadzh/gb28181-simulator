@@ -10,8 +10,8 @@ import (
 
 	"github.com/ghettovoice/gosip/sip"
 
-	"github.com/your-org/gb28181-simulator/internal/adapter/siptransport"
-	"github.com/your-org/gb28181-simulator/internal/sipprobe"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/siptransport"
+	"github.com/noroadzh/gb28181-simulator/internal/sipprobe"
 )
 
 // TestParseStatus covers the --expect-status flag parser.

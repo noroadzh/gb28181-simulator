@@ -13,9 +13,9 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	app "github.com/your-org/gb28181-simulator/internal/app"
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
+	app "github.com/noroadzh/gb28181-simulator/internal/app"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
 )
 
 // opsView is the operations slice of the node service.
@@ -28,7 +28,7 @@ type opsView interface {
 	SetConfig(ctx context.Context, id model.NodeID, cfg model.BasicConfig) error
 	Upgrade(ctx context.Context, id model.NodeID, version string) error
 	Reboot(ctx context.Context, id model.NodeID) error
-	StartDownload(ctx context.Context, id model.NodeID, channelID string, start, end time.Time) (string, error)
+	StartDownload(ctx context.Context, id model.NodeID, channelID string, start, end time.Time, transport string) (string, error)
 }
 
 func (s *Server) ops(c echo.Context) (opsView, bool) {
@@ -209,8 +209,9 @@ func (s *Server) handleNodeReboot(c echo.Context) error {
 }
 
 type downloadRequest struct {
-	Start string `json:"start"`
-	End   string `json:"end"`
+	Start     string `json:"start"`
+	End       string `json:"end"`
+	Transport string `json:"transport"`
 }
 
 func (s *Server) handleChannelDownload(c echo.Context) error {
@@ -238,11 +239,19 @@ func (s *Server) handleChannelDownload(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, errorBody{Error: "invalid end: " + err.Error()})
 	}
-	callID, err := ops.StartDownload(c.Request().Context(), id, channelID, start, end)
+	transport := strings.ToLower(strings.TrimSpace(in.Transport))
+	switch transport {
+	case "", "udp":
+		transport = "udp"
+	case "tcp":
+	default:
+		return c.JSON(http.StatusBadRequest, errorBody{Error: `transport must be "udp" or "tcp"`})
+	}
+	callID, err := ops.StartDownload(c.Request().Context(), id, channelID, start, end, transport)
 	if err != nil {
 		return opsError(c, err)
 	}
-	return c.JSON(http.StatusOK, map[string]any{"call_id": callID})
+	return c.JSON(http.StatusOK, map[string]any{"call_id": callID, "transport": transport})
 }
 
 // opsError maps the operations vocabulary onto HTTP.

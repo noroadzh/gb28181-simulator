@@ -11,7 +11,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // faultDecision is the gate's tri-state verdict for one inbound request

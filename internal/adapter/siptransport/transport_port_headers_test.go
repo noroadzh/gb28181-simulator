@@ -6,8 +6,8 @@ import (
 
 	"github.com/ghettovoice/gosip/sip"
 
-	sipbuild "github.com/your-org/gb28181-simulator/internal/adapter/sip"
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	sipbuild "github.com/noroadzh/gb28181-simulator/internal/adapter/sip"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // registerModel is a REGISTER carrying every header a device identity puts

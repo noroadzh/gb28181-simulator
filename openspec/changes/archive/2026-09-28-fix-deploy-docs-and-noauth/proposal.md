@@ -6,7 +6,7 @@
 
 ## What Changes
 
-1. **修正下载地址**：所有文档中的 `https://github.com/your-org/gb28181-simulator` 占位符替换为从本地源码构建的说明，因为项目目前没有 GitHub Release。
+1. **修正下载地址**：所有文档中的 `https://github.com/noroadzh/gb28181-simulator` 占位符替换为从本地源码构建的说明，因为项目目前没有 GitHub Release。
 2. **安装脚本重构**：改为从本地 `configs/config.example.yaml` 复制（而非远程 URL），并加入 `--skip-password` 交互式密码输入或环境变量注入。
 3. **支持无密码注册（新增代码能力）**：在 `registration.password` 和 `platform.accounts[].password` 字段引入空密码豁免规则，配合 `allow_no_auth: true` 配置开关；仅影响 simulator 侧注册行为，不改变 GB/T 28181 标准要求。
 4. **更新部署文档**：所有配置样例适配无密码模式，错误排查章节加入"密码为空导致注册失败"条目。

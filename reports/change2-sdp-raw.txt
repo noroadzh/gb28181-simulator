@@ -25,4 +25,4 @@
 === RUN   TestFixtures_SHA256Stable
 --- PASS: TestFixtures_SHA256Stable (0.00s)
 PASS
-ok  	github.com/your-org/gb28181-simulator/internal/sdp	1.529s
+ok  	github.com/noroadzh/gb28181-simulator/internal/sdp	1.529s

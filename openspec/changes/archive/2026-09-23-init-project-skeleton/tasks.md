@@ -5,7 +5,7 @@
 
 ## 1. Repo bootstrap
 
-- [x] 1.1 在仓库根创建 `go.mod`（module 路径占位为 `github.com/your-org/gb28181-simulator`，确认 `go 1.21` toolchain 在 `go.mod` 与 CI 一致) 并验证 `go mod tidy` 无错误
+- [x] 1.1 在仓库根创建 `go.mod`（module 路径占位为 `github.com/noroadzh/gb28181-simulator`，确认 `go 1.21` toolchain 在 `go.mod` 与 CI 一致) 并验证 `go mod tidy` 无错误
 - [x] 1.2 创建目录骨架 `cmd/gb28181-simulator/`、`internal/{logger,config,storage,api}/`、`web/{src,dist}/`、`docs/.keep`、`configs/.keep` 并验证 `tree -L 2` 列出全部
 - [x] 1.3 添加 `.gitignore`（覆盖 `dist/`、`web/dist/`、`*.log`、`*.db`、`.idea/`、`node_modules/`）并验证 `git status` 不再列出被忽略文件
 

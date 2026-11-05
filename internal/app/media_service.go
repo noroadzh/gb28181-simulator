@@ -8,8 +8,8 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
 )
 
 // MediaSourceFactory builds a MediaSource for a given configuration.

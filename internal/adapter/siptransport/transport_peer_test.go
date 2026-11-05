@@ -7,7 +7,7 @@ import (
 
 	"github.com/ghettovoice/gosip/sip"
 
-	sipbuild "github.com/your-org/gb28181-simulator/internal/adapter/sip"
+	sipbuild "github.com/noroadzh/gb28181-simulator/internal/adapter/sip"
 )
 
 // TestTransport_Receive_PeerAddressUnavailableIsError asserts the spec

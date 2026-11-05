@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // StepHandler executes one step of a scenario. Implementations must treat

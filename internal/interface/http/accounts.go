@@ -11,8 +11,8 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
 )
 
 // accountListResponse 是 GET /platforms/:id/accounts 的响应格式。

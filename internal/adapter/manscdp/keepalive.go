@@ -8,8 +8,8 @@ import (
 	"encoding/xml"
 	"fmt"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
 )
 
 // xmlHeader is the declaration platforms expect on every MANSCDP body. It is

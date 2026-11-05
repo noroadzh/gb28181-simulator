@@ -4,8 +4,8 @@ import (
 	"encoding/xml"
 	"fmt"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
 )
 
 // Extension is the simulator-internal XML block embedded in a catalog Item to

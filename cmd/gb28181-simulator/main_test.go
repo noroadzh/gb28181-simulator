@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/your-org/gb28181-simulator/internal/adapter/credstore"
-	"github.com/your-org/gb28181-simulator/internal/adapter/nodesql"
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
-	platformconfig "github.com/your-org/gb28181-simulator/internal/platform/config"
-	"github.com/your-org/gb28181-simulator/internal/storage"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/credstore"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/nodesql"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
+	platformconfig "github.com/noroadzh/gb28181-simulator/internal/platform/config"
+	"github.com/noroadzh/gb28181-simulator/internal/storage"
 )
 
 // The step where a configured password becomes a credential is the one place

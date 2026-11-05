@@ -6,8 +6,8 @@ import (
 	"image/jpeg"
 	"testing"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
 )
 
 // The synthetic source already produces pixels, so a snapshot is a draw plus

@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/your-org/gb28181-simulator/internal/adapter/credstore"
-	"github.com/your-org/gb28181-simulator/internal/adapter/devicereg"
-	"github.com/your-org/gb28181-simulator/internal/adapter/siptest"
-	"github.com/your-org/gb28181-simulator/internal/adapter/siptransport"
-	"github.com/your-org/gb28181-simulator/internal/app"
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/credstore"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/devicereg"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/siptest"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/siptransport"
+	"github.com/noroadzh/gb28181-simulator/internal/app"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // platformProfileWithPolicy is platformProfile for a node that grants a

@@ -3,7 +3,7 @@ package manscdp
 import (
 	"testing"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // Golden on the query the platform sends: field order, the string SN, the

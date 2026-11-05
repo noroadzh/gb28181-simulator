@@ -17,8 +17,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
 )
 
 // handle authenticates a REGISTER and, once it passes, records or forgets the

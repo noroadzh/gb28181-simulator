@@ -195,7 +195,7 @@ else
   cat > "$UNIT_FILE" <<EOF
 [Unit]
 Description=GB28181 Simulator (SIP NVR/DVR/IPC + Platform)
-Documentation=https://github.com/your-org/gb28181-simulator
+Documentation=https://github.com/noroadzh/gb28181-simulator
 After=network-online.target
 Wants=network-online.target
 

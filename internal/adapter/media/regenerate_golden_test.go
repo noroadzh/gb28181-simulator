@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // TestRegenerateGoldenFiles regenerates the golden fixtures with the current

@@ -24,9 +24,9 @@ import (
 
 	"github.com/ghettovoice/gosip/sip"
 
-	sipbuild "github.com/your-org/gb28181-simulator/internal/adapter/sip"
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
+	sipbuild "github.com/noroadzh/gb28181-simulator/internal/adapter/sip"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
 )
 
 // PortAdapter wraps a *Transport and exposes it through the

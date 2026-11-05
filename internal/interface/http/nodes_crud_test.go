@@ -19,17 +19,17 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/your-org/gb28181-simulator/internal/adapter/nodereg"
-	"github.com/your-org/gb28181-simulator/internal/adapter/nodesql"
-	"github.com/your-org/gb28181-simulator/internal/app"
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
-	httpapi "github.com/your-org/gb28181-simulator/internal/interface/http"
-	platformclock "github.com/your-org/gb28181-simulator/internal/platform/clock"
-	platformconfig "github.com/your-org/gb28181-simulator/internal/platform/config"
-	"github.com/your-org/gb28181-simulator/internal/platform/events"
-	"github.com/your-org/gb28181-simulator/internal/platform/observability/logging"
-	"github.com/your-org/gb28181-simulator/internal/storage"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/nodereg"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/nodesql"
+	"github.com/noroadzh/gb28181-simulator/internal/app"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
+	httpapi "github.com/noroadzh/gb28181-simulator/internal/interface/http"
+	platformclock "github.com/noroadzh/gb28181-simulator/internal/platform/clock"
+	platformconfig "github.com/noroadzh/gb28181-simulator/internal/platform/config"
+	"github.com/noroadzh/gb28181-simulator/internal/platform/events"
+	"github.com/noroadzh/gb28181-simulator/internal/platform/observability/logging"
+	"github.com/noroadzh/gb28181-simulator/internal/storage"
 )
 
 const (

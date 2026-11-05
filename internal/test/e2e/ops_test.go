@@ -79,22 +79,36 @@ func TestOps_StatusConfigArmingUpgrade(t *testing.T) {
 }
 
 func TestOps_DownloadWritesIntoTheLibrary(t *testing.T) {
+	testOpsDownloadWrites(t, "udp")
+}
+
+func TestOps_DownloadTCPWritesIntoTheLibrary(t *testing.T) {
+	testOpsDownloadWrites(t, "tcp")
+}
+
+func testOpsDownloadWrites(t *testing.T, transport string) {
+	t.Helper()
 	proc, channelID, _ := startLivePlatform(t)
 	const platform = livePlatformID
 
 	start := time.Now().Add(-time.Minute)
 	end := time.Now().Add(20 * time.Second)
+	req := map[string]any{
+		"start": start.Format(time.RFC3339),
+		"end":   end.Format(time.RFC3339),
+	}
+	if transport != "" && transport != "udp" {
+		req["transport"] = transport
+	}
 	status, body := proc.call(t, http.MethodPost,
-		fmt.Sprintf("/v1/nodes/%s/channels/%s/download", platform, channelID),
-		map[string]any{
-			"start": start.Format(time.RFC3339),
-			"end":   end.Format(time.RFC3339),
-		})
+		fmt.Sprintf("/v1/nodes/%s/channels/%s/download", platform, channelID), req)
 	if status != http.StatusOK {
-		t.Fatalf("download = %d (body %v)", status, body)
+		t.Fatalf("download(%s) = %d (body %v)", transport, status, body)
+	}
+	if got, _ := body["transport"].(string); transport != "" && transport != "udp" && got != transport {
+		t.Errorf("response transport = %q, want %q", got, transport)
 	}
 
-	// The frames land under a download: channel key in the same library.
 	key := "download:" + channelID
 	deadline := time.Now().Add(20 * time.Second)
 	for {
@@ -116,7 +130,7 @@ func TestOps_DownloadWritesIntoTheLibrary(t *testing.T) {
 			}
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("the download produced no recording (last status %v)", status)
+			t.Fatalf("the %s download produced no recording (last status %v)", transport, status)
 		}
 		time.Sleep(200 * time.Millisecond)
 	}

@@ -17,7 +17,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // A minimal H.264-style ES payload: a few NALUs with Annex B start codes.

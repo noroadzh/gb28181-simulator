@@ -7,7 +7,7 @@ package playback
 import (
 	"context"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
 )
 
 // Compile-time check.

@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/your-org/gb28181-simulator/internal/adapter/sm"
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/sm"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // TestGB35114_SM2MutualAuth covers the end-to-end GB 35114 A-grade flow:

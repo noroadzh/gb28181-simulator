@@ -307,7 +307,7 @@ device 节点可展开查看所有通道。该页面从 `GET /v1/nodes/:id/chann
 | 语音对讲 | 已实现：INVITE/BYE 控制面 + `/talk/audio` WebSocket 音频桥（PCMU）；非 device 501、对端不可达 502、无应答 504、未知 session 404 |
 | 真实平台向设备拉实时流 | 已实现：device 受理 `m=video` INVITE，回 `a=sendonly` SDP 并按通道媒体源发 PS/RTP；通道无源 404、BYE 停流 |
 | TCP 媒体（附录 D） | 已实现（设备侧 video/playback）：offer 的 m-line 为 `TCP/RTP/AVP` 时按 `a=setup` 主动连接或被动监听，RTP 包带 2 字节长度前缀；无法承载回 488 |
-| 运维命令（#44） | 已实现：DeviceStatus、Broadcast（ack + 设备主动音频 INVITE）、报警查询与布防撤防（GuardCmd）、ConfigDownload 查询/下发、DeviceUpgrade、DeviceControl/TeleBoot；HTTP 入口 `/status`、`/config`、`/upgrade`、`/reboot`、`…/alarms`、`…/alarm-mode`、`…/download` |
+| 运维命令（#44） | 已实现：DeviceStatus、Broadcast（ack + 设备主动音频 INVITE）、报警查询与布防撤防（GuardCmd）、ConfigDownload 查询/下发、DeviceUpgrade、DeviceControl/TeleBoot；HTTP 入口 `/status`、`/config`、`/upgrade`、`/reboot`、`…/alarms`、`…/alarm-mode`、`…/download`（`transport=udp|tcp`，缺省 udp） |
 | 级联 MESSAGE 信令中继 | 已实现：按 X-RoutePath / 下一跳投递 MANSCDP MESSAGE 并回传应答；**不等于**媒体中继——不自动转发 INVITE/RTP |
 | 级联媒体中继 | 已实现（独立路径）：上级对属于在线下级的通道发实时视频 INVITE 时，平台作为 B2BUA 双对话桥接（PS 原样转发，两侧传输独立 UDP/TCP）；上级 BYE/下级 BYE 成对传播；中继流同样可预览与录像 |
 | 平台录像 | 已实现：拉流即自动分段录制（`recording.enabled` 默认开，`dir` 默认存储目录下 `recordings/`）；`GET …/recordings` 查询、`GET …/recordings/:id/flv` 回放；平台对上级的 RecordInfo 与回放 INVITE 从录像库作答；**Web UI**：平台节点录像页走录像库（非设备 RecordInfo） |

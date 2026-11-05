@@ -16,11 +16,11 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
-	"github.com/your-org/gb28181-simulator/internal/interface/webui"
-	platformconfig "github.com/your-org/gb28181-simulator/internal/platform/config"
-	"github.com/your-org/gb28181-simulator/internal/platform/events"
-	"github.com/your-org/gb28181-simulator/internal/platform/observability/logging"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
+	"github.com/noroadzh/gb28181-simulator/internal/interface/webui"
+	platformconfig "github.com/noroadzh/gb28181-simulator/internal/platform/config"
+	"github.com/noroadzh/gb28181-simulator/internal/platform/events"
+	"github.com/noroadzh/gb28181-simulator/internal/platform/observability/logging"
 )
 
 // Version metadata is injected by the CLI entrypoint (ldflags / defaults).

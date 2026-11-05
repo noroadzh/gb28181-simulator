@@ -8,9 +8,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
-	"github.com/your-org/gb28181-simulator/internal/storage"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
+	"github.com/noroadzh/gb28181-simulator/internal/storage"
 )
 
 // newTestStore opens a throwaway sqlite database (file-backed temp dir so

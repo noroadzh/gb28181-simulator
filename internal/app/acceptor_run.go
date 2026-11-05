@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // routeOutbound consults the cascade handler before a message leaves the node.

@@ -22,8 +22,8 @@ import (
 
 	"modernc.org/sqlite" // registered as "sqlite" by init()
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
 )
 
 // DriverName is the name the store registers with database/sql. The

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/your-org/gb28181-simulator/internal/adapter/media"
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/media"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // TestDetectCodecMPEG4FeatureBytes 验证 MPEG-4 Part 2 的 VOP(0xB6)/VOS(0xB0)/

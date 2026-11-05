@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // TestGenerateChannelID_Basic 验证 generateChannelID 的基础正确性：

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // recordStampFormat is the timestamp spelling RecordInfo items use.

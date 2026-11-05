@@ -7,8 +7,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/your-org/gb28181-simulator/internal/platform/observability/logging"
-	"github.com/your-org/gb28181-simulator/internal/platform/servicectx"
+	"github.com/noroadzh/gb28181-simulator/internal/platform/observability/logging"
+	"github.com/noroadzh/gb28181-simulator/internal/platform/servicectx"
 )
 
 // Version carries the ldflags-injected build metadata printed by --version.

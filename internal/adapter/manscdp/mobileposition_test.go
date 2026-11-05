@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 const mobilePositionNotifyGolden = `<?xml version="1.0" encoding="UTF-8"?>` + "\n" +

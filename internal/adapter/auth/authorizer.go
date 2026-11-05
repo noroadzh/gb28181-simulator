@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/your-org/gb28181-simulator/internal/adapter/sm"
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/sm"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // Authorizer builds the client side of a Digest exchange: it turns a

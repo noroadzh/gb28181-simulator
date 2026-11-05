@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // findPsmStartCode returns the byte offset of `00 00 01 BC` in b, or -1.

@@ -3,10 +3,10 @@
 package servicectx
 
 import (
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
-	platformconfig "github.com/your-org/gb28181-simulator/internal/platform/config"
-	"github.com/your-org/gb28181-simulator/internal/platform/observability/logging"
-	"github.com/your-org/gb28181-simulator/internal/platform/observability/tracing"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
+	platformconfig "github.com/noroadzh/gb28181-simulator/internal/platform/config"
+	"github.com/noroadzh/gb28181-simulator/internal/platform/observability/logging"
+	"github.com/noroadzh/gb28181-simulator/internal/platform/observability/tracing"
 )
 
 // Well-known service keys for dependency injection.

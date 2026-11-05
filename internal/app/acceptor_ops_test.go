@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/your-org/gb28181-simulator/internal/adapter/manscdp"
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/adapter/manscdp"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // opsHarness serves a device node with a real codec, so each command is

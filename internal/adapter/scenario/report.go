@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // RenderJSON 返回 RunReport 的格式化 JSON。

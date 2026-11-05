@@ -1,7 +1,7 @@
 // Package port — SDPCodec.
 package port
 
-import "github.com/your-org/gb28181-simulator/internal/domain/model"
+import "github.com/noroadzh/gb28181-simulator/internal/domain/model"
 
 // SDPCodec parses RFC 4566 SDP text (with GB/T 28181 §K.2 y=/f= extensions)
 // into an immutable model.Session, and serialises a model.Session back to

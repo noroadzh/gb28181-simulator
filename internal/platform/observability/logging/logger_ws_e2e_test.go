@@ -9,9 +9,9 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
 
-	httpapi "github.com/your-org/gb28181-simulator/internal/interface/http"
-	platformconfig "github.com/your-org/gb28181-simulator/internal/platform/config"
-	"github.com/your-org/gb28181-simulator/internal/platform/observability/logging"
+	httpapi "github.com/noroadzh/gb28181-simulator/internal/interface/http"
+	platformconfig "github.com/noroadzh/gb28181-simulator/internal/platform/config"
+	"github.com/noroadzh/gb28181-simulator/internal/platform/observability/logging"
 )
 
 // TestE2E_HubPushedToWebSocketWithRedaction exercises the full pipeline that

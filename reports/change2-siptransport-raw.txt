@@ -35,4 +35,4 @@
 --- PASS: TestTransport_MultiInstance (0.00s)
 --- PASS: TestTransport_MultiInstanceSimultaneous (0.04s)
 PASS
-ok  	github.com/your-org/gb28181-simulator/internal/siptransport	1.654s
+ok  	github.com/noroadzh/gb28181-simulator/internal/siptransport	1.654s

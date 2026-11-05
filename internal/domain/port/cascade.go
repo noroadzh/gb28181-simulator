@@ -3,7 +3,7 @@ package port
 
 import (
 	"errors"
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // CascadeHandler is the boundary through which outbound SIP messages are

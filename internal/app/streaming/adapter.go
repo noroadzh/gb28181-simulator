@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // MediaServiceBridge adapts *app.MediaService + NodeRegistry to the

@@ -5,7 +5,7 @@ import (
 
 	"github.com/ghettovoice/gosip/sip"
 
-	isip "github.com/your-org/gb28181-simulator/internal/adapter/sip"
+	isip "github.com/noroadzh/gb28181-simulator/internal/adapter/sip"
 )
 
 // firstHeader renders the only occurrence of name, or "" when absent.

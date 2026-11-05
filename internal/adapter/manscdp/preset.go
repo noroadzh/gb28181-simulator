@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // presetQueryEnvelope is the wire shape of a Preset query.

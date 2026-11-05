@@ -12,7 +12,7 @@ import (
 	"context"
 	"io"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // MediaSource is the entry point of the outbound pipeline: a single method

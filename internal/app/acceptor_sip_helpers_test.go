@@ -3,7 +3,7 @@ package app
 import (
 	"testing"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // A relayed request carries one Via per hop, and RFC 3261 §8.2.6 requires the

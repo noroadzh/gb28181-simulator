@@ -27,7 +27,7 @@
 ### 2.1 从源码本地构建（推荐）
 
 ```bash
-git clone https://github.com/your-org/gb28181-simulator.git
+git clone https://github.com/noroadzh/gb28181-simulator.git
 cd gb28181-simulator
 make build   # 输出 bin/gb28181-simulator（CGO_ENABLED=0，纯静态二进制）
 ```
@@ -135,7 +135,7 @@ nodes:
 
 [Unit]
 Description=GB/T 28181-2016 Simulator
-Documentation=https://github.com/your-org/gb28181-simulator
+Documentation=https://github.com/noroadzh/gb28181-simulator
 After=network-online.target
 Wants=network-online.target
 
@@ -376,7 +376,7 @@ sudo setcap 'cap_net_bind_service=+ep' /usr/local/bin/gb28181-simulator
 if [ ! -f "$SRC_DIR/configs/config.example.yaml" ]; then
     echo "ERROR: $SRC_DIR/configs/config.example.yaml not found"
     echo "  Provide the source directory as the second argument, or clone the repo first:"
-    echo "    git clone https://github.com/your-org/gb28181-simulator.git"
+    echo "    git clone https://github.com/noroadzh/gb28181-simulator.git"
     exit 1
 fi
 sudo cp "$SRC_DIR/configs/config.example.yaml" /etc/gb28181-simulator/config.yaml

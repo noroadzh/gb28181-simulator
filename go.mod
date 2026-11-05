@@ -1,4 +1,4 @@
-module github.com/your-org/gb28181-simulator
+module github.com/noroadzh/gb28181-simulator
 
 go 1.25.0
 

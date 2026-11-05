@@ -7,7 +7,7 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 func embeddedPayload(t *testing.T, steps string) []byte {

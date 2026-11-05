@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // allowedMethods is the Allow header value this platform emits. RFC 3261 §8.2.2

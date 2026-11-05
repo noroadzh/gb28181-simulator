@@ -24,7 +24,7 @@
 | 7.6 / 9.6 状态报送 | Keepalive | ✅ | MESSAGE Keepalive；刷新 last_seen 不延长 Expires |
 | 7.7 / 9.7 录像检索 | RecordInfo | 🟡 | 设备侧合成目录；平台侧可查真实录像库 `#42` |
 | 7.8 / 9.8 历史回放 | INVITE Playback + MANSRTSP | 🟡 | 会话/FLV ✅；入站 PlaybackControl MESSAGE 仅 ACK，真实控制走 INFO |
-| 7.9 / 9.9 文件下载 | INVITE `s=Download` | ✅ | `#44`；可写入平台录像库 |
+| 7.9 / 9.9 文件下载 | INVITE `s=Download` | ✅ | `#44`；平台 `StartDownload` UDP/附录 D TCP；可写入录像库 |
 | 7.10 / 9.10 网络校时 | Date / 校时 | ❌ | 未见生产处理路径 |
 | 7.11 / 9.11 订阅通知 | catalog / alarm / mobileposition | ✅ | SUBSCRIBE + NOTIFY；未知 Event → 489 |
 | 7.12 / 9.12 广播与对讲 | Broadcast + Talk | 🟡 | 对讲 WS↔PCMU ✅；广播 ack + 设备主动音频 INVITE，不进对讲桥（有意） |

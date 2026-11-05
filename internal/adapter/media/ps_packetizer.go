@@ -17,7 +17,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // defaultMuxRate is the nominal stream bit-rate in bits per second.

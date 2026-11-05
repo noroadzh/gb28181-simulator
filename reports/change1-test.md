@@ -41,14 +41,14 @@
 
 ```sh
 $ head -5 go.mod
-module github.com/your-org/gb28181-simulator
+module github.com/noroadzh/gb28181-simulator
 
 go 1.25.0
 
 // toolchain follows the locally installed Go (1.21+ compatible). CI uses the
 ```
 
-模块路径按任务规范使用占位符 `github.com/your-org/...`；`go 1.25.0` 满足 `>= 1.21` 下限。`go mod tidy` 无差异。
+模块路径按任务规范使用占位符 `github.com/noroadzh/...`；`go 1.25.0` 满足 `>= 1.21` 下限。`go mod tidy` 无差异。
 
 ### 1.2 目录骨架 — PASS
 
@@ -173,7 +173,7 @@ $ CGO_ENABLED=0 go test -race -count=1 -v ./...
 === RUN   TestWSHandler_EchoShutdown
 --- PASS: TestWSHandler_EchoShutdown (0.10s)
 PASS
-ok  github.com/your-org/gb28181-simulator/internal/api	4.775s
+ok  github.com/noroadzh/gb28181-simulator/internal/api	4.775s
 === RUN   TestConfig_Defaults
 --- PASS: TestConfig_Defaults (0.00s)
 === RUN   TestConfig_YAML_Override
@@ -183,7 +183,7 @@ ok  github.com/your-org/gb28181-simulator/internal/api	4.775s
 === RUN   TestDefaultConfigPath_XDG
 --- PASS: TestDefaultConfigPath_XDG (0.00s)
 PASS
-ok  github.com/your-org/gb28181-simulator/internal/config	2.165s
+ok  github.com/noroadzh/gb28181-simulator/internal/config	2.165s
 === RUN   TestParseLevel
 --- PASS: TestParseLevel (0.00s)
 === RUN   TestOptions_RedactionAndFanout
@@ -200,7 +200,7 @@ ok  github.com/your-org/gb28181-simulator/internal/config	2.165s
     logger_ws_e2e_test.go:69: payload: {"time":"...","level":"INFO","msg":"manual ping","reason":"test","password":"***REDACTED***"}
 --- PASS: TestE2E_HubPushedToWebSocketWithRedaction (0.00s)
 PASS
-ok  github.com/your-org/gb28181-simulator/internal/logger	2.830s
+ok  github.com/noroadzh/gb28181-simulator/internal/logger	2.830s
 === RUN   TestBootstrap_Idempotent
 --- PASS: TestBootstrap_Idempotent (0.03s)
 === RUN   TestDefaultDBPath_Explicit
@@ -208,14 +208,14 @@ ok  github.com/your-org/gb28181-simulator/internal/logger	2.830s
 === RUN   TestDefaultDBPath_Fallback
 --- PASS: TestDefaultDBPath_Fallback (0.00s)
 PASS
-ok  github.com/your-org/gb28181-simulator/internal/storage	3.960s
+ok  github.com/noroadzh/gb28181-simulator/internal/storage	3.960s
 === RUN   TestEmbedContainsIndex
     dist_test.go:19: entry: embed
 --- PASS: TestEmbedContainsIndex (0.00s)
 === RUN   TestSpaHandlerServesIndex
 --- PASS: TestSpaHandlerServesIndex (0.00s)
 PASS
-ok  github.com/your-org/gb28181-simulator/internal/webui	3.264s
+ok  github.com/noroadzh/gb28181-simulator/internal/webui	3.264s
 ```
 
 按验收点对应关系：

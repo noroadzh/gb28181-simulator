@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
 )
 
 // fakeStore implements port.Storage so the container can be exercised

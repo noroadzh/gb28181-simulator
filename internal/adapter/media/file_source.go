@@ -5,7 +5,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // FileSource reads an elementary-stream byte stream from a local file.

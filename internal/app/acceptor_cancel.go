@@ -9,7 +9,7 @@ package app
 import (
 	"context"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // pendingInvite is one INVITE transaction whose final response has not been

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/port"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/port"
 )
 
 // PTZ and Records used to return nil, which the HTTP layer rendered as 200:

@@ -13,7 +13,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/your-org/gb28181-simulator/internal/domain/model"
+	"github.com/noroadzh/gb28181-simulator/internal/domain/model"
 )
 
 // ErrNodeNotFound is returned by the read, update and delete paths when no
